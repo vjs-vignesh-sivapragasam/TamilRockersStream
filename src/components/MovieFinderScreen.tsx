@@ -509,24 +509,46 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         }
 
         if (magnet) {
-          const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
-          const streamDownloadItem: DownloadItem = {
-            id: `stream_${Date.now()}`,
-            title,
-            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-            fileUri: '',
-            url: liveStreamUrl,
-            status: 'completed',
-            progress: 1,
-            totalBytes: 0,
-            downloadedBytes: 0,
-            speed: 'Online Stream',
-            isTorrent: false,
-            createdAt: Date.now(),
-          };
+          const finalMagnet = magnet;
+          Alert.alert(
+            'Stream Movie',
+            `Choose how to stream "${title}":`,
+            [
+              {
+                text: '▶ Stream in App (Stremio Engine)',
+                onPress: () => {
+                  const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(finalMagnet)}`;
+                  const streamDownloadItem: DownloadItem = {
+                    id: `stream_${Date.now()}`,
+                    title,
+                    fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+                    fileUri: '',
+                    url: liveStreamUrl,
+                    status: 'completed',
+                    progress: 1,
+                    totalBytes: 0,
+                    downloadedBytes: 0,
+                    speed: 'Stremio Engine Stream',
+                    isTorrent: false,
+                    createdAt: Date.now(),
+                  };
 
-          setActiveStreamItem(streamDownloadItem);
-          setStreamPlayerVisible(true);
+                  setActiveStreamItem(streamDownloadItem);
+                  setStreamPlayerVisible(true);
+                },
+              },
+              {
+                text: '🌐 Stream in Browser (Webtor)',
+                onPress: () => {
+                  const webtorUrl = `https://webtor.io/show?magnet=${encodeURIComponent(finalMagnet)}`;
+                  Linking.openURL(webtorUrl).catch((err) => {
+                    Alert.alert('Error', 'Could not open browser: ' + err.message);
+                  });
+                },
+              },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          );
         } else {
           Alert.alert(
             'Stream Unavailable',
