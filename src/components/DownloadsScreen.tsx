@@ -65,6 +65,7 @@ export const DownloadsScreen: React.FC = () => {
     rescanStorage,
     importMovie,
     isBackendConnected,
+    backendUrl,
   } = useDownloads();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -320,6 +321,9 @@ export const DownloadsScreen: React.FC = () => {
   };
 
   // Stream Modal State
+  const WORKING_SAMPLE_MAGNET =
+    'magnet:?xt=urn:btih:673144559b1da83f26d51f369329266ceef6bd12&dn=www.1TamilMV.meme%20-%20Photographer%20%282026%29%20Tamil%C2%A0HQ%20HDRip%20-%20x264%20-%20AAC%20-%20250MB%20-%20ESub.mkv&xl=251057547&tr=udp%3A%2F%2Ftracker.dler.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker-udp.gbitt.info%3A80%2Fannounce&tr=http%3A%2F%2Fipv4announce.sktorrent.eu%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.mywaifu.best%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fevan.im%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.leechshield.link%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.dhitechnical.com%3A6969%2Fannounce&tr=https%3A%2F%2Ftorrents.tmtime.dev%3A443%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.online%3A1984%2Fannounce&tr=udp%3A%2F%2Ftracker.wildkat.net%3A6969%2Fannounce&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce';
+
   const [streamModalVisible, setStreamModalVisible] = useState(false);
   const [streamTab, setStreamTab] = useState<'file' | 'link'>('link');
   const [streamUrl, setStreamUrl] = useState('');
@@ -341,26 +345,23 @@ export const DownloadsScreen: React.FC = () => {
     } catch {}
   };
 
-  const handleStreamOnline = async () => {
-    let webtorLink = '';
-
+  const resolveTargetMagnet = async (): Promise<string | null> => {
     if (streamTab === 'link') {
       const target = streamUrl.trim();
       if (!target) {
-        Alert.alert('Error', 'Please paste a valid magnet link.');
-        return;
+        Alert.alert('Magnet Link Required', 'Please paste a valid magnet link or tap the sample movie below.');
+        return null;
       }
       if (target.startsWith('magnet:')) {
-        webtorLink = `https://webtor.io/show?magnet=${encodeURIComponent(target)}`;
+        return target;
       } else {
-        Alert.alert('Error', 'Only magnet links are supported here. Use the File tab for .torrent files.');
-        return;
+        Alert.alert('Invalid Format', 'Only magnet links are supported here. Use the File tab for .torrent files.');
+        return null;
       }
     } else {
-      // Stream via File: Use the torrent engine temporarily to extract the infoHash
       if (!streamFile) {
         handlePickStreamFile();
-        return;
+        return null;
       }
 
       try {
@@ -371,12 +372,11 @@ export const DownloadsScreen: React.FC = () => {
         for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
         const dataUri = `data:application/x-bittorrent;base64,${btoa(binary)}`;
 
-        // We use a promise to wait for the metadata event from the engine
         const getMagnet = new Promise<string>((resolve, reject) => {
           const timeout = setTimeout(() => {
             unsubscribe();
-            reject(new Error('Timed out reading .torrent file'));
-          }, 8000);
+            reject(new Error('Timed out reading .torrent file metadata'));
+          }, 10000);
 
           const unsubscribe = torrentEngine.subscribe((event) => {
             if (event.id === 'stream_extract' && event.type === 'metadata') {
@@ -397,18 +397,55 @@ export const DownloadsScreen: React.FC = () => {
           torrentEngine.addTorrent('stream_extract', dataUri);
         });
 
-        const generatedMagnet = await getMagnet;
-        webtorLink = `https://webtor.io/show?magnet=${encodeURIComponent(generatedMagnet)}`;
+        return await getMagnet;
       } catch (err: any) {
         Alert.alert('Extraction Failed', err.message);
-        return;
+        return null;
       }
     }
+  };
+
+  const handleStreamInApp = async () => {
+    const magnet = await resolveTargetMagnet();
+    if (!magnet) return;
+
+    let streamTitle = 'Live Torrent Stream';
+    const dnMatch = magnet.match(/[?&]dn=([^&]+)/i);
+    if (dnMatch && dnMatch[1]) {
+      try {
+        streamTitle = decodeURIComponent(dnMatch[1]).replace(/\+/g, ' ');
+      } catch {}
+    } else if (streamFile) {
+      streamTitle = streamFile.name.replace(/\.torrent$/i, '');
+    }
+
+    const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+    const streamItem: DownloadItem = {
+      id: `stream_${Date.now()}`,
+      title: streamTitle,
+      fileName: `${streamTitle}.mp4`,
+      fileUri: '',
+      url: liveStreamUrl,
+      status: 'completed',
+      progress: 1,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      speed: 'Stremio Engine Stream',
+      isTorrent: false,
+      createdAt: Date.now(),
+    };
 
     setStreamModalVisible(false);
-    setStreamUrl('');
-    setStreamFile(null);
+    setSelectedMovie(streamItem);
+    setPlayerModalVisible(true);
+  };
 
+  const handleStreamWebtor = async () => {
+    const magnet = await resolveTargetMagnet();
+    if (!magnet) return;
+
+    setStreamModalVisible(false);
+    const webtorLink = `https://webtor.io/show?magnet=${encodeURIComponent(magnet)}`;
     Linking.openURL(webtorLink).catch((err) => {
       Alert.alert('Error', 'Could not launch browser: ' + err.message);
     });
@@ -1106,6 +1143,33 @@ export const DownloadsScreen: React.FC = () => {
                     )}
                   </View>
                 </View>
+
+                {/* Quick 1-Tap Working Sample Movie */}
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(229, 9, 20, 0.35)',
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    marginTop: 10,
+                  }}
+                  onPress={() => setStreamUrl(WORKING_SAMPLE_MAGNET)}
+                  activeOpacity={0.75}
+                >
+                  <Film color={Colors.netflixRed} size={15} style={{ marginRight: 8 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
+                      ⚡ Load Verified Movie: Photographer (2026)
+                    </Text>
+                    <Text style={{ color: '#888888', fontSize: 9 }}>
+                      Active swarm • 250 MB • Direct Stremio-style stream
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
             ) : (
               <View style={styles.tabContentGroup}>
@@ -1161,9 +1225,10 @@ export const DownloadsScreen: React.FC = () => {
               </View>
             )}
 
+            {/* Primary Action: Stremio-Style In-App Stream */}
             <TouchableOpacity
               style={styles.submitButtonTouchable}
-              onPress={handleStreamOnline}
+              onPress={handleStreamInApp}
               activeOpacity={0.88}
             >
               <LinearGradient
@@ -1174,11 +1239,31 @@ export const DownloadsScreen: React.FC = () => {
               >
                 <Play color="#FFFFFF" size={18} fill="#FFFFFF" />
                 <Text style={styles.submitButtonText}>
-                  {streamTab === 'file'
-                    ? (streamFile ? 'Extract & Stream Movie' : 'Select File to Stream')
-                    : (streamUrl.trim() ? 'Stream Movie Now' : 'Paste Link to Stream')}
+                  ▶ Stream in App (Stremio Engine)
                 </Text>
               </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Secondary Action: External Webtor Proxy Stream */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#1E1E1E',
+                borderRadius: 10,
+                paddingVertical: 12,
+                marginTop: 8,
+                borderWidth: 1,
+                borderColor: '#333333',
+              }}
+              onPress={handleStreamWebtor}
+              activeOpacity={0.8}
+            >
+              <ExternalLink color="#AAAAAA" size={14} style={{ marginRight: 8 }} />
+              <Text style={{ color: '#CCCCCC', fontSize: 13, fontWeight: '600' }}>
+                Open in Web Browser (Webtor Proxy)
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>

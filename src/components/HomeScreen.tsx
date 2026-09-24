@@ -402,6 +402,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
                 style={styles.sampleCard}
                 onPress={() =>
                   handleStartSampleDownload(
+                    'magnet:?xt=urn:btih:673144559b1da83f26d51f369329266ceef6bd12&dn=www.1TamilMV.meme%20-%20Photographer%20%282026%29%20Tamil%C2%A0HQ%20HDRip%20-%20x264%20-%20AAC%20-%20250MB%20-%20ESub.mkv&xl=251057547&tr=udp%3A%2F%2Ftracker.dler.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker-udp.gbitt.info%3A80%2Fannounce&tr=http%3A%2F%2Fipv4announce.sktorrent.eu%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.mywaifu.best%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fevan.im%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.leechshield.link%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.dhitechnical.com%3A6969%2Fannounce&tr=https%3A%2F%2Ftorrents.tmtime.dev%3A443%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.online%3A1984%2Fannounce&tr=udp%3A%2F%2Ftracker.wildkat.net%3A6969%2Fannounce&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce',
+                    'Photographer (2026) Tamil HQ'
+                  )
+                }
+                activeOpacity={0.75}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sampleTitle}>Photographer (2026) Tamil HQ</Text>
+                  <Text style={styles.sampleSize}>250 MB • Live Swarm Active</Text>
+                </View>
+                <View style={styles.sampleDownloadBtn}>
+                  <Download color="#FFFFFF" size={14} />
+                  <Text style={styles.sampleDownloadText}>Download</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.sampleCard}
+                onPress={() =>
+                  handleStartSampleDownload(
                     'https://webtorrent.io/torrents/sintel.torrent',
                     'Sintel (Animation Sci-Fi)'
                   )

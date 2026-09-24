@@ -20,6 +20,9 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 // Initialize Torrent Engine
 const client = new WebTorrent();
+client.on('error', (err) => {
+  console.warn('[WebTorrent Engine Warning]:', err.message || err);
+});
 
 // Setup Directories
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
@@ -83,7 +86,7 @@ function addTorrentToEngine(torrentId, appId) {
       io.emit('torrent_done', { 
         appId,
         id: torrent.infoHash, 
-        name: torrent.name,
+        name: torrent.name, 
         fileName: mainFile ? mainFile.name : torrent.name,
         downloadUrl: `/downloads/${mainFile ? encodeURIComponent(mainFile.path) : ''}`
       });
@@ -135,7 +138,22 @@ app.post('/api/torrent/file-base64', (req, res) => {
   res.json({ success: true, message: 'Base64 torrent file added to queue' });
 });
 
-// Direct HTTP Range Video Streaming for any active torrent or magnet
+// Helper for video mime type
+function getStreamContentType(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  const mimeMap = {
+    '.mp4': 'video/mp4',
+    '.m4v': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mkv': 'video/mp4', // MP4 MIME allows HTML5 player to decode H.264/AAC streams smoothly
+    '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime',
+    '.ts': 'video/mp2t',
+  };
+  return mimeMap[ext] || 'video/mp4';
+}
+
+// Direct HTTP Range Video Streaming for any active torrent or magnet (Stremio-style)
 app.get('/api/stream/play', (req, res) => {
   const magnetOrHash = req.query.magnet || req.query.hash || req.query.url;
   if (!magnetOrHash) return res.status(400).send('Magnet link or hash required');
@@ -143,8 +161,9 @@ app.get('/api/stream/play', (req, res) => {
   let torrent = client.get(magnetOrHash);
   if (!torrent) {
     try {
-      torrent = client.add(magnetOrHash, { path: DOWNLOAD_DIR });
-      console.log(`[Stream Auto-Added] ${magnetOrHash}`);
+      // deselect: true ensures sequential on-demand piece downloading (Stremio mode)
+      torrent = client.add(magnetOrHash, { path: DOWNLOAD_DIR, deselect: true });
+      console.log(`[Stremio Stream Added] ${magnetOrHash.substring(0, 60)}...`);
     } catch (e) {
       return res.status(500).send('Failed to add torrent: ' + e.message);
     }
@@ -158,11 +177,26 @@ app.get('/api/stream/play', (req, res) => {
     }
     if (!file) return res.status(404).send('No video file in torrent yet');
 
+    // Prioritize this file's pieces for streaming
+    if (typeof file.select === 'function') {
+      file.select();
+    }
+
+    const contentType = getStreamContentType(file.name);
     const range = req.headers.range;
+
     if (!range) {
-      res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Content-Length', file.length);
-      file.createReadStream().pipe(res);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': file.length,
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Range',
+        'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+      });
+      const stream = file.createReadStream();
+      stream.pipe(res);
+      req.on('close', () => stream.destroy());
       return;
     }
 
@@ -176,21 +210,27 @@ app.get('/api/stream/play', (req, res) => {
       'Content-Range': `bytes ${start}-${end}/${total}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': chunksize,
-      'Content-Type': 'video/mp4'
+      'Content-Type': contentType,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
     });
 
-    file.createReadStream({ start, end }).pipe(res);
+    const stream = file.createReadStream({ start, end });
+    stream.pipe(res);
+    req.on('close', () => stream.destroy());
   };
 
   if (torrent.files && torrent.files.length > 0) {
     serveStream();
   } else {
     torrent.once('ready', serveStream);
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       if (!res.headersSent) {
         res.status(504).send('Torrent metadata fetching timeout');
       }
-    }, 20000);
+    }, 45000);
+    torrent.once('ready', () => clearTimeout(timeout));
   }
 });
 
@@ -207,11 +247,25 @@ app.get('/api/stream/:infoHash', (req, res) => {
   }
   if (!file) return res.status(404).send('No video file in torrent');
 
+  if (typeof file.select === 'function') {
+    file.select();
+  }
+
+  const contentType = getStreamContentType(file.name);
   const range = req.headers.range;
+
   if (!range) {
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Length', file.length);
-    file.createReadStream().pipe(res);
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': file.length,
+      'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+    });
+    const stream = file.createReadStream();
+    stream.pipe(res);
+    req.on('close', () => stream.destroy());
     return;
   }
 
@@ -225,10 +279,15 @@ app.get('/api/stream/:infoHash', (req, res) => {
     'Content-Range': `bytes ${start}-${end}/${total}`,
     'Accept-Ranges': 'bytes',
     'Content-Length': chunksize,
-    'Content-Type': 'video/mp4'
+    'Content-Type': contentType,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Range',
+    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
   });
 
-  file.createReadStream({ start, end }).pipe(res);
+  const stream = file.createReadStream({ start, end });
+  stream.pipe(res);
+  req.on('close', () => stream.destroy());
 });
 
 app.get('/api/torrents', (req, res) => {

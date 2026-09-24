@@ -841,10 +841,11 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         webkit-playsinline
         autoplay
         preload="auto"
+        ${httpFallback ? `src="${httpFallback}"` : localFileUri ? `src="${localFileUri}"` : contentUri ? `src="${contentUri}"` : ''}
       >
-        ${localFileUri ? `<source src="${localFileUri}" type="video/mp4" />` : ''}
-        ${contentUri ? `<source src="${contentUri}" type="video/mp4" />` : ''}
-        ${httpFallback ? `<source src="${httpFallback}" type="video/mp4" />` : ''}
+        ${httpFallback ? `<source src="${httpFallback}" />` : ''}
+        ${localFileUri ? `<source src="${localFileUri}" />` : ''}
+        ${contentUri ? `<source src="${contentUri}" />` : ''}
       </video>
 
       <div id="subtitle-overlay"></div>
