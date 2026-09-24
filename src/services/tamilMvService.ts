@@ -255,4 +255,45 @@ export const tamilMvService = {
       resolutions: [resolutionItem],
     };
   },
+
+  /**
+   * Extract direct magnet and .torrent download links from a topic page HTML
+   */
+  async extractMagnetFromTopic(topicUrl: string): Promise<{ magnetUrl?: string; torrentUrl?: string }> {
+    if (!topicUrl) return {};
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      const response = await fetch(topicUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) return {};
+      const html = await response.text();
+
+      // 1. Extract magnet URL
+      const magnetMatch = html.match(/href=["'](magnet:\?[^"']+)["']/i);
+      const magnetUrl = magnetMatch ? magnetMatch[1] : undefined;
+
+      // 2. Extract torrent file attachment URL
+      const torrentMatch =
+        html.match(/href=["'](https?:\/\/[^"']+\.torrent[^"']*)["']/i) ||
+        html.match(
+          /href=["'](https?:\/\/[^"']*\/index\.php\?\/applications\/core\/interface\/file\/attachment\.php\?[^"']+)["']/i
+        );
+      const torrentUrl = torrentMatch ? torrentMatch[1] : undefined;
+
+      return { magnetUrl, torrentUrl };
+    } catch (err) {
+      console.warn('Failed to extract magnet from topic:', err);
+      return {};
+    }
+  },
 };

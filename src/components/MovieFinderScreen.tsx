@@ -34,6 +34,8 @@ import {
   Flame,
   Radio,
   Tv,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import {
@@ -64,7 +66,7 @@ let globalCachedFinderState: {
 };
 
 const FINDER_CACHE_FILE = FileSystem.documentDirectory
-  ? `${FileSystem.documentDirectory}finder_cache_v2.json`
+  ? `${FileSystem.documentDirectory}finder_cache_v3.json`
   : '';
 
 // Helper for quality badge colors
@@ -80,6 +82,7 @@ const getQualityBadgeColor = (res: string) => {
 interface ResolutionRowItemProps {
   resItem: MovieResolutionItem;
   movie: TamilMvMovieResult;
+  isStreaming: boolean;
   onMovieDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onTorrentDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onStream: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
@@ -87,7 +90,7 @@ interface ResolutionRowItemProps {
 }
 
 const ResolutionRowItem = React.memo<ResolutionRowItemProps>(
-  ({ resItem, movie, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
+  ({ resItem, movie, isStreaming, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
     const badgeColor = getQualityBadgeColor(resItem.resolution);
 
     return (
@@ -101,43 +104,50 @@ const ResolutionRowItem = React.memo<ResolutionRowItemProps>(
           {resItem.audio ? <Text style={styles.codecText}>• {resItem.audio}</Text> : null}
         </View>
 
-        {/* Right: 4 Distinct Action Buttons */}
+        {/* Right: 4 Clean Uniform Action Buttons (No text) */}
         <View style={styles.resRightActions}>
-          {/* Action 1: Movie Download */}
+          {/* Action 1: Movie Download (Direct to Downloads Manager) */}
           <TouchableOpacity
-            style={styles.btnMovieDownload}
+            style={styles.actionIconBtnDownload}
             onPress={() => onMovieDownload(resItem, movie)}
             activeOpacity={0.7}
+            accessibilityLabel="Movie Download"
           >
-            <Download color="#FFFFFF" size={13} />
-            <Text style={styles.btnMovieDownloadText}>Download</Text>
+            <Download color="#FFFFFF" size={14} />
           </TouchableOpacity>
 
           {/* Action 2: Torrent Option */}
           <TouchableOpacity
-            style={styles.btnTorrent}
+            style={styles.actionIconBtnTorrent}
             onPress={() => onTorrentDownload(resItem, movie)}
             activeOpacity={0.7}
+            accessibilityLabel="Torrent Download"
           >
-            <Flame color="#FF9500" size={13} />
+            <Flame color="#FF9500" size={14} />
           </TouchableOpacity>
 
           {/* Action 3: Online Stream (In-App Player) */}
           <TouchableOpacity
-            style={styles.btnStream}
+            style={styles.actionIconBtnStream}
             onPress={() => onStream(resItem, movie)}
             activeOpacity={0.7}
+            accessibilityLabel="Online Stream"
           >
-            <Play color="#FFFFFF" size={12} fill="#FFFFFF" />
+            {isStreaming ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
+            )}
           </TouchableOpacity>
 
-          {/* Action 4: Copy Magnet */}
+          {/* Action 4: Copy Magnet / Link */}
           <TouchableOpacity
-            style={styles.btnIcon}
+            style={styles.actionIconBtnCopy}
             onPress={() => onCopy(resItem)}
             activeOpacity={0.7}
+            accessibilityLabel="Copy Link"
           >
-            <Copy color="#8E8E93" size={13} />
+            <Copy color="#8E8E93" size={14} />
           </TouchableOpacity>
         </View>
       </View>
@@ -148,6 +158,7 @@ const ResolutionRowItem = React.memo<ResolutionRowItemProps>(
 // Pure Component for Movie Card
 interface MovieCardItemProps {
   item: TamilMvMovieResult;
+  streamingResId: string | null;
   onMovieDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onTorrentDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onStream: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
@@ -155,11 +166,15 @@ interface MovieCardItemProps {
 }
 
 const MovieCardItem = React.memo<MovieCardItemProps>(
-  ({ item, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
+  ({ item, streamingResId, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
     return (
       <View style={styles.card}>
-        {/* Card Header */}
+        {/* Card Header with Film Avatar & Movie Info */}
         <View style={styles.cardHeader}>
+          <View style={styles.filmAvatar}>
+            <Film color={Colors.netflixRed} size={18} />
+          </View>
+
           <View style={styles.cardTitleGroup}>
             <Text style={styles.movieTitle} numberOfLines={1}>
               {item.movieTitle}
@@ -171,7 +186,9 @@ const MovieCardItem = React.memo<MovieCardItemProps>(
                 </View>
               ) : null}
               {item.language ? (
-                <Text style={styles.langText}>{item.language}</Text>
+                <View style={styles.langChip}>
+                  <Text style={styles.langText}>{item.language}</Text>
+                </View>
               ) : null}
               <Text style={styles.qualityCount}>
                 • {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
@@ -188,13 +205,14 @@ const MovieCardItem = React.memo<MovieCardItemProps>(
           </TouchableOpacity>
         </View>
 
-        {/* Resolutions List */}
+        {/* Grouped Resolutions List */}
         <View style={styles.resolutionsList}>
           {item.resolutions.map((res) => (
             <ResolutionRowItem
               key={res.id}
               resItem={res}
               movie={item}
+              isStreaming={streamingResId === res.id}
               onMovieDownload={onMovieDownload}
               onTorrentDownload={onTorrentDownload}
               onStream={onStream}
@@ -217,23 +235,28 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const [results, setResults] = useState<TamilMvMovieResult[]>(globalCachedFinderState.results);
   const [hasSearched, setHasSearched] = useState(globalCachedFinderState.hasSearched);
 
-  // Pagination State
-  const PAGE_SIZE = 8;
+  // Pagination State (6 movies per page)
+  const PAGE_SIZE = 6;
   const [currentPage, setCurrentPage] = useState(1);
+  const flatListRef = useRef<FlatList>(null);
+
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
 
   const visibleResults = useMemo(() => {
-    return results.slice(0, currentPage * PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return results.slice(start, start + PAGE_SIZE);
   }, [results, currentPage]);
 
-  const handleLoadMore = useCallback(() => {
-    if (visibleResults.length < results.length) {
-      setCurrentPage((prev) => prev + 1);
-    }
-  }, [visibleResults.length, results.length]);
+  const handlePageChange = (newPage: number) => {
+    const page = Math.max(1, Math.min(totalPages, newPage));
+    setCurrentPage(page);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  };
 
   // In-App Video Streaming Player State
   const [streamPlayerVisible, setStreamPlayerVisible] = useState(false);
   const [activeStreamItem, setActiveStreamItem] = useState<DownloadItem | null>(null);
+  const [streamingResId, setStreamingResId] = useState<string | null>(null);
 
   // Configurable Mirror URL State
   const [currentBaseUrl, setCurrentBaseUrl] = useState(tamilMvService.getBaseUrl());
@@ -384,16 +407,25 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   // 1. Movie Direct Download (In-App Download Manager)
   const handleMovieDownload = useCallback(
     async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
-      const downloadTarget = resItem.magnetUrl || resItem.torrentFileUrl || resItem.topicUrl;
-      if (!downloadTarget) {
-        Linking.openURL(resItem.topicUrl);
-        return;
+      let target = resItem.magnetUrl || resItem.torrentFileUrl;
+
+      if (!target && resItem.topicUrl) {
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+        if (extracted.magnetUrl) {
+          target = extracted.magnetUrl;
+          resItem.magnetUrl = extracted.magnetUrl;
+        } else if (extracted.torrentUrl) {
+          target = extracted.torrentUrl;
+          resItem.torrentFileUrl = extracted.torrentUrl;
+        }
       }
+
+      if (!target) target = resItem.topicUrl;
 
       try {
         const title = `${movie.movieTitle} (${resItem.resolution})`;
-        await startDownload(downloadTarget, title);
-        Alert.alert('Download Started', `"${title}" has been queued to your Downloads manager!`, [
+        await startDownload(target, title);
+        Alert.alert('Download Started', `"${title}" has been added to your downloads queue!`, [
           { text: 'OK' },
           { text: 'View Downloads', onPress: () => onNavigateToTab?.('downloads') },
         ]);
@@ -407,8 +439,20 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   // 2. Torrent Option (Save / Queue to Torrent Engine)
   const handleTorrentDownload = useCallback(
     async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
-      const magnet = resItem.magnetUrl;
-      const torrentFile = resItem.torrentFileUrl;
+      let magnet = resItem.magnetUrl;
+      let torrentFile = resItem.torrentFileUrl;
+
+      if (!magnet && !torrentFile && resItem.topicUrl) {
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+        if (extracted.magnetUrl) {
+          magnet = extracted.magnetUrl;
+          resItem.magnetUrl = extracted.magnetUrl;
+        }
+        if (extracted.torrentUrl) {
+          torrentFile = extracted.torrentUrl;
+          resItem.torrentFileUrl = extracted.torrentUrl;
+        }
+      }
 
       if (magnet) {
         Alert.alert(
@@ -447,33 +491,56 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     [startDownload, onNavigateToTab]
   );
 
-  // 3. Online Stream (Play directly inside the App with backend stream engine)
+  // 3. Online Stream (Plays directly inside built-in Video Player Modal)
   const handleStreamResolution = useCallback(
-    (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
-      const magnet = resItem.magnetUrl;
+    async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
       const title = `${movie.movieTitle} (${resItem.resolution})`;
+      let magnet = resItem.magnetUrl;
 
-      if (magnet) {
-        const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
-        const streamDownloadItem: DownloadItem = {
-          id: `stream_${Date.now()}`,
-          title,
-          fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-          fileUri: '',
-          url: liveStreamUrl,
-          status: 'completed',
-          progress: 1,
-          totalBytes: 0,
-          downloadedBytes: 0,
-          speed: 'Online Stream',
-          isTorrent: false,
-          createdAt: Date.now(),
-        };
+      setStreamingResId(resItem.id);
 
-        setActiveStreamItem(streamDownloadItem);
-        setStreamPlayerVisible(true);
-      } else if (resItem.topicUrl) {
-        Linking.openURL(resItem.topicUrl);
+      try {
+        if (!magnet && resItem.topicUrl) {
+          const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+          if (extracted.magnetUrl) {
+            magnet = extracted.magnetUrl;
+            resItem.magnetUrl = extracted.magnetUrl;
+          }
+        }
+
+        if (magnet) {
+          const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+          const streamDownloadItem: DownloadItem = {
+            id: `stream_${Date.now()}`,
+            title,
+            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+            fileUri: '',
+            url: liveStreamUrl,
+            status: 'completed',
+            progress: 1,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            speed: 'Online Stream',
+            isTorrent: false,
+            createdAt: Date.now(),
+          };
+
+          setActiveStreamItem(streamDownloadItem);
+          setStreamPlayerVisible(true);
+        } else {
+          Alert.alert(
+            'Stream Unavailable',
+            `Could not resolve a direct magnet stream for "${title}". You can check the forum post directly.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'View Forum Topic', onPress: () => Linking.openURL(resItem.topicUrl) },
+            ]
+          );
+        }
+      } catch (err: any) {
+        Alert.alert('Stream Error', err?.message || 'Could not start stream');
+      } finally {
+        setStreamingResId(null);
       }
     },
     [backendUrl]
@@ -481,7 +548,20 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   // 4. Copy Magnet / Link
   const handleCopyMagnet = useCallback(async (resItem: MovieResolutionItem) => {
-    const link = resItem.magnetUrl || resItem.torrentFileUrl || resItem.topicUrl;
+    let link = resItem.magnetUrl || resItem.torrentFileUrl;
+    if (!link && resItem.topicUrl) {
+      const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+      if (extracted.magnetUrl) {
+        link = extracted.magnetUrl;
+        resItem.magnetUrl = extracted.magnetUrl;
+      } else if (extracted.torrentUrl) {
+        link = extracted.torrentUrl;
+        resItem.torrentFileUrl = extracted.torrentUrl;
+      } else {
+        link = resItem.topicUrl;
+      }
+    }
+
     if (link) {
       try {
         await Share.share({ message: link, title: 'Movie Magnet Link' });
@@ -496,6 +576,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       return (
         <MovieCardItem
           item={item}
+          streamingResId={streamingResId}
           onMovieDownload={handleMovieDownload}
           onTorrentDownload={handleTorrentDownload}
           onStream={handleStreamResolution}
@@ -503,10 +584,60 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         />
       );
     },
-    [handleMovieDownload, handleTorrentDownload, handleStreamResolution, handleCopyMagnet]
+    [streamingResId, handleMovieDownload, handleTorrentDownload, handleStreamResolution, handleCopyMagnet]
   );
 
   const keyExtractor = useCallback((item: TamilMvMovieResult) => item.id, []);
+
+  // Clean Pagination Bar Component
+  const renderPaginationBar = () => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <View style={styles.paginationBar}>
+        <TouchableOpacity
+          style={[styles.pageNavBtn, currentPage === 1 && styles.pageNavBtnDisabled]}
+          onPress={() => handlePageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          activeOpacity={0.7}
+        >
+          <ChevronLeft color={currentPage === 1 ? '#48484A' : '#FFFFFF'} size={15} />
+          <Text style={[styles.pageNavBtnText, currentPage === 1 && styles.pageNavBtnTextDisabled]}>
+            Prev
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.pageNumbersRow}>
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .slice(Math.max(0, currentPage - 3), Math.min(totalPages, currentPage + 2))
+            .map((pageNum) => (
+              <TouchableOpacity
+                key={pageNum}
+                style={[styles.pageNumPill, currentPage === pageNum && styles.pageNumPillActive]}
+                onPress={() => handlePageChange(pageNum)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.pageNumText, currentPage === pageNum && styles.pageNumTextActive]}>
+                  {pageNum}
+                </Text>
+              </TouchableOpacity>
+            ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.pageNavBtn, currentPage === totalPages && styles.pageNavBtnDisabled]}
+          onPress={() => handlePageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.pageNavBtnText, currentPage === totalPages && styles.pageNavBtnTextDisabled]}>
+            Next
+          </Text>
+          <ChevronRight color={currentPage === totalPages ? '#48484A' : '#FFFFFF'} size={15} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   const INJECTED_SCRAPER_JS = `
     (function() {
@@ -649,8 +780,9 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           </TouchableOpacity>
         </View>
       ) : hasSearched && results.length > 0 ? (
-        /* Optimized Paginated Results List */
+        /* Results List with Pagination Header & Footer */
         <FlatList
+          ref={flatListRef}
           data={visibleResults}
           keyExtractor={keyExtractor}
           renderItem={renderMovieCard}
@@ -661,26 +793,20 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           windowSize={5}
           updateCellsBatchingPeriod={50}
           removeClippedSubviews={Platform.OS === 'android'}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.4}
           ListHeaderComponent={
-            <Text style={styles.resultsCount}>
-              Showing {visibleResults.length} of {results.length} movie release{results.length === 1 ? '' : 's'}
-            </Text>
-          }
-          ListFooterComponent={
-            visibleResults.length < results.length ? (
-              <TouchableOpacity
-                style={styles.loadMoreBtn}
-                onPress={handleLoadMore}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.loadMoreText}>
-                  Load More Releases ({results.length - visibleResults.length} remaining)
+            <View style={styles.listHeaderBox}>
+              <View style={styles.listHeaderMetaRow}>
+                <Text style={styles.resultsCount}>
+                  Found {results.length} Movie{results.length === 1 ? '' : 's'}
                 </Text>
-              </TouchableOpacity>
-            ) : null
+                <Text style={styles.pageCount}>
+                  Page {currentPage} of {totalPages}
+                </Text>
+              </View>
+              {renderPaginationBar()}
+            </View>
           }
+          ListFooterComponent={renderPaginationBar}
         />
       ) : (
         /* Clean Idle State */
@@ -900,15 +1026,85 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 28,
+    paddingBottom: 36,
+  },
+  listHeaderBox: {
+    marginBottom: 10,
+    gap: 8,
+  },
+  listHeaderMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   resultsCount: {
-    color: '#636366',
+    color: '#E5E5EA',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  pageCount: {
+    color: '#8E8E93',
     fontSize: 11,
     fontWeight: '600',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  },
+  paginationBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#161618',
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: '#242428',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginVertical: 4,
+  },
+  pageNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#242428',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  pageNavBtnDisabled: {
+    opacity: 0.35,
+    backgroundColor: '#18181A',
+  },
+  pageNavBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pageNavBtnTextDisabled: {
+    color: '#636366',
+  },
+  pageNumbersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pageNumPill: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  pageNumPillActive: {
+    backgroundColor: Colors.netflixRed,
+  },
+  pageNumText: {
+    color: '#AEAEB2',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pageNumTextActive: {
+    color: '#FFFFFF',
   },
   card: {
     backgroundColor: '#161618',
@@ -921,10 +1117,20 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: 12,
+    gap: 10,
     borderBottomWidth: 0.5,
     borderBottomColor: '#202024',
+  },
+  filmAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 0, 64, 0.12)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 0, 64, 0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   cardTitleGroup: {
     flex: 1,
@@ -934,6 +1140,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: -0.2,
   },
   metaBadgeRow: {
     flexDirection: 'row',
@@ -942,8 +1149,8 @@ const styles = StyleSheet.create({
   },
   yearChip: {
     backgroundColor: '#242428',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 4,
   },
   yearChipText: {
@@ -951,9 +1158,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
+  langChip: {
+    backgroundColor: 'rgba(255, 0, 64, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
   langText: {
     color: Colors.netflixRed,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   qualityCount: {
@@ -966,7 +1179,7 @@ const styles = StyleSheet.create({
   resolutionsList: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    gap: 8,
+    gap: 7,
   },
   resRow: {
     flexDirection: 'row',
@@ -1005,43 +1218,37 @@ const styles = StyleSheet.create({
   resRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
   },
-  btnMovieDownload: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  actionIconBtnDownload: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
     backgroundColor: Colors.netflixRed,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  btnMovieDownloadText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  btnTorrent: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 149, 0, 0.15)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255, 149, 0, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  btnStream: {
-    width: 26,
-    height: 26,
+  actionIconBtnTorrent: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 149, 0, 0.15)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 149, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionIconBtnStream: {
+    width: 30,
+    height: 30,
     borderRadius: 6,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  btnIcon: {
-    width: 26,
-    height: 26,
+  actionIconBtnCopy: {
+    width: 30,
+    height: 30,
     borderRadius: 6,
     backgroundColor: '#242428',
     justifyContent: 'center',
@@ -1178,22 +1385,5 @@ const styles = StyleSheet.create({
     width: 320,
     height: 400,
     opacity: 0.01,
-  },
-  loadMoreBtn: {
-    backgroundColor: '#1C1C1E',
-    borderWidth: 0.5,
-    borderColor: '#2C2C2E',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 20,
-  },
-  loadMoreText: {
-    color: '#E5E5EA',
-    fontSize: 12,
-    fontWeight: '600',
   },
 });

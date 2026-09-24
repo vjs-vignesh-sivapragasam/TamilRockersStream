@@ -11,7 +11,7 @@ import { resolveTorrentMoviePayload } from '../utils/bencode';
 import { debridService } from '../services/debridService';
 
 // Default public backend URL
-export const DEFAULT_BACKEND_URL = 'https://polite-glasses-bow.loca.lt';
+export const DEFAULT_BACKEND_URL = 'https://gold-ways-remain.loca.lt';
 const BACKEND_CONFIG_FILE = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}backend_config.json`
   : '';

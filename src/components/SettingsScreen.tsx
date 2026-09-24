@@ -358,7 +358,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 {[
-                  { label: 'Cloud Tunnel (Live)', url: 'https://polite-glasses-bow.loca.lt' },
+                  { label: 'Cloud Tunnel (Live)', url: 'https://gold-ways-remain.loca.lt' },
                   { label: 'Android Emulator', url: 'http://10.0.2.2:3000' },
                   { label: 'Local PC', url: 'http://localhost:3000' },
                 ].map((item) => {
