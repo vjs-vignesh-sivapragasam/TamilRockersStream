@@ -554,18 +554,55 @@ app.get('/api/stream/play', (req, res) => {
 app.get('/api/stream/:infoHash', (req, res) => {
   const { infoHash } = req.params;
   const magnet = req.query.magnet;
+  const isRaw = req.query.raw === '1' || Boolean(req.headers.range) || Boolean(req.headers.accept && req.headers.accept.includes('video/'));
   let torrent = client.get(infoHash.toLowerCase());
 
-  if (!torrent && magnet) {
-    const cleanMagnet = magnet.toString().replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
-    const trackers = getCombinedTrackers(cleanMagnet);
+  if (!torrent) {
+    const rawTarget = magnet
+      ? magnet.toString().replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim()
+      : `magnet:?xt=urn:btih:${infoHash}`;
+    const trackers = getCombinedTrackers(rawTarget);
     try {
-      torrent = client.add(cleanMagnet, {
+      torrent = client.add(rawTarget, {
         path: DOWNLOAD_DIR,
         deselect: true,
         announce: trackers,
       });
     } catch (_) {}
+  }
+
+  // If opened directly in a browser without range headers, serve a sleek HTML5 video player page
+  if (!isRaw && req.headers.accept && req.headers.accept.includes('text/html')) {
+    const torrentName = (torrent && torrent.name) ? torrent.name : `Torrent Stream (${infoHash.slice(0, 8)})`;
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VFlix - ${torrentName}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000000; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+    .top-bar { position: absolute; top: 18px; left: 24px; right: 24px; display: flex; align-items: center; justify-content: space-between; z-index: 20; pointer-events: none; }
+    .logo { color: #FA243C; font-size: 20px; font-weight: 900; letter-spacing: 1.5px; }
+    .title { color: #A0A0A0; font-size: 13px; font-weight: 500; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .player-wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; position: relative; }
+    video { width: 100%; height: 100%; max-height: 100vh; object-fit: contain; outline: none; background: #000; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <span class="logo">VFLIX</span>
+    <span class="title">${torrentName}</span>
+  </div>
+  <div class="player-wrap">
+    <video controls autoplay playsinline preload="auto" src="/api/stream/${infoHash}?raw=1">
+      Your browser does not support HTML5 video.
+    </video>
+  </div>
+</body>
+</html>`;
+    return res.send(html);
   }
 
   if (!torrent) return res.status(404).send('Torrent not found in engine');

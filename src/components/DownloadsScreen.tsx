@@ -49,7 +49,6 @@ import {
   cleanTitleFromFilename,
   getPosterForFilename,
 } from '../services/downloadService';
-import { torrentEngine } from '../services/torrentEngine';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
 
 export const DownloadsScreen: React.FC = () => {
@@ -65,7 +64,6 @@ export const DownloadsScreen: React.FC = () => {
     rescanStorage,
     importMovie,
     isBackendConnected,
-    backendUrl,
   } = useDownloads();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -319,138 +317,6 @@ export const DownloadsScreen: React.FC = () => {
       Alert.alert('Download Error', err?.message || 'Failed to start download.');
     }
   };
-
-  // Stream Modal State
-  const WORKING_SAMPLE_MAGNET =
-    'magnet:?xt=urn:btih:673144559b1da83f26d51f369329266ceef6bd12&dn=www.1TamilMV.meme%20-%20Photographer%20%282026%29%20Tamil%C2%A0HQ%20HDRip%20-%20x264%20-%20AAC%20-%20250MB%20-%20ESub.mkv&xl=251057547&tr=udp%3A%2F%2Ftracker.dler.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker-udp.gbitt.info%3A80%2Fannounce&tr=http%3A%2F%2Fipv4announce.sktorrent.eu%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.mywaifu.best%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fevan.im%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.leechshield.link%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.dhitechnical.com%3A6969%2Fannounce&tr=https%3A%2F%2Ftorrents.tmtime.dev%3A443%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.online%3A1984%2Fannounce&tr=udp%3A%2F%2Ftracker.wildkat.net%3A6969%2Fannounce&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce';
-
-  const [streamModalVisible, setStreamModalVisible] = useState(false);
-  const [streamTab, setStreamTab] = useState<'file' | 'link'>('link');
-  const [streamUrl, setStreamUrl] = useState('');
-  const [streamFile, setStreamFile] = useState<{ uri: string; name: string; size: number } | null>(null);
-
-  const handlePickStreamFile = async () => {
-    try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: ['*/*', 'application/x-bittorrent'],
-        copyToCacheDirectory: true,
-      });
-      if (!res.canceled && res.assets && res.assets.length > 0) {
-        setStreamFile({
-          uri: res.assets[0].uri,
-          name: res.assets[0].name,
-          size: res.assets[0].size || 0,
-        });
-      }
-    } catch {}
-  };
-
-  const resolveTargetMagnet = async (): Promise<string | null> => {
-    if (streamTab === 'link') {
-      const target = streamUrl.trim();
-      if (!target) {
-        Alert.alert('Magnet Link Required', 'Please paste a valid magnet link or tap the sample movie below.');
-        return null;
-      }
-      if (target.startsWith('magnet:')) {
-        return target;
-      } else {
-        Alert.alert('Invalid Format', 'Only magnet links are supported here. Use the File tab for .torrent files.');
-        return null;
-      }
-    } else {
-      if (!streamFile) {
-        handlePickStreamFile();
-        return null;
-      }
-
-      try {
-        const response = await fetch(streamFile.uri);
-        const arrayBuffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-        const dataUri = `data:application/x-bittorrent;base64,${btoa(binary)}`;
-
-        const getMagnet = new Promise<string>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            unsubscribe();
-            reject(new Error('Timed out reading .torrent file metadata'));
-          }, 10000);
-
-          const unsubscribe = torrentEngine.subscribe((event) => {
-            if (event.id === 'stream_extract' && event.type === 'metadata') {
-              clearTimeout(timeout);
-              unsubscribe();
-              torrentEngine.removeTorrent('stream_extract');
-              const magnet = `magnet:?xt=urn:btih:${event.data.infoHash}&dn=${encodeURIComponent(event.data.name || streamFile.name)}`;
-              resolve(magnet);
-            }
-            if (event.id === 'stream_extract' && event.type === 'error') {
-              clearTimeout(timeout);
-              unsubscribe();
-              torrentEngine.removeTorrent('stream_extract');
-              reject(new Error(event.data || 'Failed to read torrent'));
-            }
-          });
-
-          torrentEngine.addTorrent('stream_extract', dataUri);
-        });
-
-        return await getMagnet;
-      } catch (err: any) {
-        Alert.alert('Extraction Failed', err.message);
-        return null;
-      }
-    }
-  };
-
-  const handleStreamInApp = async () => {
-    const magnet = await resolveTargetMagnet();
-    if (!magnet) return;
-
-    let streamTitle = 'Live Torrent Stream';
-    const dnMatch = magnet.match(/[?&]dn=([^&]+)/i);
-    if (dnMatch && dnMatch[1]) {
-      try {
-        streamTitle = decodeURIComponent(dnMatch[1]).replace(/\+/g, ' ');
-      } catch {}
-    } else if (streamFile) {
-      streamTitle = streamFile.name.replace(/\.torrent$/i, '');
-    }
-
-    const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
-    const streamItem: DownloadItem = {
-      id: `stream_${Date.now()}`,
-      title: streamTitle,
-      fileName: `${streamTitle}.mp4`,
-      fileUri: '',
-      url: liveStreamUrl,
-      status: 'completed',
-      progress: 1,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      speed: 'Stremio Engine Stream',
-      isTorrent: false,
-      createdAt: Date.now(),
-    };
-
-    setStreamModalVisible(false);
-    setSelectedMovie(streamItem);
-    setPlayerModalVisible(true);
-  };
-
-  const handleStreamWebtor = async () => {
-    const magnet = await resolveTargetMagnet();
-    if (!magnet) return;
-
-    setStreamModalVisible(false);
-    const webtorLink = `https://webtor.io/show?magnet=${encodeURIComponent(magnet)}`;
-    Linking.openURL(webtorLink).catch((err) => {
-      Alert.alert('Error', 'Could not launch browser: ' + err.message);
-    });
-  };
-
   // Storage calculation
   const totalDisk = storageStats.totalBytes || 1;
   const freeDisk = storageStats.freeBytes || 0;
@@ -490,15 +356,6 @@ export const DownloadsScreen: React.FC = () => {
           >
             <Film color="#FFFFFF" size={14} />
             <Text style={styles.importHeaderBtnText}>Import</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.streamOnlineBtn}
-            onPress={() => setStreamModalVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Play color="#FFFFFF" size={12} fill="#FFFFFF" />
-            <Text style={styles.addBtnText}>Stream</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -835,7 +692,7 @@ export const DownloadsScreen: React.FC = () => {
                 <View>
                   <Text style={styles.sheetTitle}>Add Torrent</Text>
                   <Text style={styles.sheetSubtitle}>
-                    Stream & save movies directly to internal storage
+                    Save movies directly to internal storage
                   </Text>
                 </View>
               </View>
@@ -1057,218 +914,6 @@ export const DownloadsScreen: React.FC = () => {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Stream Online Modal */}
-      <Modal
-        visible={streamModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setStreamModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalBackdrop}
-        >
-          <TouchableOpacity
-            style={styles.modalBackdropDismiss}
-            activeOpacity={1}
-            onPress={() => setStreamModalVisible(false)}
-          />
-
-          <View style={[styles.modernModalSheet, { paddingBottom: insets.bottom + 20 }]}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeaderLeft}>
-                <View style={styles.sheetIconCircle}>
-                  <Play color={Colors.netflixRed} size={20} fill={Colors.netflixRed} />
-                </View>
-                <View>
-                  <Text style={styles.sheetTitle}>Stream Online</Text>
-                  <Text style={styles.sheetSubtitle}>
-                    Watch instantly via Webtor cloud proxy
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={styles.sheetCloseBtn}
-                onPress={() => setStreamModalVisible(false)}
-                activeOpacity={0.7}
-              >
-                <X color="#A0A0A0" size={18} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modernTabSwitcher}>
-              <TouchableOpacity
-                style={[styles.modernTabItem, streamTab === 'file' && styles.modernTabItemActive]}
-                onPress={() => setStreamTab('file')}
-                activeOpacity={0.8}
-              >
-                <FileUp color={streamTab === 'file' ? '#FFFFFF' : '#888888'} size={16} />
-                <Text style={[styles.modernTabItemText, streamTab === 'file' && styles.modernTabItemTextActive]}>
-                  Upload .torrent
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modernTabItem, streamTab === 'link' && styles.modernTabItemActive]}
-                onPress={() => setStreamTab('link')}
-                activeOpacity={0.8}
-              >
-                <Link2 color={streamTab === 'link' ? '#FFFFFF' : '#888888'} size={16} />
-                <Text style={[styles.modernTabItemText, streamTab === 'link' && styles.modernTabItemTextActive]}>
-                  Magnet Link
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {streamTab === 'link' ? (
-              <View style={styles.tabContentGroup}>
-                <View style={styles.inputWrapper}>
-                  <Text style={styles.inputLabel}>MAGNET LINK</Text>
-                  <View style={styles.inputContainer}>
-                    <Link2 color="#777777" size={16} style={styles.inputLeadingIcon} />
-                    <TextInput
-                      style={styles.textInputModern}
-                      placeholder="Paste magnet:?xt=urn:..."
-                      placeholderTextColor="#555555"
-                      value={streamUrl}
-                      onChangeText={setStreamUrl}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    {streamUrl.length > 0 && (
-                      <TouchableOpacity onPress={() => setStreamUrl('')} style={styles.inputClearBtn}>
-                        <X color="#777777" size={15} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-
-                {/* Quick 1-Tap Working Sample Movie */}
-                <TouchableOpacity
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(250, 36, 60, 0.12)',
-                    borderWidth: 1,
-                    borderColor: 'rgba(250, 36, 60, 0.35)',
-                    borderRadius: 8,
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                    marginTop: 10,
-                  }}
-                  onPress={() => setStreamUrl(WORKING_SAMPLE_MAGNET)}
-                  activeOpacity={0.75}
-                >
-                  <Film color={Colors.netflixRed} size={15} style={{ marginRight: 8 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
-                      ⚡ Load Verified Movie: Photographer (2026)
-                    </Text>
-                    <Text style={{ color: '#888888', fontSize: 9 }}>
-                      Active swarm • 250 MB • Direct Stremio-style stream
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.tabContentGroup}>
-                <TouchableOpacity
-                  style={[styles.modernUploadZone, streamFile && styles.modernUploadZoneSelected]}
-                  onPress={handlePickStreamFile}
-                  activeOpacity={0.85}
-                >
-                  {streamFile ? (
-                    <View style={styles.selectedFileBox}>
-                      <View style={styles.selectedFileHeader}>
-                        <View style={styles.selectedIconCircle}>
-                          <FileCheck color="#46D369" size={24} />
-                        </View>
-                        <View style={styles.selectedFileInfo}>
-                          <Text style={styles.selectedFileName} numberOfLines={1}>
-                            {streamFile.name}
-                          </Text>
-                          <View style={styles.selectedMetaRow}>
-                            <View style={styles.sizeBadge}>
-                              <Text style={styles.sizeBadgeText}>{formatBytes(streamFile.size)}</Text>
-                            </View>
-                            <View style={styles.readyBadge}>
-                              <CheckCircle2 color="#46D369" size={11} />
-                              <Text style={styles.readyBadgeText}>Ready to Stream</Text>
-                            </View>
-                          </View>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.changeFileBtn}
-                          onPress={(e) => { e.stopPropagation(); setStreamFile(null); }}
-                          activeOpacity={0.7}
-                        >
-                          <X color="#888888" size={18} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.emptyUploadContent}>
-                      <View style={styles.emptyUploadIcon}>
-                        <Upload color={Colors.netflixRed} size={26} />
-                      </View>
-                      <Text style={styles.emptyUploadTitle}>Tap to Browse .torrent File</Text>
-                      <Text style={styles.emptyUploadSubtitle}>
-                        Select a torrent file to extract and stream instantly
-                      </Text>
-                      <View style={styles.browseActionPill}>
-                        <Text style={styles.browseActionText}>Browse Storage</Text>
-                      </View>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Primary Action: Stremio-Style In-App Stream */}
-            <TouchableOpacity
-              style={styles.submitButtonTouchable}
-              onPress={handleStreamInApp}
-              activeOpacity={0.88}
-            >
-              <LinearGradient
-                colors={[Colors.primary, '#B51527']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.submitGradient}
-              >
-                <Play color="#FFFFFF" size={18} fill="#FFFFFF" />
-                <Text style={styles.submitButtonText}>
-                  ▶ Stream in App (Stremio Engine)
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {/* Secondary Action: External Webtor Proxy Stream */}
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#1E1E1E',
-                borderRadius: 10,
-                paddingVertical: 12,
-                marginTop: 8,
-                borderWidth: 1,
-                borderColor: '#333333',
-              }}
-              onPress={handleStreamWebtor}
-              activeOpacity={0.8}
-            >
-              <ExternalLink color="#AAAAAA" size={14} style={{ marginRight: 8 }} />
-              <Text style={{ color: '#CCCCCC', fontSize: 13, fontWeight: '600' }}>
-                Open in Web Browser (Webtor Proxy)
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* Netflix Offline Video Player Modal */}
       <OfflinePlayerModal
         visible={playerModalVisible}
@@ -1304,17 +949,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     marginTop: 2,
-  },
-  streamOnlineBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#333333',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#444',
   },
   addBtn: {
     flexDirection: 'row',

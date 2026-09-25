@@ -15,30 +15,41 @@ import {
   RefreshControl,
   BackHandler,
   Image,
+  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
+import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   Search,
   X,
+  ArrowLeft,
   Globe,
   Download,
   Play,
   Copy,
   ExternalLink,
   Film,
+  Clapperboard,
+  RotateCcw,
   Sparkles,
+  Flame,
   Check,
   AlertCircle,
   ChevronDown,
   Layers,
-  Flame,
   Radio,
   Tv,
   ArrowUp,
+  HardDrive,
+  Bookmark,
+  BookmarkCheck,
+  PlayCircle,
+  Clock,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import {
@@ -51,6 +62,8 @@ import {
 import { useDownloads } from '../context/DownloadContext';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
 import { DownloadItem } from '../types/downloads';
+import { continueWatchingService, ContinueWatchingItem } from '../services/continueWatchingService';
+import { myListService } from '../services/myListService';
 
 interface MovieFinderScreenProps {
   onNavigateToTab?: (tab: any) => void;
@@ -78,8 +91,19 @@ let globalCachedFinderState: {
 };
 
 const FINDER_CACHE_FILE = FileSystem.documentDirectory
-  ? `${FileSystem.documentDirectory}finder_cache_v4.json`
+  ? `${FileSystem.documentDirectory}finder_cache_v5.json`
   : '';
+
+// Helper to strip IPS forum boilerplate like "View the topic '...'", "View the topic: ...", etc.
+export const sanitizeMovieTitle = (title?: string): string => {
+  if (!title) return '';
+  return title
+    .replace(/^(?:view\s+(?:the\s+)?topic|go\s+to\s+(?:the\s+)?topic)[\s:'"‘“\-]*/i, '')
+    .replace(/^view\s+the\s+topic\s*/i, '')
+    .replace(/['"’”]+$/g, '')
+    .replace(/^['"‘“]+/g, '')
+    .trim();
+};
 
 // Helper for quality badge styling
 const getQualityBadgeConfig = (res: string) => {
@@ -118,307 +142,1167 @@ const getInitialResolutionIndex = (resolutions: MovieResolutionItem[]): number =
   return 0;
 };
 
-// Pure Component for Movie Card with Dynamic Resolution Dropdown and 2-Line Action Buttons
-interface MovieCardItemProps {
+// Helper to format remaining duration for continue watching
+const formatRemainingTime = (currentTime: number, duration: number): string => {
+  const remSec = Math.max(0, duration - currentTime);
+  const remMin = Math.round(remSec / 60);
+  if (remMin >= 60) {
+    const hrs = Math.floor(remMin / 60);
+    const mins = remMin % 60;
+    return mins > 0 ? `${hrs}h ${mins}m left` : `${hrs}h left`;
+  }
+  if (remMin > 0) {
+    return `${remMin}m left`;
+  }
+  return `${Math.round(remSec)}s left`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ContinueWatchingCard — horizontal card displaying in-progress watched movies
+// ─────────────────────────────────────────────────────────────────────────────
+interface ContinueWatchingCardProps {
+  item: ContinueWatchingItem;
+  onResume: () => void;
+  onRemove: () => void;
+}
+
+const ContinueWatchingCard = React.memo<ContinueWatchingCardProps>(({ item, onResume, onRemove }) => {
+  const remainingText = formatRemainingTime(item.currentTime, item.duration);
+  const progressPercent = Math.min(Math.max(Math.round(item.progress * 100), 5), 100);
+
+  return (
+    <TouchableOpacity
+      style={styles.cwCard}
+      onPress={onResume}
+      activeOpacity={0.82}
+    >
+      {/* Poster Image */}
+      {item.posterUrl ? (
+        <Image
+          source={{ uri: item.posterUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+      ) : (
+        <LinearGradient
+          colors={['#181920', '#252834', '#181920']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+        >
+          <Film color="#3A3E4E" size={28} strokeWidth={1.5} />
+        </LinearGradient>
+      )}
+
+      {/* Dark gradient overlay */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(10,10,14,0.6)', 'rgba(10,10,14,0.95)']}
+        style={styles.cwGradientOverlay}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      />
+
+      {/* Dismiss / Remove Button ("×") on Top-Right */}
+      <TouchableOpacity
+        style={styles.cwDismissBtn}
+        onPress={(e) => {
+          e.stopPropagation?.();
+          onRemove();
+        }}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        activeOpacity={0.7}
+      >
+        <X color="#FFFFFF" size={13} strokeWidth={2.5} />
+      </TouchableOpacity>
+
+      {/* Center Play Icon Overlay */}
+      <View style={styles.cwCenterPlay} pointerEvents="none">
+        <View style={styles.cwPlayCircle}>
+          <Play color="#FFFFFF" size={16} fill="#FFFFFF" style={{ marginLeft: 2 }} />
+        </View>
+      </View>
+
+      {/* Bottom Info: Title, Remaining, Progress Bar */}
+      <View style={styles.cwBottomInfo} pointerEvents="none">
+        <Text style={styles.cwTitle} numberOfLines={1}>
+          {item.movieTitle}
+        </Text>
+        <View style={styles.cwMetaRow}>
+          <Clock color="#8E8E93" size={10} strokeWidth={2} />
+          <Text style={styles.cwRemainingText}>{remainingText}</Text>
+          {item.resolution ? (
+            <Text style={styles.cwResText}>• {item.resolution}</Text>
+          ) : null}
+        </View>
+
+        {/* Progress Bar */}
+        <View style={styles.cwProgressBarBg}>
+          <View style={[styles.cwProgressBarFill, { width: `${progressPercent}%` }]} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PosterGridCard — compact 2-column poster card for the grid layout
+// ─────────────────────────────────────────────────────────────────────────────
+interface PosterGridCardProps {
   item: TamilMvMovieResult;
+  isSaved?: boolean;
+  onToggleSave?: (posterUrl: string | null) => void;
+  enqueuePosterFetch: (topicUrl: string, cb: (url: string | null) => void) => void;
+  onPress: () => void;
+}
+
+const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = Math.floor((screenWidth - 36) / 2);
+  const cardHeight = Math.round(cardWidth * 1.5);
+
+  const topicUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
+  const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (!topicUrl) return null;
+    const cached = posterCache.get(topicUrl);
+    return cached !== undefined ? cached : null;
+  });
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+
+  useEffect(() => {
+    if (!topicUrl) return;
+    if (posterCache.has(topicUrl)) {
+      setPosterUrl(posterCache.get(topicUrl) ?? null);
+      setPosterLoading(false);
+      return;
+    }
+    setPosterLoading(true);
+    enqueuePosterFetch(topicUrl, (url) => {
+      setPosterUrl(url);
+      setPosterLoading(false);
+    });
+  }, [topicUrl, enqueuePosterFetch]);
+
+  // Determine best quality badge label
+  const bestRes = useMemo(() => {
+    if (!item.resolutions || item.resolutions.length === 0) return null;
+    const idx = getInitialResolutionIndex(item.resolutions);
+    return item.resolutions[idx] || item.resolutions[0];
+  }, [item.resolutions]);
+
+  const badge = getQualityBadgeConfig(bestRes?.resolution || '');
+
+  const cleanMovieName = useMemo(() => {
+    const isBad = (name?: string) =>
+      !name ||
+      name.length < 2 ||
+      /^(languages?|rips?)|^[-–—\s\d.+]+(?:gb|mb)?/i.test(name.trim()) ||
+      /^(view\s+(?:the\s+)?topic|go\s+to\s+topic)/i.test(name.trim());
+
+    const sanitizedItemTitle = sanitizeMovieTitle(item.movieTitle);
+    if (!isBad(sanitizedItemTitle)) return sanitizedItemTitle;
+
+    const fallbackUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
+    if (fallbackUrl) {
+      const parsed = tamilMvService.parseTitleMetadata(
+        item.resolutions?.[0]?.rawTitle || item.movieTitle || '',
+        fallbackUrl
+      );
+      const sanitizedParsedTitle = sanitizeMovieTitle(parsed.movieTitle);
+      if (!isBad(sanitizedParsedTitle)) return sanitizedParsedTitle;
+    }
+    return 'Tamil Movie';
+  }, [item.movieTitle, item.topicUrl, item.resolutions]);
+
+  return (
+    <TouchableOpacity
+      style={[styles.pgCard, { width: cardWidth, height: cardHeight }]}
+      onPress={onPress}
+      activeOpacity={0.82}
+    >
+      {/* Poster Image */}
+      {posterUrl ? (
+        <Image
+          source={{ uri: posterUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onError={() => {
+            setPosterUrl(null);
+          }}
+        />
+      ) : posterLoading ? (
+        <LinearGradient
+          colors={['#181920', '#252834', '#181920']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Film color="#3A3E4E" size={32} strokeWidth={1.5} />
+        </LinearGradient>
+      ) : (
+        <LinearGradient
+          colors={[Colors.primary, '#660814']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Film color="rgba(255,255,255,0.4)" size={32} strokeWidth={1.5} />
+        </LinearGradient>
+      )}
+
+      {/* Bottom gradient overlay */}
+      <LinearGradient
+        colors={['transparent', 'rgba(10,10,14,0.4)', 'rgba(10,10,14,0.95)']}
+        style={styles.pgGradientOverlay}
+        start={{ x: 0, y: 0.3 }}
+        end={{ x: 0, y: 1 }}
+      >
+        <Text style={styles.pgTitle} numberOfLines={2}>
+          {cleanMovieName}
+        </Text>
+      </LinearGradient>
+
+      {/* Year badge — top-left */}
+      {item.year ? (
+        <View style={styles.pgYearBadge}>
+          <Text style={styles.pgYearText}>{item.year}</Text>
+        </View>
+      ) : null}
+
+      {/* Language badge — top-left next to year */}
+      {item.language ? (
+        <View style={[styles.pgLangBadge, { left: item.year ? 46 : 7, right: undefined }]}>
+          <Text style={styles.pgLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
+        </View>
+      ) : null}
+
+      {/* Bookmark button — top-right */}
+      <TouchableOpacity
+        style={styles.cardBookmarkBtn}
+        onPress={(e) => {
+          e.stopPropagation?.();
+          onToggleSave?.(posterUrl);
+        }}
+        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        activeOpacity={0.7}
+      >
+        <Bookmark
+          color={isSaved ? Colors.primary : '#FFFFFF'}
+          size={13}
+          fill={isSaved ? Colors.primary : 'transparent'}
+        />
+      </TouchableOpacity>
+
+      {/* Quality badge — bottom-right */}
+      {bestRes ? (
+        <View style={[styles.pgQualityBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+          <Text style={[styles.pgQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TopReleaseCard — horizontal carousel card for "Top Release for this week"
+// ─────────────────────────────────────────────────────────────────────────────
+interface TopReleaseCardProps {
+  item: TamilMvMovieResult;
+  rank: number;
+  isSaved?: boolean;
+  onToggleSave?: (posterUrl: string | null) => void;
+  enqueuePosterFetch: (topicUrl: string, cb: (url: string | null) => void) => void;
+  onPress: () => void;
+}
+
+const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
+  const topicUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
+  const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (!topicUrl) return null;
+    const cached = posterCache.get(topicUrl);
+    return cached !== undefined ? cached : null;
+  });
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+
+  useEffect(() => {
+    if (!topicUrl) return;
+    if (posterCache.has(topicUrl)) {
+      setPosterUrl(posterCache.get(topicUrl) ?? null);
+      setPosterLoading(false);
+      return;
+    }
+    setPosterLoading(true);
+    enqueuePosterFetch(topicUrl, (url) => {
+      setPosterUrl(url);
+      setPosterLoading(false);
+    });
+  }, [topicUrl, enqueuePosterFetch]);
+
+  const bestRes = useMemo(() => {
+    if (!item.resolutions || item.resolutions.length === 0) return null;
+    const idx = getInitialResolutionIndex(item.resolutions);
+    return item.resolutions[idx] || item.resolutions[0];
+  }, [item.resolutions]);
+
+  const badge = getQualityBadgeConfig(bestRes?.resolution || '');
+
+  const cleanMovieName = useMemo(() => {
+    const isBad = (name?: string) =>
+      !name ||
+      name.length < 2 ||
+      /^(languages?|rips?)|^[-–—\s\d.+]+(?:gb|mb)?/i.test(name.trim()) ||
+      /^(view\s+(?:the\s+)?topic|go\s+to\s+topic)/i.test(name.trim());
+
+    const sanitizedItemTitle = sanitizeMovieTitle(item.movieTitle);
+    if (!isBad(sanitizedItemTitle)) return sanitizedItemTitle;
+
+    const fallbackUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
+    if (fallbackUrl) {
+      const parsed = tamilMvService.parseTitleMetadata(
+        item.resolutions?.[0]?.rawTitle || item.movieTitle || '',
+        fallbackUrl
+      );
+      const sanitizedParsedTitle = sanitizeMovieTitle(parsed.movieTitle);
+      if (!isBad(sanitizedParsedTitle)) return sanitizedParsedTitle;
+    }
+    return 'Tamil Movie';
+  }, [item.movieTitle, item.topicUrl, item.resolutions]);
+
+  return (
+    <TouchableOpacity
+      style={styles.trCard}
+      onPress={onPress}
+      activeOpacity={0.82}
+    >
+      {/* Poster Image */}
+      {posterUrl ? (
+        <Image
+          source={{ uri: posterUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onError={() => setPosterUrl(null)}
+        />
+      ) : posterLoading ? (
+        <LinearGradient
+          colors={['#181920', '#252834', '#181920']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Film color="#3A3E4E" size={26} strokeWidth={1.5} />
+        </LinearGradient>
+      ) : (
+        <LinearGradient
+          colors={[Colors.primary, '#660814']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Film color="rgba(255,255,255,0.4)" size={26} strokeWidth={1.5} />
+        </LinearGradient>
+      )}
+
+      {/* Bottom gradient overlay with Title */}
+      <LinearGradient
+        colors={['transparent', 'rgba(10,10,14,0.45)', 'rgba(10,10,14,0.95)']}
+        style={styles.trGradientOverlay}
+        start={{ x: 0, y: 0.3 }}
+        end={{ x: 0, y: 1 }}
+      >
+        <Text style={styles.trTitle} numberOfLines={2}>
+          {cleanMovieName}
+        </Text>
+      </LinearGradient>
+
+      {/* Top-Left: Rank Badge (#1, #2, ...) */}
+      <View style={styles.trRankBadge}>
+        <LinearGradient
+          colors={rank <= 3 ? [Colors.primary, '#850E1B'] : ['#2C2D38', '#181920']}
+          style={styles.trRankGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Text style={styles.trRankText}>#{rank}</Text>
+        </LinearGradient>
+      </View>
+
+      {/* Top-Left: Language badge next to rank */}
+      {item.language ? (
+        <View style={[styles.trLangBadge, { left: 38, right: undefined }]}>
+          <Text style={styles.pgLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
+        </View>
+      ) : null}
+
+      {/* Top-Right: Bookmark button */}
+      <TouchableOpacity
+        style={styles.cardBookmarkBtn}
+        onPress={(e) => {
+          e.stopPropagation?.();
+          onToggleSave?.(posterUrl);
+        }}
+        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        activeOpacity={0.7}
+      >
+        <Bookmark
+          color={isSaved ? Colors.primary : '#FFFFFF'}
+          size={13}
+          fill={isSaved ? Colors.primary : 'transparent'}
+        />
+      </TouchableOpacity>
+
+      {/* Bottom-Right: Quality Badge */}
+      {bestRes ? (
+        <View style={[styles.trQualityBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+          <Text style={[styles.trQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MovieDetailSheet — full-screen bottom-sheet style Netflix detail modal
+// ─────────────────────────────────────────────────────────────────────────────
+interface MovieDetailSheetProps {
+  visible: boolean;
+  movie: TamilMvMovieResult | null;
   streamingResId: string | null;
+  isSaved?: boolean;
+  onToggleSave?: () => void;
+  onClose: () => void;
   onMovieDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onTorrentDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onStream: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
   onCopy: (res: MovieResolutionItem) => void;
+  onOpenExternal: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
+  enqueuePosterFetch: (topicUrl: string, cb: (url: string | null) => void) => void;
+  backendUrl?: string;
 }
 
-const MovieCardItem = React.memo<MovieCardItemProps>(
-  ({ item, streamingResId, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
-    // Dynamic Resolution Dropdown State (Defaults to 1080p or 720p)
-    const [selectedResIndex, setSelectedResIndex] = useState(() =>
-      getInitialResolutionIndex(item.resolutions)
-    );
-    const [dropdownOpen, setDropdownOpen] = useState(false);
+const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
+  ({
+    visible,
+    movie,
+    streamingResId,
+    isSaved,
+    onToggleSave,
+    onClose,
+    onMovieDownload,
+    onTorrentDownload,
+    onStream,
+    onCopy,
+    onOpenExternal,
+    enqueuePosterFetch,
+    backendUrl,
+  }) => {
+    const insets = useSafeAreaInsets();
+    const { width: screenWidth } = useWindowDimensions();
+    const [selectedResIndex, setSelectedResIndex] = useState(0);
+    const [posterUrl, setPosterUrl] = useState<string | null>(null);
+    const [posterLoading, setPosterLoading] = useState(true);
+    const [resolutionsList, setResolutionsList] = useState<MovieResolutionItem[]>(() => movie?.resolutions || []);
+    const [resolutionsLoading, setResolutionsLoading] = useState(false);
+    const [qualityModalMode, setQualityModalMode] = useState<'play' | 'download' | null>(null);
+    const [playDestination, setPlayDestination] = useState<'internal' | 'browser'>('internal');
+    const [downloadDestination, setDownloadDestination] = useState<'internal' | 'torrent_app'>('internal');
+    const [copyingMagnet, setCopyingMagnet] = useState(false);
 
-    // Lazy poster thumbnail state
-    const [posterUrl, setPosterUrl] = useState<string | null>(() => {
-      // Check module-level cache first for instant render (no flicker on tab switch)
-      const cached = posterCache.get(item.topicUrl);
-      return cached !== undefined ? cached : null;
-    });
-    const [posterLoading, setPosterLoading] = useState(() => !posterCache.has(item.topicUrl));
+    const topicUrl = movie?.topicUrl || movie?.resolutions?.[0]?.topicUrl || '';
 
-    // Lazy-load poster in background (only if not already cached)
+    // Hardware back press handler for quality selection popup
     useEffect(() => {
-      if (posterCache.has(item.topicUrl)) return; // already fetched
-      let cancelled = false;
-      setPosterLoading(true);
-      tamilMvService.extractPosterFromTopic(item.topicUrl).then((url) => {
-        if (cancelled) return;
-        const result = url || null;
-        posterCache.set(item.topicUrl, result);
-        setPosterUrl(result);
+      if (!qualityModalMode) return;
+      const onBack = () => {
+        setQualityModalMode(null);
+        return true;
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+      return () => sub.remove();
+    }, [qualityModalMode]);
+
+    // Reset / fetch poster and resolutions whenever movie changes
+    useEffect(() => {
+      if (!movie) return;
+      setQualityModalMode(null);
+      setResolutionsList(movie.resolutions || []);
+      setSelectedResIndex(getInitialResolutionIndex(movie.resolutions));
+
+      // Check cache first
+      if (topicUrl && posterCache.has(topicUrl)) {
+        setPosterUrl(posterCache.get(topicUrl) ?? null);
         setPosterLoading(false);
-      });
-      return () => { cancelled = true; };
-    }, [item.topicUrl]);
-
-    // Keep default synced if resolutions change
-    useEffect(() => {
-      setSelectedResIndex(getInitialResolutionIndex(item.resolutions));
-    }, [item.resolutions]);
-
-    // Selected Resolution
-    const selectedRes = item.resolutions[selectedResIndex] || item.resolutions[0];
-    const isStreaming = selectedRes ? streamingResId === selectedRes.id : false;
-    const badge = getQualityBadgeConfig(selectedRes?.resolution || '1080p');
-
-    // Robust Title Sanitizer: Guarantees clean movie name even if scraped/cached data was irregular
-    const cleanMovieName = useMemo(() => {
-      const isBad = (name?: string) =>
-        !name ||
-        name.length < 2 ||
-        /^(languages?|rips?)|^[-–—\s\d.+]+(?:gb|mb)?/i.test(name.trim());
-
-      if (!isBad(item.movieTitle)) {
-        return item.movieTitle;
-      }
-
-      // Recover from topicUrl
-      const fallbackUrl = item.topicUrl || item.resolutions[0]?.topicUrl || '';
-      if (fallbackUrl) {
-        const parsed = tamilMvService.parseTitleMetadata(
-          item.resolutions[0]?.rawTitle || item.movieTitle || '',
-          fallbackUrl
-        );
-        if (!isBad(parsed.movieTitle)) {
-          return parsed.movieTitle;
+      } else {
+        setPosterLoading(Boolean(topicUrl));
+        setPosterUrl(null);
+        if (topicUrl) {
+          enqueuePosterFetch(topicUrl, (url) => {
+            setPosterUrl(url);
+            setPosterLoading(false);
+          });
         }
       }
 
+      // Fetch all resolutions directly from topic page in background
+      if (topicUrl) {
+        setResolutionsLoading(true);
+        tamilMvService
+          .extractResolutionsFromTopic(topicUrl)
+          .then((fetched) => {
+            setResolutionsLoading(false);
+            if (fetched && fetched.length > 0) {
+              setResolutionsList(fetched);
+              movie.resolutions = fetched;
+            }
+          })
+          .catch(() => {
+            setResolutionsLoading(false);
+          });
+      }
+    }, [topicUrl, movie]);
+
+    const resolutions = resolutionsList.length > 0 ? resolutionsList : (movie?.resolutions || []);
+    const selectedRes = resolutions[selectedResIndex] || resolutions[0];
+    const badge = getQualityBadgeConfig(selectedRes?.resolution || '');
+    const isStreaming = selectedRes ? streamingResId === selectedRes.id : false;
+
+    const cleanTitle = (() => {
+      if (!movie) return 'Tamil Movie';
+      const isBad = (name?: string) =>
+        !name ||
+        name.length < 2 ||
+        /^(languages?|rips?)|^[-–—\s\d.+]+(?:gb|mb)?/i.test(name.trim()) ||
+        /^(view\s+(?:the\s+)?topic|go\s+to\s+topic)/i.test(name.trim());
+
+      const sanitized = sanitizeMovieTitle(movie.movieTitle);
+      if (!isBad(sanitized)) return sanitized;
+
+      const fallbackUrl = movie.topicUrl || movie.resolutions?.[0]?.topicUrl || '';
+      if (fallbackUrl) {
+        const parsed = tamilMvService.parseTitleMetadata(
+          movie.resolutions?.[0]?.rawTitle || movie.movieTitle || '',
+          fallbackUrl
+        );
+        const parsedSanitized = sanitizeMovieTitle(parsed.movieTitle);
+        if (!isBad(parsedSanitized)) return parsedSanitized;
+      }
       return 'Tamil Movie';
-    }, [item.movieTitle, item.topicUrl, item.resolutions]);
+    })();
+
+    const handleQuickOpenBrowser = useCallback(() => {
+      const url = topicUrl || movie?.topicUrl || resolutions[selectedResIndex]?.topicUrl;
+      if (url) {
+        Linking.openURL(url).catch((err) => {
+          Alert.alert('Browser Error', 'Could not open movie page: ' + err.message);
+        });
+      } else {
+        Alert.alert('Notice', 'Movie page URL is not available.');
+      }
+    }, [topicUrl, movie, resolutions, selectedResIndex]);
+
+    const handleQuickCopyMagnet = useCallback(
+      async (targetResolution?: MovieResolutionItem) => {
+        const targetRes = targetResolution || selectedRes;
+        let magnet = targetRes?.magnetUrl;
+        const resTopic = targetRes?.topicUrl || topicUrl;
+
+        if (!magnet && resTopic) {
+          setCopyingMagnet(true);
+          try {
+            const extracted = await tamilMvService.extractMagnetFromTopic(
+              resTopic,
+              targetRes?.resolution
+            );
+            if (extracted.magnetUrl) {
+              magnet = extracted.magnetUrl;
+              if (targetRes) targetRes.magnetUrl = extracted.magnetUrl;
+            }
+          } catch {}
+          setCopyingMagnet(false);
+        }
+
+        if (magnet) {
+          try {
+            await Clipboard.setStringAsync(magnet);
+            Alert.alert(
+              'Magnet URL Copied! 📋',
+              `Magnet link for ${targetRes?.resolution || 'movie'} (${targetRes?.size || 'standard'}) copied to your clipboard.\n\nYou can paste it directly into your browser or torrent client.`
+            );
+          } catch {
+            await Share.share({ message: magnet, title: `${cleanTitle} Magnet Link` });
+          }
+        } else {
+          Alert.alert(
+            'Magnet Not Found',
+            'Could not extract direct magnet link from topic. Would you like to view the movie page in your browser?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Movie Page', onPress: handleQuickOpenBrowser },
+            ]
+          );
+        }
+      },
+      [selectedRes, topicUrl, cleanTitle, handleQuickOpenBrowser]
+    );
+
+    const handleStreamInBrowser = useCallback(
+      async (res: MovieResolutionItem) => {
+        let magnet = res.magnetUrl;
+        const resTopic = res.topicUrl || topicUrl;
+
+        if (!magnet && resTopic) {
+          try {
+            const extracted = await tamilMvService.extractMagnetFromTopic(resTopic, res.resolution);
+            if (extracted.magnetUrl) {
+              magnet = extracted.magnetUrl;
+              res.magnetUrl = extracted.magnetUrl;
+            }
+          } catch {}
+        }
+
+        if (magnet) {
+          // Extract 40-character hex or 32-character base32 infoHash from magnet link
+          const hashMatch = magnet.match(/urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i);
+          const infoHash = hashMatch ? hashMatch[1].toLowerCase() : null;
+          const baseUrl = (backendUrl || 'http://localhost:3000').replace(/\/+$/, '');
+
+          if (infoHash) {
+            // Pre-warm the torrent in backend engine so it immediately connects to peers
+            fetch(`${baseUrl}/api/stream/warmup?magnet=${encodeURIComponent(magnet)}`).catch(() => {});
+
+            // Direct stream URL in format: http://localhost:3000/api/stream/<infoHash>
+            const streamUrl = `${baseUrl}/api/stream/${infoHash}`;
+            Linking.openURL(streamUrl).catch((err) => {
+              Alert.alert('Browser Error', 'Could not open browser for streaming: ' + err.message);
+            });
+          } else {
+            const streamUrl = `${baseUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+            Linking.openURL(streamUrl).catch((err) => {
+              Alert.alert('Browser Error', 'Could not open browser for streaming: ' + err.message);
+            });
+          }
+        } else if (resTopic) {
+          Linking.openURL(resTopic);
+        } else {
+          Alert.alert('Notice', 'Stream link unavailable.');
+        }
+      },
+      [topicUrl, backendUrl]
+    );
+
+    const handleOpenBitTorrentApp = useCallback(
+      async (res: MovieResolutionItem) => {
+        let magnet = res.magnetUrl;
+        const resTopic = res.topicUrl || topicUrl;
+
+        if (!magnet && resTopic) {
+          try {
+            const extracted = await tamilMvService.extractMagnetFromTopic(resTopic, res.resolution);
+            if (extracted.magnetUrl) {
+              magnet = extracted.magnetUrl;
+              res.magnetUrl = extracted.magnetUrl;
+            }
+          } catch {}
+        }
+
+        if (magnet) {
+          try {
+            const canOpen = await Linking.canOpenURL(magnet).catch(() => false);
+            if (canOpen) {
+              await Linking.openURL(magnet);
+            } else {
+              await Linking.openURL(magnet);
+            }
+          } catch {
+            Alert.alert(
+              'BitTorrent App Required',
+              `Could not launch an external BitTorrent app on this device for ${res.resolution}.\n\nPlease install a client like Flud, µTorrent, or LibreTorrent, or copy the magnet link to your clipboard.`,
+              [
+                {
+                  text: 'Copy Magnet',
+                  onPress: async () => {
+                    await Clipboard.setStringAsync(magnet!);
+                    Alert.alert('Copied', 'Magnet URL copied to clipboard!');
+                  },
+                },
+                {
+                  text: 'Get Flud App',
+                  onPress: () => {
+                    Linking.openURL('market://details?id=com.delphicoder.flud').catch(() => {
+                      Linking.openURL('https://play.google.com/store/apps/details?id=com.delphicoder.flud');
+                    });
+                  },
+                },
+                { text: 'Cancel', style: 'cancel' },
+              ]
+            );
+          }
+        } else {
+          Alert.alert('Notice', 'Magnet link unavailable for BitTorrent app.');
+        }
+      },
+      [topicUrl]
+    );
+
+    const HERO_HEIGHT = Math.round(screenWidth * 1.18);
+
+    if (!visible || !movie) return null;
 
     return (
-      <View style={styles.card}>
-        {/* Card Layout: Poster Left + Content Right */}
-        <View style={styles.cardInner}>
-          {/* Movie Poster Thumbnail */}
-          <View style={styles.posterWrap}>
-            {posterUrl ? (
-              <Image
-                source={{ uri: posterUrl }}
-                style={styles.posterImage}
-                resizeMode="cover"
-              />
-            ) : posterLoading ? (
-              /* Shimmer placeholder while loading */
-              <LinearGradient
-                colors={['#1C1C1E', '#2C2C2E', '#1C1C1E']}
-                style={styles.posterShimmer}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Film color="#3A3A3C" size={28} strokeWidth={1.5} />
-              </LinearGradient>
-            ) : (
-              /* No poster found — show gradient fallback with icon */
-              <LinearGradient
-                colors={[Colors.primary, '#8A0E1C']}
-                style={styles.posterShimmer}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Film color="rgba(255,255,255,0.5)" size={28} strokeWidth={1.5} />
-              </LinearGradient>
-            )}
-            {/* Language badge on poster */}
-            {item.language ? (
-              <View style={styles.posterLangBadge}>
-                <Text style={styles.posterLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
-              </View>
-            ) : null}
-          </View>
+      <Modal
+        visible={visible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={onClose}
+        statusBarTranslucent
+      >
+        <View style={styles.dsContainer}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+            showsVerticalScrollIndicator={false}
+            bounces={true}
+          >
+            {/* ── Hero Section ── */}
+            <View style={[styles.dsHero, { height: HERO_HEIGHT }]}>
+              {/* Background poster */}
+              {posterUrl ? (
+                <Image
+                  source={{ uri: posterUrl }}
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                  onError={() => setPosterUrl(null)}
+                />
+              ) : posterLoading ? (
+                <LinearGradient colors={['#181920', '#252834', '#181920']} style={StyleSheet.absoluteFill} />
+              ) : (
+                <LinearGradient colors={[Colors.primary, '#660814']} style={StyleSheet.absoluteFill} />
+              )}
 
-          {/* Right Content */}
-          <View style={styles.cardContent}>
-            {/* Card Header */}
-            <View style={styles.cardHeader}>
-              <View style={styles.cardTitleGroup}>
-                <Text style={styles.movieTitle} numberOfLines={2}>
-                  {cleanMovieName}
-                </Text>
-                <View style={styles.metaBadgeRow}>
-                  {item.year ? (
-                    <View style={styles.yearChip}>
-                      <Text style={styles.yearChipText}>{item.year}</Text>
+              {/* Dark gradient from poster → obsidian black */}
+              <LinearGradient
+                colors={['transparent', 'rgba(9,9,12,0.25)', 'rgba(9,9,12,0.85)', '#09090C']}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0.25 }}
+                end={{ x: 0, y: 1 }}
+              />
+
+              {/* Bookmark button in header */}
+              <TouchableOpacity
+                style={[styles.dsHeaderBookmarkBtn, { top: insets.top + 10 }]}
+                onPress={onToggleSave}
+                activeOpacity={0.8}
+              >
+                <Bookmark
+                  color={isSaved ? Colors.primary : '#FFFFFF'}
+                  size={19}
+                  fill={isSaved ? Colors.primary : 'transparent'}
+                />
+              </TouchableOpacity>
+
+              {/* Close button */}
+              <TouchableOpacity
+                style={[styles.dsCloseBtn, { top: insets.top + 10 }]}
+                onPress={onClose}
+                activeOpacity={0.8}
+              >
+                <X color="#FFFFFF" size={20} strokeWidth={2.5} />
+              </TouchableOpacity>
+
+              {/* Hero content */}
+              <View style={styles.dsHeroContent}>
+                {/* Title */}
+                <Text style={styles.dsHeroTitle} numberOfLines={3}>{cleanTitle}</Text>
+
+                {/* Meta badges row */}
+                <View style={styles.dsBadgeRow}>
+                  {movie.year ? (
+                    <View style={styles.dsMetaBadge}>
+                      <Text style={styles.dsMetaBadgeText}>{movie.year}</Text>
                     </View>
                   ) : null}
-                  {selectedRes ? (
-                    <View style={[styles.selectedQualityHeaderBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                      <Text style={[styles.selectedQualityHeaderBadgeText, { color: badge.text }]}>
-                        {selectedRes.resolution}
+                  {movie.language ? (
+                    <View style={[styles.dsMetaBadge, { borderColor: 'rgba(250,36,60,0.4)', backgroundColor: 'rgba(250,36,60,0.12)' }]}>
+                      <Text style={[styles.dsMetaBadgeText, { color: Colors.primary }]}>
+                        {movie.language.toUpperCase()}
                       </Text>
                     </View>
                   ) : null}
-                  <View style={styles.resCountChip}>
-                    <Text style={styles.qualityCount}>
-                      {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
+                  <View style={styles.dsMetaBadge}>
+                    <Text style={styles.dsMetaBadgeText}>
+                      {resolutions.length} {resolutions.length === 1 ? 'Quality' : 'Qualities'}
                     </Text>
                   </View>
                 </View>
-              </View>
 
-              <TouchableOpacity
-                style={styles.openTopicBtn}
-                onPress={() => Linking.openURL(item.topicUrl)}
-                activeOpacity={0.7}
-                accessibilityLabel="Open Forum Post"
-              >
-                <ExternalLink color="#4B5563" size={13.5} strokeWidth={2.4} />
-              </TouchableOpacity>
-            </View>
+                {/* Primary CTA Buttons — ONLY TWO BUTTONS: Play and Download */}
+                <View style={styles.dsCtaRow}>
+                  {/* Play button */}
+                  <TouchableOpacity
+                    style={styles.dsPlayBtn}
+                    activeOpacity={0.85}
+                    onPress={() => setQualityModalMode('play')}
+                  >
+                    <LinearGradient
+                      colors={[Colors.primary, '#B51527']}
+                      style={styles.dsPlayGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                    >
+                      {streamingResId ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Play color="#FFFFFF" size={19} fill="#FFFFFF" />
+                      )}
+                      <Text style={styles.dsPlayBtnText}>Play</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
 
-            {/* Dynamic Resolution Dropdown Selector */}
-            {selectedRes ? (
-              <View style={styles.dropdownContainer}>
+                  {/* Download button */}
+                  <TouchableOpacity
+                    style={styles.dsDownloadBtn}
+                    activeOpacity={0.85}
+                    onPress={() => setQualityModalMode('download')}
+                  >
+                    <Download color="#FFFFFF" size={19} strokeWidth={2.2} />
+                    <Text style={styles.dsDownloadBtnText}>Download</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Secondary Action: My List toggle */}
                 <TouchableOpacity
-                  style={[styles.dropdownTrigger, dropdownOpen && styles.dropdownTriggerOpen]}
-                  onPress={() => setDropdownOpen((prev) => !prev)}
+                  style={[styles.dsMyListBtn, isSaved && styles.dsMyListBtnActive]}
                   activeOpacity={0.8}
+                  onPress={onToggleSave}
                 >
-                  <View style={styles.dropdownTriggerLeft}>
-                    <View style={[styles.qualityPill, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                      <Text style={[styles.qualityPillText, { color: badge.text }]}>
-                        {selectedRes.resolution}
-                      </Text>
-                    </View>
-                    <View style={styles.dropdownSpecs}>
-                      {selectedRes.size ? <Text style={styles.dropdownSizeText}>{selectedRes.size}</Text> : null}
-                      {selectedRes.audio ? (
-                        <Text style={styles.dropdownAudioText} numberOfLines={1}>
-                          {selectedRes.audio}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.dropdownTriggerRight}>
-                    <Text style={styles.dropdownActionText}>
-                      {item.resolutions.length > 1 ? (dropdownOpen ? 'Close' : 'Change Quality') : 'Quality'}
-                    </Text>
-                    {item.resolutions.length > 1 ? (
-                      <ChevronDown
-                        color="#9CA3AF"
-                        size={15}
-                        style={{ transform: [{ rotate: dropdownOpen ? '180deg' : '0deg' }] }}
-                      />
-                    ) : null}
-                  </View>
+                  {isSaved ? (
+                    <BookmarkCheck color={Colors.primary} size={17} fill={Colors.primary} />
+                  ) : (
+                    <Bookmark color="#FFFFFF" size={17} />
+                  )}
+                  <Text style={[styles.dsMyListBtnText, isSaved && { color: Colors.primary }]}>
+                    {isSaved ? 'In My List' : 'Add to My List'}
+                  </Text>
                 </TouchableOpacity>
 
-                {/* Dropdown Options Menu */}
-                {dropdownOpen && item.resolutions.length > 1 ? (
-                  <View style={styles.dropdownMenu}>
-                    {item.resolutions.map((resOption, idx) => {
-                      const isSelected = idx === selectedResIndex;
-                      const optBadge = getQualityBadgeConfig(resOption.resolution);
+                {/* Quick Actions: Copy Magnet URL & Movie Page in Browser */}
+                <View style={styles.dsQuickActionsRow}>
+                  <TouchableOpacity
+                    style={styles.dsQuickActionBtn}
+                    activeOpacity={0.8}
+                    onPress={() => handleQuickCopyMagnet()}
+                  >
+                    {copyingMagnet ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Copy color="#FFFFFF" size={15} />
+                    )}
+                    <Text style={styles.dsQuickActionBtnText}>Copy Magnet</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dsQuickActionBtn}
+                    activeOpacity={0.8}
+                    onPress={handleQuickOpenBrowser}
+                  >
+                    <Globe color="#FFFFFF" size={15} />
+                    <Text style={styles.dsQuickActionBtnText}>Movie Page</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* ── Movie Info Section ── */}
+            <View style={styles.dsInfoSection}>
+              {/* Release Rip Title */}
+              {selectedRes?.rawTitle ? (
+                <View style={styles.dsSectionBlock}>
+                  <Text style={styles.dsSectionTitle}>Rip / Release Name</Text>
+                  <View style={styles.dsRawTitleCard}>
+                    <Film color="#8E8E93" size={14} strokeWidth={1.8} />
+                    <Text style={styles.dsRawTitleText} numberOfLines={3}>
+                      {selectedRes.rawTitle}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Streaming info */}
+              <View style={styles.dsStreamingInfo}>
+                <View style={styles.dsStreamingDot} />
+                <Text style={styles.dsStreamingText}>Streaming via VFlix Engine • Direct P2P</Text>
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Quality & File Size Selection Popup for Play / Download */}
+          <Modal
+            visible={qualityModalMode !== null}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setQualityModalMode(null)}
+          >
+            <View style={styles.qmOverlay}>
+              <TouchableOpacity
+                style={StyleSheet.absoluteFill}
+                activeOpacity={1}
+                onPress={() => setQualityModalMode(null)}
+              />
+
+              <View style={[styles.qmSheet, { paddingBottom: Math.max(insets.bottom + 16, 28) }]}>
+                {/* Handle */}
+                <View style={styles.qmHandle} />
+
+                {/* Header */}
+                <View style={styles.qmHeader}>
+                  <View style={styles.qmHeaderLeft}>
+                    <View
+                      style={[
+                        styles.qmIconBadge,
+                        qualityModalMode === 'play'
+                          ? { backgroundColor: 'rgba(250, 36, 60, 0.15)' }
+                          : { backgroundColor: 'rgba(52, 199, 89, 0.15)' },
+                      ]}
+                    >
+                      {qualityModalMode === 'play' ? (
+                        playDestination === 'internal' ? (
+                          <Play color={Colors.primary} size={18} fill={Colors.primary} />
+                        ) : (
+                          <Globe color={Colors.primary} size={18} />
+                        )
+                      ) : downloadDestination === 'internal' ? (
+                        <Download color="#30D158" size={18} strokeWidth={2.2} />
+                      ) : (
+                        <ExternalLink color="#30D158" size={18} strokeWidth={2.2} />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.qmTitle}>
+                        {qualityModalMode === 'play'
+                          ? playDestination === 'internal'
+                            ? 'Select Playback Quality'
+                            : 'Watch in Web Browser'
+                          : downloadDestination === 'internal'
+                          ? 'Select Download Quality'
+                          : 'Open in BitTorrent App'}
+                      </Text>
+                      <Text style={styles.qmSubtitle} numberOfLines={1}>
+                        {qualityModalMode === 'play'
+                          ? playDestination === 'internal'
+                            ? `In-App VFlix Player • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
+                            : `Instant browser stream • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
+                          : downloadDestination === 'internal'
+                          ? `Internal storage • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
+                          : `Redirect to external torrent app • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.qmCloseBtn}
+                    onPress={() => setQualityModalMode(null)}
+                    activeOpacity={0.7}
+                  >
+                    <X color="#8E8E93" size={18} strokeWidth={2.2} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Destination Selector Tabs */}
+                <View style={styles.qmDestinationSelector}>
+                  {qualityModalMode === 'play' ? (
+                    <>
+                      <TouchableOpacity
+                        style={[
+                          styles.qmDestinationTab,
+                          playDestination === 'internal' && styles.qmDestinationTabActivePlay,
+                        ]}
+                        onPress={() => setPlayDestination('internal')}
+                        activeOpacity={0.8}
+                      >
+                        <Play
+                          color={playDestination === 'internal' ? '#FFFFFF' : '#8E8E93'}
+                          size={13}
+                          fill={playDestination === 'internal' ? '#FFFFFF' : 'none'}
+                        />
+                        <Text
+                          style={[
+                            styles.qmDestinationTabText,
+                            playDestination === 'internal' && styles.qmDestinationTabTextActive,
+                          ]}
+                        >
+                          Internal Player
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.qmDestinationTab,
+                          playDestination === 'browser' && styles.qmDestinationTabActivePlay,
+                        ]}
+                        onPress={() => setPlayDestination('browser')}
+                        activeOpacity={0.8}
+                      >
+                        <Globe
+                          color={playDestination === 'browser' ? '#FFFFFF' : '#8E8E93'}
+                          size={13}
+                        />
+                        <Text
+                          style={[
+                            styles.qmDestinationTabText,
+                            playDestination === 'browser' && styles.qmDestinationTabTextActive,
+                          ]}
+                        >
+                          Watch in Browser
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={[
+                          styles.qmDestinationTab,
+                          downloadDestination === 'internal' && styles.qmDestinationTabActiveDownload,
+                        ]}
+                        onPress={() => setDownloadDestination('internal')}
+                        activeOpacity={0.8}
+                      >
+                        <Download
+                          color={downloadDestination === 'internal' ? '#FFFFFF' : '#8E8E93'}
+                          size={13}
+                        />
+                        <Text
+                          style={[
+                            styles.qmDestinationTabText,
+                            downloadDestination === 'internal' && styles.qmDestinationTabTextActive,
+                          ]}
+                        >
+                          In-App Download
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.qmDestinationTab,
+                          downloadDestination === 'torrent_app' && styles.qmDestinationTabActiveDownload,
+                        ]}
+                        onPress={() => setDownloadDestination('torrent_app')}
+                        activeOpacity={0.8}
+                      >
+                        <ExternalLink
+                          color={downloadDestination === 'torrent_app' ? '#FFFFFF' : '#8E8E93'}
+                          size={13}
+                        />
+                        <Text
+                          style={[
+                            styles.qmDestinationTabText,
+                            downloadDestination === 'torrent_app' && styles.qmDestinationTabTextActive,
+                          ]}
+                        >
+                          BitTorrent App
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+
+                {/* Quality Options */}
+                {resolutionsLoading && resolutions.length === 0 ? (
+                  <View style={styles.qmLoadingContainer}>
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <Text style={styles.qmLoadingText}>Fetching qualities & sizes...</Text>
+                  </View>
+                ) : (
+                  <ScrollView
+                    style={styles.qmScroll}
+                    contentContainerStyle={styles.qmScrollContent}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {resolutions.map((res, idx) => {
+                      const qb = getQualityBadgeConfig(res.resolution);
+                      const isThisStreaming = streamingResId === res.id;
+
                       return (
                         <TouchableOpacity
-                          key={resOption.id || `opt-${idx}`}
-                          style={[styles.dropdownOption, isSelected && styles.dropdownOptionActive]}
+                          key={res.id || `qm-res-${idx}`}
+                          style={styles.qmOptionCard}
                           onPress={() => {
+                            const mode = qualityModalMode;
+                            setQualityModalMode(null);
                             setSelectedResIndex(idx);
-                            setDropdownOpen(false);
+                            if (mode === 'play') {
+                              if (playDestination === 'browser') {
+                                handleStreamInBrowser(res);
+                              } else {
+                                onStream(res, movie);
+                              }
+                            } else if (mode === 'download') {
+                              if (downloadDestination === 'torrent_app') {
+                                handleOpenBitTorrentApp(res);
+                              } else {
+                                onMovieDownload(res, movie);
+                              }
+                            }
                           }}
-                          activeOpacity={0.7}
+                          activeOpacity={0.75}
                         >
-                          <View style={styles.dropdownOptionLeft}>
-                            <View style={[styles.qualityPill, { backgroundColor: optBadge.bg, borderColor: optBadge.border }]}>
-                              <Text style={[styles.qualityPillText, { color: optBadge.text }]}>
-                                {resOption.resolution}
+                          {/* Quality Badge & Details */}
+                          <View style={styles.qmCardLeft}>
+                            <View style={[styles.qmQualityBadge, { backgroundColor: qb.bg, borderColor: qb.border }]}>
+                              <Text style={[styles.qmQualityBadgeText, { color: qb.text }]}>
+                                {res.resolution}
                               </Text>
                             </View>
-                            {resOption.size ? (
-                              <Text style={styles.dropdownOptionSize}>{resOption.size}</Text>
-                            ) : null}
-                            {resOption.audio ? (
-                              <Text style={styles.dropdownOptionAudio} numberOfLines={1}>
-                                {resOption.audio}
+                            {(res.codec || res.audio || (res.rawTitle && res.rawTitle !== res.resolution)) ? (
+                              <Text style={styles.qmCardMeta} numberOfLines={1}>
+                                {[res.codec, res.audio].filter(Boolean).join(' • ') || res.rawTitle}
                               </Text>
                             ) : null}
                           </View>
-                          {isSelected ? <Check color="#34C759" size={15} strokeWidth={2.5} /> : null}
+
+                          {/* Right: File Size & Action Icon */}
+                          <View style={styles.qmCardRight}>
+                            <View style={styles.qmSizeBadge}>
+                              <HardDrive color="#30D158" size={12.5} strokeWidth={2.4} />
+                              <Text style={styles.qmSizeBadgeText}>{res.size || 'Standard'}</Text>
+                            </View>
+
+                            <View
+                              style={[
+                                styles.qmActionCircle,
+                                qualityModalMode === 'play'
+                                  ? { backgroundColor: 'rgba(250, 36, 60, 0.15)', borderColor: 'rgba(250, 36, 60, 0.35)' }
+                                  : { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: 'rgba(52, 199, 89, 0.35)' },
+                              ]}
+                            >
+                              {isThisStreaming ? (
+                                <ActivityIndicator size="small" color={Colors.primary} />
+                              ) : qualityModalMode === 'play' ? (
+                                playDestination === 'internal' ? (
+                                  <Play color={Colors.primary} size={13} fill={Colors.primary} />
+                                ) : (
+                                  <Globe color={Colors.primary} size={13} />
+                                )
+                              ) : downloadDestination === 'internal' ? (
+                                <Download color="#30D158" size={13} strokeWidth={2.2} />
+                              ) : (
+                                <ExternalLink color="#30D158" size={13} strokeWidth={2.2} />
+                              )}
+                            </View>
+                          </View>
                         </TouchableOpacity>
                       );
                     })}
-                  </View>
-                ) : null}
+                  </ScrollView>
+                )}
               </View>
-            ) : null}
-
-            {/* 4 Action Buttons */}
-            {selectedRes ? (
-              <View style={styles.cardActionsWrapper}>
-                {/* Line 1: Download .torrent & Open in Torrent App */}
-                <View style={styles.actionLineRow}>
-                  <TouchableOpacity
-                    onPress={() => onMovieDownload(selectedRes, item)}
-                    activeOpacity={0.75}
-                    style={[styles.actionBtnWithText, styles.btnDownloadLight]}
-                    accessibilityLabel="Download .torrent file"
-                  >
-                    <Download color="#059669" size={14} strokeWidth={2.4} />
-                    <Text style={[styles.actionBtnText, { color: '#047857' }]}>Download .torrent</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => onTorrentDownload(selectedRes, item)}
-                    activeOpacity={0.75}
-                    style={[styles.actionBtnWithText, styles.btnTorrentRedirectLight]}
-                    accessibilityLabel="Redirect to Torrent App"
-                  >
-                    <ExternalLink color="#EA580C" size={14} strokeWidth={2.4} />
-                    <Text style={[styles.actionBtnText, { color: '#C2410C' }]}>Torrent App</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Line 2: Copy Magnet & Play Stream */}
-                <View style={styles.actionLineRow}>
-                  <TouchableOpacity
-                    onPress={() => onCopy(selectedRes)}
-                    activeOpacity={0.75}
-                    style={[styles.actionBtnWithText, styles.btnCopyLight]}
-                    accessibilityLabel="Copy Magnet Link"
-                  >
-                    <Copy color="#4F46E5" size={14} strokeWidth={2.4} />
-                    <Text style={[styles.actionBtnText, { color: '#4338CA' }]}>Copy Magnet</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => onStream(selectedRes, item)}
-                    activeOpacity={0.75}
-                    style={[styles.actionBtnWithText, styles.btnPlayLight]}
-                    accessibilityLabel="Play Stream"
-                  >
-                    {isStreaming ? (
-                      <ActivityIndicator size="small" color={Colors.primary} />
-                    ) : (
-                      <Play color={Colors.primary} size={13} fill={Colors.primary} strokeWidth={1} />
-                    )}
-                    <Text style={[styles.actionBtnText, { color: Colors.primary }]} numberOfLines={1}>
-                      Play {selectedRes ? selectedRes.resolution : 'Stream'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : null}
-          </View>
+            </View>
+          </Modal>
         </View>
-      </View>
+      </Modal>
     );
   }
 );
 
+
 export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigateToTab }) => {
   const insets = useSafeAreaInsets();
-  const { startDownload, backendUrl } = useDownloads();
+  const { startDownload, backendUrl, testPing } = useDownloads();
 
   const [query, setQuery] = useState(globalCachedFinderState.query);
   const [loading, setLoading] = useState(false);
@@ -434,15 +1318,75 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const [showScrollTop, setShowScrollTop] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  const visibleResults = useMemo(() => {
-    return results.slice(0, displayedCount);
-  }, [results, displayedCount]);
+  const isHomeFeed = !searchedQuery || /^recent/i.test(searchedQuery);
+
+  // Multi-Language Filter State (default: ['Tamil'])
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Tamil']);
+
+  const handleToggleLanguage = useCallback((lang: string) => {
+    if (lang === 'All') {
+      setSelectedLanguages(['All']);
+      return;
+    }
+
+    setSelectedLanguages((prev) => {
+      const withoutAll = prev.filter((l) => l !== 'All');
+      if (withoutAll.includes(lang)) {
+        const next = withoutAll.filter((l) => l !== lang);
+        return next.length === 0 ? ['All'] : next;
+      } else {
+        return [...withoutAll, lang];
+      }
+    });
+  }, []);
+
+  const isLangActive = useCallback(
+    (lang: string) => {
+      if (lang === 'All') return selectedLanguages.includes('All') || selectedLanguages.length === 0;
+      return selectedLanguages.includes(lang);
+    },
+    [selectedLanguages]
+  );
+
+  const filteredResults = useMemo(() => {
+    if (selectedLanguages.length === 0 || selectedLanguages.includes('All')) {
+      return results;
+    }
+
+    return results.filter((m) => {
+      const movieLang = (m.language || '').toLowerCase().trim();
+      const titleAndRaw = `${m.movieTitle} ${m.resolutions?.[0]?.rawTitle || ''} ${m.topicUrl || ''}`.toLowerCase();
+
+      return selectedLanguages.some((lang) => {
+        const l = lang.toLowerCase();
+        if (movieLang === l) return true;
+        const regex = new RegExp(`\\b${l}\\b`, 'i');
+        return regex.test(titleAndRaw);
+      });
+    });
+  }, [results, selectedLanguages]);
+
+  const topReleases = useMemo(() => {
+    if (!isHomeFeed || filteredResults.length === 0) return [];
+    const count = filteredResults.length > 10 ? 8 : Math.min(filteredResults.length, 5);
+    return filteredResults.slice(0, count);
+  }, [filteredResults, isHomeFeed]);
+
+  const recentlyAdded = useMemo(() => {
+    if (!isHomeFeed) return filteredResults;
+    const remaining = filteredResults.slice(topReleases.length);
+    return remaining.length > 0 ? remaining : filteredResults;
+  }, [filteredResults, topReleases, isHomeFeed]);
+
+  const visibleRecentlyAdded = useMemo(() => {
+    return recentlyAdded.slice(0, displayedCount);
+  }, [recentlyAdded, displayedCount]);
 
   const handleLoadMore = useCallback(() => {
-    if (displayedCount < results.length) {
-      setDisplayedCount((prev) => Math.min(prev + BATCH_LOAD_STEP, results.length));
+    if (displayedCount < recentlyAdded.length) {
+      setDisplayedCount((prev) => Math.min(prev + BATCH_LOAD_STEP, recentlyAdded.length));
     }
-  }, [displayedCount, results.length]);
+  }, [displayedCount, recentlyAdded.length]);
 
   const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
@@ -456,27 +1400,125 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   // In-App Video Streaming Player State
   const [streamPlayerVisible, setStreamPlayerVisible] = useState(false);
   const [activeStreamItem, setActiveStreamItem] = useState<DownloadItem | null>(null);
+  const [streamPlayerInitialPos, setStreamPlayerInitialPos] = useState<number>(0);
+  const [streamPlayerPosterUrl, setStreamPlayerPosterUrl] = useState<string | undefined>(undefined);
   const [streamingResId, setStreamingResId] = useState<string | null>(null);
   const [streamModalVisible, setStreamModalVisible] = useState(false);
   const [streamModalData, setStreamModalData] = useState<StreamModalData | null>(null);
 
-  // Hardware Back Button handler for Stream Options Modal
-  useEffect(() => {
-    if (!streamModalVisible) return;
+  // Continue Watching & My List State
+  const [continueWatchingList, setContinueWatchingList] = useState<ContinueWatchingItem[]>([]);
+  const [savedMovieIds, setSavedMovieIds] = useState<Set<string>>(new Set());
 
-    const onBackPress = () => {
-      setStreamModalVisible(false);
-      return true;
+  // Subscribe to Continue Watching and My List store changes
+  useEffect(() => {
+    const unsubCW = continueWatchingService.subscribe((items) => {
+      setContinueWatchingList(items);
+    });
+
+    const unsubMyList = myListService.subscribe((items) => {
+      const set = new Set<string>();
+      items.forEach((item) => {
+        if (item.id) set.add(item.id.toLowerCase());
+        if (item.topicUrl) set.add(item.topicUrl.toLowerCase());
+        if (item.movieTitle) set.add(item.movieTitle.toLowerCase());
+      });
+      setSavedMovieIds(set);
+    });
+
+    return () => {
+      unsubCW();
+      unsubMyList();
+    };
+  }, []);
+
+  const isMovieSaved = useCallback(
+    (movie: TamilMvMovieResult): boolean => {
+      const id = (movie.id || '').toLowerCase();
+      const topic = (movie.topicUrl || '').toLowerCase();
+      const title = (movie.movieTitle || '').toLowerCase();
+      return (
+        (!!id && savedMovieIds.has(id)) ||
+        (!!topic && savedMovieIds.has(topic)) ||
+        (!!title && savedMovieIds.has(title)) ||
+        myListService.isSaved(movie.id || movie.topicUrl || movie.movieTitle)
+      );
+    },
+    [savedMovieIds]
+  );
+
+  const handleToggleSaveMovie = useCallback(
+    (movie: TamilMvMovieResult, posterUrl?: string | null) => {
+      const resolvedPoster =
+        posterUrl ||
+        (movie.topicUrl ? posterCache.get(movie.topicUrl) : null) ||
+        (movie.resolutions?.[0]?.topicUrl ? posterCache.get(movie.resolutions[0].topicUrl) : null) ||
+        null;
+      myListService.toggle(movie, resolvedPoster);
+    },
+    []
+  );
+
+  const handleResumeContinueWatching = useCallback((cwItem: ContinueWatchingItem) => {
+    const resumeDownloadItem: DownloadItem = {
+      id: cwItem.id,
+      title: cwItem.movieTitle,
+      fileName: `${cwItem.movieTitle}.mp4`,
+      fileUri: cwItem.fileUri || '',
+      url: cwItem.streamUrl || '',
+      status: 'completed',
+      progress: cwItem.progress,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      speed: 'VFlix Resume',
+      isTorrent: false,
+      createdAt: Date.now(),
     };
 
-    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => sub.remove();
-  }, [streamModalVisible]);
+    setActiveStreamItem(resumeDownloadItem);
+    setStreamPlayerInitialPos(cwItem.currentTime);
+    setStreamPlayerPosterUrl(cwItem.posterUrl || undefined);
+    setStreamPlayerVisible(true);
+  }, []);
+
+  // Netflix Detail Modal State
+  const [detailMovie, setDetailMovie] = useState<TamilMvMovieResult | null>(null);
+  const [detailVisible, setDetailVisible] = useState(false);
 
   // Configurable Mirror URL State
   const [currentBaseUrl, setCurrentBaseUrl] = useState(tamilMvService.getBaseUrl());
   const [urlModalVisible, setUrlModalVisible] = useState(false);
   const [customUrlInput, setCustomUrlInput] = useState(currentBaseUrl);
+
+  const handleClearSearchRef = useRef<() => void>(() => {});
+
+  // Hardware Back Button handler for Modals & Search Mode
+  useEffect(() => {
+    if (!streamModalVisible && !detailVisible && !urlModalVisible && isHomeFeed) return;
+
+    const onBackPress = () => {
+      if (streamModalVisible) {
+        setStreamModalVisible(false);
+        return true;
+      }
+      if (detailVisible) {
+        setDetailVisible(false);
+        return true;
+      }
+      if (urlModalVisible) {
+        setUrlModalVisible(false);
+        return true;
+      }
+      if (!isHomeFeed) {
+        handleClearSearchRef.current();
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [streamModalVisible, detailVisible, urlModalVisible, isHomeFeed]);
 
   // Scraper WebView State
   const [webViewSearchUrl, setWebViewSearchUrl] = useState('');
@@ -484,28 +1526,114 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const searchTimeoutRef = useRef<any>(null);
   const activeSearchTermRef = useRef(globalCachedFinderState.searchedQuery || 'Recent Upload');
 
-  // Quick filter suggestions
-  const suggestions = [
-    'Recent Upload',
-    '2026',
-    '2025',
-    '2024',
-    'Leo',
-    'Amaran',
-    'GOAT',
-    'Modha Rathri',
-    'Vettaiyan',
-    'Lover',
-  ];
+  // Poster WebView Queue & Direct HTTP Fetch — extracts poster images with fast direct fetch & WebView fallback
+  const [posterWebViewUrl, setPosterWebViewUrl] = useState('');
+  const posterQueueRef = useRef<string[]>([]);
+  const posterProcessingRef = useRef(false);
+  const posterTimeoutRef = useRef<any>(null);
+  const activeFetchesRef = useRef<Set<string>>(new Set());
+  // Callback registry: topicUrl → resolve function so MovieCardItem can be notified
+  const posterCallbacksRef = useRef<Map<string, (url: string | null) => void>>(new Map());
+
+  const processPosterQueue = useCallback(() => {
+    if (posterProcessingRef.current) return;
+    if (posterQueueRef.current.length === 0) {
+      setPosterWebViewUrl('');
+      return;
+    }
+    const nextUrl = posterQueueRef.current[0];
+    posterProcessingRef.current = true;
+    setPosterWebViewUrl(nextUrl);
+
+    // Watchdog timeout: if headless WebView gets stuck, advance to prevent blocking
+    if (posterTimeoutRef.current) clearTimeout(posterTimeoutRef.current);
+    posterTimeoutRef.current = setTimeout(() => {
+      posterProcessingRef.current = false;
+      const timedOutUrl = posterQueueRef.current.shift();
+      if (timedOutUrl) {
+        posterCache.set(timedOutUrl, null);
+        const cb = posterCallbacksRef.current.get(timedOutUrl);
+        if (cb) {
+          cb(null);
+          posterCallbacksRef.current.delete(timedOutUrl);
+        }
+      }
+      if (posterQueueRef.current.length > 0) {
+        posterProcessingRef.current = true;
+        setPosterWebViewUrl(posterQueueRef.current[0]);
+      } else {
+        setPosterWebViewUrl('');
+      }
+    }, 7000);
+  }, []);
+
+  const enqueuePosterFetch = useCallback(
+    (topicUrl: string, callback: (url: string | null) => void) => {
+      if (!topicUrl) {
+        callback(null);
+        return;
+      }
+      if (posterCache.has(topicUrl)) {
+        callback(posterCache.get(topicUrl) ?? null);
+        return;
+      }
+
+      // Chain callbacks if already waiting for this URL
+      const existing = posterCallbacksRef.current.get(topicUrl);
+      posterCallbacksRef.current.set(topicUrl, (url) => {
+        if (existing) existing(url);
+        callback(url);
+      });
+
+      if (activeFetchesRef.current.has(topicUrl)) return;
+      activeFetchesRef.current.add(topicUrl);
+
+      // Fast direct HTTP fetch first (~200ms)
+      tamilMvService
+        .extractPosterFromTopic(topicUrl)
+        .then((posterUrl) => {
+          activeFetchesRef.current.delete(topicUrl);
+          if (posterUrl) {
+            posterCache.set(topicUrl, posterUrl);
+            const cb = posterCallbacksRef.current.get(topicUrl);
+            if (cb) {
+              cb(posterUrl);
+              posterCallbacksRef.current.delete(topicUrl);
+            }
+          } else {
+            // Direct fetch didn't find an image, try headless WebView fallback
+            if (!posterQueueRef.current.includes(topicUrl)) {
+              posterQueueRef.current.push(topicUrl);
+              processPosterQueue();
+            }
+          }
+        })
+        .catch(() => {
+          activeFetchesRef.current.delete(topicUrl);
+          if (!posterQueueRef.current.includes(topicUrl)) {
+            posterQueueRef.current.push(topicUrl);
+            processPosterQueue();
+          }
+        });
+    },
+    [processPosterQueue]
+  );
 
   // Restore persisted state from storage on first mount or auto-fetch Recent Upload
   useEffect(() => {
     if (globalCachedFinderState.results.length > 0) {
-      setQuery(globalCachedFinderState.query);
-      setSearchedQuery(globalCachedFinderState.searchedQuery);
-      setResults(globalCachedFinderState.results);
-      setHasSearched(globalCachedFinderState.hasSearched);
-      return;
+      const isHome = !globalCachedFinderState.searchedQuery || /^recent/i.test(globalCachedFinderState.searchedQuery);
+      if (isHome) {
+        const sanitizedMem = globalCachedFinderState.results.map((r) => ({
+          ...r,
+          movieTitle: sanitizeMovieTitle(r.movieTitle),
+        }));
+        setQuery(globalCachedFinderState.query);
+        setSearchedQuery(globalCachedFinderState.searchedQuery);
+        setResults(sanitizedMem);
+        setHasSearched(globalCachedFinderState.hasSearched);
+        return;
+      }
     }
 
     if (FINDER_CACHE_FILE) {
@@ -513,16 +1641,21 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         .then((content) => {
           try {
             const parsed = JSON.parse(content);
-            if (parsed && Array.isArray(parsed.results) && parsed.results.length > 0) {
+            const isCachedHomeFeed = !parsed.searchedQuery || /^recent/i.test(parsed.searchedQuery);
+            if (isCachedHomeFeed && parsed && Array.isArray(parsed.results) && parsed.results.length > 0) {
+              const sanitizedDisk = parsed.results.map((r: TamilMvMovieResult) => ({
+                ...r,
+                movieTitle: sanitizeMovieTitle(r.movieTitle),
+              }));
               setQuery(parsed.query || '');
-              setSearchedQuery(parsed.searchedQuery || '');
-              setResults(parsed.results);
+              setSearchedQuery(parsed.searchedQuery || 'Recent Upload');
+              setResults(sanitizedDisk);
               setHasSearched(Boolean(parsed.hasSearched));
               setDisplayedCount(INITIAL_BATCH_SIZE);
               globalCachedFinderState = {
                 query: parsed.query || '',
-                searchedQuery: parsed.searchedQuery || '',
-                results: parsed.results,
+                searchedQuery: parsed.searchedQuery || 'Recent Upload',
+                results: sanitizedDisk,
                 hasSearched: Boolean(parsed.hasSearched),
               };
               return;
@@ -545,7 +1678,11 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     newHasSearched: boolean,
     newQuery?: string
   ) => {
-    setResults(newResults);
+    const cleanedResults = newResults.map((r) => ({
+      ...r,
+      movieTitle: sanitizeMovieTitle(r.movieTitle),
+    }));
+    setResults(cleanedResults);
     setSearchedQuery(newSearchedQuery);
     setHasSearched(newHasSearched);
     setDisplayedCount(INITIAL_BATCH_SIZE);
@@ -555,13 +1692,17 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     const newState = {
       query: newQuery !== undefined ? newQuery : query,
       searchedQuery: newSearchedQuery,
-      results: newResults,
+      results: cleanedResults,
       hasSearched: newHasSearched,
     };
     globalCachedFinderState = newState;
 
     if (FINDER_CACHE_FILE) {
-      FileSystem.writeAsStringAsync(FINDER_CACHE_FILE, JSON.stringify(newState)).catch(() => {});
+      // Only persist home feed to disk so reopening app always lands on normal mode
+      const isHome = !newSearchedQuery || /^recent/i.test(newSearchedQuery);
+      if (isHome) {
+        FileSystem.writeAsStringAsync(FINDER_CACHE_FILE, JSON.stringify(newState)).catch(() => {});
+      }
     }
   };
 
@@ -571,48 +1712,69 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     };
   }, []);
 
-  const handlePerformSearch = async (searchTerm?: string) => {
-    const term = (searchTerm ?? query).trim();
-    if (!term) return;
+  const handlePerformSearch = useCallback(
+    async (searchTerm?: string) => {
+      const term = (searchTerm ?? query).trim();
+      if (!term) return;
 
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    activeSearchTermRef.current = term;
-    setLoading(true);
-    setHasSearched(true);
-    setSearchedQuery(term);
-    setResults([]);
-    setDisplayedCount(INITIAL_BATCH_SIZE);
+      activeSearchTermRef.current = term;
+      setLoading(true);
+      setHasSearched(true);
+      setSearchedQuery(term);
+      setResults([]);
+      setDisplayedCount(INITIAL_BATCH_SIZE);
 
-    const isRecent = /^recent/i.test(term);
-    const ts = Date.now();
-    const searchUrl = isRecent
-      ? `${currentBaseUrl}/?_t=${ts}`
-      : `${currentBaseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic&_t=${ts}`;
+      const isRecent = /^recent/i.test(term);
+      const ts = Date.now();
+      const searchUrl = isRecent
+        ? `${currentBaseUrl}/?_t=${ts}`
+        : `${currentBaseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic&_t=${ts}`;
 
-    setWebViewSearchUrl(searchUrl);
+      setWebViewSearchUrl(searchUrl);
 
-    // Timeout safety fallback
-    searchTimeoutRef.current = setTimeout(() => {
-      setLoading(false);
-    }, 15000);
-
-    // Try direct fetch first
-    try {
-      const data = isRecent
-        ? await tamilMvService.searchMovie('Recent Upload', currentBaseUrl)
-        : await tamilMvService.searchMovie(term, currentBaseUrl);
-
-      if (data && data.length > 0) {
-        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-        updateFinderState(data, term, true);
+      // Timeout safety fallback
+      searchTimeoutRef.current = setTimeout(() => {
         setLoading(false);
-        return;
+      }, 15000);
+
+      // Try direct fetch first
+      try {
+        const data = isRecent
+          ? await tamilMvService.searchMovie('Recent Upload', currentBaseUrl)
+          : await tamilMvService.searchMovie(term, currentBaseUrl);
+
+        if (data && data.length > 0) {
+          if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+          updateFinderState(data, term, true);
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        // Background WebView scraper will catch the result
       }
-    } catch (err) {
-      // Background WebView scraper will catch the result
-    }
-  };
+    },
+    [query, currentBaseUrl]
+  );
+
+  const handleClearSearch = useCallback(async () => {
+    setQuery('');
+    setSearchedQuery('');
+    setHasSearched(false);
+    activeSearchTermRef.current = 'Recent Upload';
+    globalCachedFinderState = {
+      query: '',
+      searchedQuery: '',
+      results: [],
+      hasSearched: false,
+    };
+    await handlePerformSearch('Recent Upload');
+  }, [handlePerformSearch]);
+
+  useEffect(() => {
+    handleClearSearchRef.current = handleClearSearch;
+  }, [handleClearSearch]);
 
   const handlePullToRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -636,6 +1798,49 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     }
   };
 
+  const handlePosterWebViewMessage = useCallback((event: any) => {
+    try {
+      if (posterTimeoutRef.current) clearTimeout(posterTimeoutRef.current);
+      const payload = JSON.parse(event.nativeEvent.data);
+      if (payload.type === 'POSTER_RESULT') {
+        const { topicUrl, posterUrl: url } = payload;
+        const result: string | null = url || null;
+        // Store in global cache
+        posterCache.set(topicUrl, result);
+        // Fire the waiting callback so MovieCardItem re-renders
+        const cb = posterCallbacksRef.current.get(topicUrl);
+        if (cb) {
+          cb(result);
+          posterCallbacksRef.current.delete(topicUrl);
+        }
+        // Advance queue
+        posterQueueRef.current = posterQueueRef.current.filter((u) => u !== topicUrl);
+        posterProcessingRef.current = false;
+        // Process next in queue
+        if (posterQueueRef.current.length > 0) {
+          const nextUrl = posterQueueRef.current[0];
+          posterProcessingRef.current = true;
+          setPosterWebViewUrl(nextUrl);
+        } else {
+          setPosterWebViewUrl('');
+        }
+      }
+    } catch (e) {
+      if (posterTimeoutRef.current) clearTimeout(posterTimeoutRef.current);
+      // Advance queue on error so we don't get stuck
+      posterProcessingRef.current = false;
+      if (posterQueueRef.current.length > 0) {
+        posterQueueRef.current.shift();
+        if (posterQueueRef.current.length > 0) {
+          posterProcessingRef.current = true;
+          setPosterWebViewUrl(posterQueueRef.current[0]);
+        } else {
+          setPosterWebViewUrl('');
+        }
+      }
+    }
+  }, []);
+
   const handleSaveBaseUrl = (newUrl: string) => {
     tamilMvService.setBaseUrl(newUrl);
     const cleaned = tamilMvService.getBaseUrl();
@@ -650,7 +1855,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       let target = resItem.magnetUrl || resItem.torrentFileUrl;
 
       if (!target && resItem.topicUrl) {
-        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
         if (extracted.magnetUrl) {
           target = extracted.magnetUrl;
           resItem.magnetUrl = extracted.magnetUrl;
@@ -683,7 +1888,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       let torrentFile = resItem.torrentFileUrl;
 
       if (!magnet && !torrentFile && resItem.topicUrl) {
-        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
         if (extracted.magnetUrl) {
           magnet = extracted.magnetUrl;
           resItem.magnetUrl = extracted.magnetUrl;
@@ -740,8 +1945,29 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       setStreamingResId(resItem.id);
 
       try {
+        // Fast backend server reachability pre-check
+        const pingResult = await Promise.race([
+          testPing(backendUrl),
+          new Promise<{ ok: boolean; latency: number; message: string }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, latency: 3000, message: 'Server connection timed out' }), 3000)
+          ),
+        ]);
+
+        if (!pingResult.ok) {
+          setStreamingResId(null);
+          Alert.alert(
+            'Server is not reachable',
+            `Unable to connect to the streaming server.\n\nServer: ${backendUrl}\n\nPlease check if your streaming server is running or configure the server URL in Settings.`,
+            [
+              { text: 'OK', style: 'cancel' },
+              { text: 'Server Settings', onPress: () => onNavigateToTab?.('settings') },
+            ]
+          );
+          return;
+        }
+
         if (!magnet && resItem.topicUrl) {
-          const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+          const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
           if (extracted.magnetUrl) {
             magnet = extracted.magnetUrl;
             resItem.magnetUrl = extracted.magnetUrl;
@@ -770,6 +1996,10 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             createdAt: Date.now(),
           };
 
+          const topic = movie.topicUrl || resItem.topicUrl || '';
+          const poster = (topic && posterCache.get(topic)) || null;
+          setStreamPlayerPosterUrl(poster || undefined);
+          setStreamPlayerInitialPos(0);
           setActiveStreamItem(streamDownloadItem);
           setStreamPlayerVisible(true);
         } else {
@@ -788,7 +2018,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         setStreamingResId(null);
       }
     },
-    [backendUrl]
+    [backendUrl, testPing, onNavigateToTab]
   );
 
   const handleLaunchInternalPlayer = useCallback((data: StreamModalData) => {
@@ -808,15 +2038,47 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       createdAt: Date.now(),
     };
 
+    const topic = data.movie.topicUrl || data.resItem.topicUrl || '';
+    const poster = (topic && posterCache.get(topic)) || null;
+    setStreamPlayerPosterUrl(poster || undefined);
+    setStreamPlayerInitialPos(0);
     setActiveStreamItem(streamDownloadItem);
     setStreamPlayerVisible(true);
   }, []);
+
+  const handleOpenExternalPlayer = useCallback(
+    async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
+      let magnet = resItem.magnetUrl;
+      if (!magnet && resItem.topicUrl) {
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
+        if (extracted.magnetUrl) {
+          magnet = extracted.magnetUrl;
+          resItem.magnetUrl = extracted.magnetUrl;
+        }
+      }
+      if (magnet) {
+        const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+        const target = streamUrl || magnet;
+        Linking.openURL(`vlc://${target}`).catch(() => {
+          Linking.openURL(target).catch(() => {
+            Alert.alert(
+              'External Player',
+              'VLC for Android or compatible media player is recommended for playback.'
+            );
+          });
+        });
+      } else {
+        Alert.alert('Notice', 'Direct magnet link unavailable for external playback.');
+      }
+    },
+    [backendUrl]
+  );
 
   // 4. Copy Magnet / Link
   const handleCopyMagnet = useCallback(async (resItem: MovieResolutionItem) => {
     let link = resItem.magnetUrl || resItem.torrentFileUrl;
     if (!link && resItem.topicUrl) {
-      const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl);
+      const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
       if (extracted.magnetUrl) {
         link = extracted.magnetUrl;
         resItem.magnetUrl = extracted.magnetUrl;
@@ -830,8 +2092,11 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
     if (link) {
       try {
+        await Clipboard.setStringAsync(link);
+        Alert.alert('Magnet Copied! 📋', 'Magnet URL copied to clipboard.');
+      } catch {
         await Share.share({ message: link, title: 'Movie Magnet Link' });
-      } catch {}
+      }
     } else {
       Alert.alert('Link', 'Direct magnet link available on the topic page.');
     }
@@ -839,32 +2104,35 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   const renderMovieCard = useCallback(
     ({ item }: { item: TamilMvMovieResult }) => {
+      const saved = isMovieSaved(item);
       return (
-        <MovieCardItem
+        <PosterGridCard
           item={item}
-          streamingResId={streamingResId}
-          onMovieDownload={handleMovieDownload}
-          onTorrentDownload={handleTorrentDownload}
-          onStream={handleStreamResolution}
-          onCopy={handleCopyMagnet}
+          isSaved={saved}
+          onToggleSave={(p) => handleToggleSaveMovie(item, p)}
+          enqueuePosterFetch={enqueuePosterFetch}
+          onPress={() => {
+            setDetailMovie(item);
+            setDetailVisible(true);
+          }}
         />
       );
     },
-    [streamingResId, handleMovieDownload, handleTorrentDownload, handleStreamResolution, handleCopyMagnet]
+    [enqueuePosterFetch, isMovieSaved, handleToggleSaveMovie, setDetailMovie, setDetailVisible]
   );
 
   const keyExtractor = useCallback((item: TamilMvMovieResult) => item.id, []);
 
   // Lazy Load Footer Component
   const renderListFooter = useCallback(() => {
-    if (results.length === 0) return null;
+    if (recentlyAdded.length === 0) return null;
 
-    if (displayedCount < results.length) {
+    if (displayedCount < recentlyAdded.length) {
       return (
         <View style={styles.lazyLoadFooter}>
           <ActivityIndicator size="small" color={Colors.netflixRed} />
           <Text style={styles.lazyLoadText}>
-            Loading more movies ({visibleResults.length} / {results.length})...
+            Loading more movies ({visibleRecentlyAdded.length} / {recentlyAdded.length})...
           </Text>
         </View>
       );
@@ -873,11 +2141,11 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     return (
       <View style={styles.endOfListFooter}>
         <View style={styles.endOfListDivider} />
-        <Text style={styles.endOfListText}>All {results.length} movies loaded</Text>
+        <Text style={styles.endOfListText}>All {recentlyAdded.length} movies loaded</Text>
         <View style={styles.endOfListDivider} />
       </View>
     );
-  }, [displayedCount, results.length, visibleResults.length]);
+  }, [displayedCount, recentlyAdded.length, visibleRecentlyAdded.length]);
 
   const INJECTED_SCRAPER_JS = `
     (function() {
@@ -888,11 +2156,18 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           for (var i = 0; i < links.length; i++) {
             var a = links[i];
             var rawHref = a.href || '';
-            var cleanUrl = rawHref.split('#')[0].replace(/&.*$/, '').replace(/\\/page\\/\\d+\\/?$/, '/');
-            if (!cleanUrl || cleanUrl.indexOf('topic/') === -1 || cleanUrl.indexOf('/topic/183-0') !== -1) continue;
-            
-            var titleAttr = (a.getAttribute('title') || '').replace(/<[^>]*>/g, '').trim();
-            var innerText = (a.innerText || a.textContent || '').replace(/<[^>]*>/g, '').trim();
+            var cleanText = function(str) {
+              if (!str) return '';
+              return str
+                .replace(/<[^>]*>/g, '')
+                .replace(/^(?:view\\s+(?:the\\s+)?topic|go\\s+to\\s+(?:the\\s+)?topic)[\\s:'"‘“\\-]*/i, '')
+                .replace(/['"’”]+$/g, '')
+                .replace(/^['"‘“]+/g, '')
+                .trim();
+            };
+
+            var titleAttr = cleanText(a.getAttribute('title') || '');
+            var innerText = cleanText(a.innerText || a.textContent || '');
             
             var candidates = [titleAttr, innerText];
             for (var c = 0; c < candidates.length; c++) {
@@ -940,47 +2215,224 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     true;
   `;
 
+  // Injected into each IPS forum topic page to extract the exact movie poster
+  const POSTER_EXTRACTOR_JS = `
+    (function() {
+      var _sent = false;
+
+      function sendResult(posterUrl) {
+        if (_sent) return;
+        _sent = true;
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'POSTER_RESULT',
+            topicUrl: window.location.href,
+            posterUrl: posterUrl || null
+          }));
+        }
+      }
+
+      function isGoodSrc(src) {
+        if (!src || src.length < 8) return false;
+        if (/data:image/i.test(src)) return false;
+        if (/\\.(gif|svg|ico)(\\?|$)/i.test(src)) return false;
+        // Exclude profile avatars, emoticons, forum UI images
+        if (/(photo\\/member|profile_photo|avatars?\\/|emoticons?\\/|emoji\\/|smilies?\\/|ranks?\\/|badges?\\/|awards?\\/|reaction|monthly_202[0-9].*\\/profile|uploads\\/profile|torrborder|uTorrent|defaultPhoto|theme_images)/i.test(src)) return false;
+        var isImgExt = /\\.(jpg|jpeg|png|webp)(\\?|$)/i.test(src) || /format=(jpg|jpeg|png|webp)/i.test(src);
+        var isKnownHost = /(twimg\\.com|pixelbb\\.com|postimg|ibb\\.co|imgur|imghippo|imagebam|turboimagehost)/i.test(src);
+        return isImgExt || isKnownHost;
+      }
+
+      function resolveUrl(src) {
+        if (!src) return null;
+        src = src.trim();
+        if (src.startsWith('//')) return 'https:' + src;
+        if (src.startsWith('/')) return window.location.origin + src;
+        if (src.startsWith('http')) return src;
+        return null;
+      }
+
+      function getBestPosterFromImgs(imgs) {
+        var best = null;
+        var bestScore = 0;
+
+        for (var i = 0; i < imgs.length; i++) {
+          var img = imgs[i];
+          // Support lazy-loaded images via data-src, data-lazy-src, data-original
+          var src = img.getAttribute('src') || 
+                    img.getAttribute('data-src') || 
+                    img.getAttribute('data-lazy-src') || 
+                    img.getAttribute('data-original') || 
+                    img.getAttribute('data-srcset') || '';
+
+          // For srcset, extract the first URL
+          if (!src && img.srcset) {
+            src = img.srcset.split(',')[0].trim().split(' ')[0];
+          }
+
+          if (!isGoodSrc(src)) continue;
+
+          var absUrl = resolveUrl(src);
+          if (!absUrl) continue;
+
+          // Score by natural dimensions (actual downloaded size beats rendered size)
+          var w = img.naturalWidth || img.width || 0;
+          var h = img.naturalHeight || img.height || 0;
+
+          // Skip tiny images (icons, badges) — posters are always > 100×100
+          if (w > 0 && h > 0 && (w < 80 || h < 80)) continue;
+
+          var score = w * h;
+
+          // Bonus: IPS forum post attachments, uploads paths, and known hosts are very likely the movie poster
+          if (/(uploads\\/monthly|uploads\\/attach|filebase|content_images|postimg|ibb\\.co|imgur|imghippo|i\\.ibb|twimg\\.com|pixelbb\\.com)/i.test(absUrl)) {
+            score += 500000;
+          }
+
+          if (score > bestScore || (!best && absUrl)) {
+            bestScore = score;
+            best = absUrl;
+          }
+        }
+        return best;
+      }
+
+      function extractPoster() {
+        try {
+          // ── Step 1: IPS-specific first post content selectors (most precise) ──
+          // IPS Community Suite uses these selectors for the first post body:
+          var IPS_SELECTORS = [
+            '.ipsComment:first-of-type [data-role="commentContent"]',
+            '.ipsComment:first-of-type .ipsRichText',
+            '.ipsComment:first-of-type .ipsType_richText',
+            'article:first-of-type [data-role="commentContent"]',
+            '[data-role="commentContent"]:first-of-type',
+            '.cPost_contentWrap .ipsRichText',
+            '.ipsRichText',
+            '.ipsType_richText',
+            '[data-role="commentContent"]',
+          ];
+
+          var postBody = null;
+          for (var si = 0; si < IPS_SELECTORS.length; si++) {
+            postBody = document.querySelector(IPS_SELECTORS[si]);
+            if (postBody) break;
+          }
+
+          if (postBody) {
+            var imgs = postBody.querySelectorAll('img');
+            if (imgs.length > 0) {
+              var poster = getBestPosterFromImgs(imgs);
+              if (poster) { sendResult(poster); return; }
+            }
+          }
+
+          // ── Step 2: og:image meta tag (IPS sets this to first post image) ──
+          var ogMeta = document.querySelector('meta[property="og:image"], meta[name="og:image"]');
+          if (ogMeta) {
+            var ogContent = (ogMeta.getAttribute('content') || '').trim();
+            if (isGoodSrc(ogContent)) {
+              var abs = resolveUrl(ogContent);
+              if (abs) { sendResult(abs); return; }
+            }
+          }
+
+          // ── Step 3: Wider search — all imgs, pick the largest ──
+          var allImgs = document.querySelectorAll('article img, .ipsPad img, main img, #ipsLayout_mainArea img');
+          if (!allImgs.length) allImgs = document.querySelectorAll('img');
+          var best = getBestPosterFromImgs(allImgs);
+          sendResult(best);
+
+        } catch(e) {
+          sendResult(null);
+        }
+      }
+
+      // Run at multiple intervals to handle lazy-loading and slow renders
+      if (document.readyState === 'complete') {
+        setTimeout(extractPoster, 300);
+      } else {
+        window.addEventListener('load', function() { setTimeout(extractPoster, 500); });
+      }
+      // Retry after images may have lazily loaded
+      setTimeout(extractPoster, 1500);
+      setTimeout(extractPoster, 4000);
+    })();
+    true;
+  `;
+
+
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 6 }]}>
-      {/* 1. Modern Header with Glowing Accent & Live Mirror Chip */}
+      {/* 1. Premium VFlix Home Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.headerTitleRow}>
+          <View style={styles.headerBrandRow}>
             <LinearGradient
               colors={[Colors.primary, '#8A0E1C']}
               style={styles.headerLogoBadge}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Film color="#FFFFFF" size={16} strokeWidth={2.5} />
+              <Clapperboard color="#FFFFFF" size={17} strokeWidth={2.4} />
             </LinearGradient>
-            <View>
-              <Text style={styles.screenTitle}>Movie Finder</Text>
-              <Text style={styles.screenSubtitle}>Search & Stream HD Torrents</Text>
+            <View style={styles.brandTitleCol}>
+              <View style={styles.brandTitleRow}>
+                <Text style={styles.brandTitleV}>V</Text>
+                <Text style={styles.brandTitleFlix}>FLEX</Text>
+                <View style={styles.brandCinemaBadge}>
+                  <Text style={styles.brandCinemaBadgeText}>CINEMA</Text>
+                </View>
+              </View>
+              <Text style={styles.screenSubtitle}>Stream & Discover Torrents</Text>
             </View>
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.mirrorChip}
-          onPress={() => setUrlModalVisible(true)}
-          activeOpacity={0.75}
-        >
-          <View style={styles.livePulseDot} />
-          <Text style={styles.mirrorChipText} numberOfLines={1}>
-            {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}
-          </Text>
-          <ChevronDown color="#FFFFFF" size={13} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity
+            style={styles.mirrorChip}
+            onPress={() => setUrlModalVisible(true)}
+            activeOpacity={0.75}
+          >
+            <View style={styles.livePulseDot} />
+            <Text style={styles.mirrorChipText} numberOfLines={1}>
+              {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}
+            </Text>
+            <ChevronDown color="#9E9EA7" size={12} strokeWidth={2.5} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.refreshHeaderBtn}
+            onPress={handlePullToRefresh}
+            activeOpacity={0.7}
+            disabled={isRefreshing}
+          >
+            <RotateCcw color={isRefreshing ? Colors.primary : "#AEAEB2"} size={14} strokeWidth={2.2} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* 2. Modern Glassmorphic Search Bar */}
       <View style={styles.searchBarWrapper}>
         <View style={styles.searchBar}>
-          <Search color={Colors.primary} size={16} strokeWidth={2.5} />
+          {!isHomeFeed ? (
+            <TouchableOpacity
+              onPress={handleClearSearch}
+              style={styles.searchBackBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+              accessibilityLabel="Back to Home feed"
+            >
+              <ArrowLeft color="#FFFFFF" size={17} strokeWidth={2.4} />
+            </TouchableOpacity>
+          ) : (
+            <Search color={Colors.primary} size={16} strokeWidth={2.5} />
+          )}
           <TextInput
             style={styles.input}
-            placeholder="Search movie title (e.g. Leo, Amaran)..."
+            placeholder={!isHomeFeed ? `Showing: "${searchedQuery}" (tap X for Home)` : "Search movie title (e.g. Leo, Amaran)..."}
             placeholderTextColor="#8E8E93"
             value={query}
             onChangeText={setQuery}
@@ -988,74 +2440,90 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             returnKeyType="search"
             autoCorrect={false}
           />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} style={styles.clearBtn}>
+          {(query.length > 0 || !isHomeFeed) && (
+            <TouchableOpacity
+              onPress={() => {
+                if (!isHomeFeed) {
+                  handleClearSearch();
+                } else {
+                  setQuery('');
+                }
+              }}
+              style={styles.clearBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Clear and return to Home"
+            >
               <X color="#FFFFFF" size={15} strokeWidth={2.5} />
             </TouchableOpacity>
           )}
         </View>
 
-        <TouchableOpacity
-          onPress={() => handlePerformSearch()}
-          disabled={!query.trim() || loading}
-          activeOpacity={0.8}
-        >
-          <LinearGradient
-            colors={!query.trim() ? ['#221C1E', '#181416'] : [Colors.primary, '#B51527']}
-            style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+        {!isHomeFeed && !query.trim() ? (
+          <TouchableOpacity
+            onPress={handleClearSearch}
+            activeOpacity={0.8}
           >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.searchBtnText}>Search</Text>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+            <LinearGradient
+              colors={['#2B1E22', '#1B1416']}
+              style={[styles.searchBtn, styles.homeResetBtn]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <RotateCcw color={Colors.primary} size={13} strokeWidth={2.4} style={{ marginRight: 4 }} />
+              <Text style={styles.homeResetBtnText}>Home</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={() => handlePerformSearch()}
+            disabled={!query.trim() || loading}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={!query.trim() ? ['#221C1E', '#181416'] : [Colors.primary, '#B51527']}
+              style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.searchBtnText}>Search</Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* 3. Filter / Suggestions Chips */}
-      <View style={styles.suggestionsSection}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
-          {suggestions.map((item) => {
-            const isSelected = searchedQuery.toLowerCase() === item.toLowerCase();
+      {/* 2.5. Multi-Language Filter Chips Bar */}
+      <View style={styles.langFilterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.langFilterScroll}
+        >
+          {['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English', 'All'].map((lang) => {
+            const active = isLangActive(lang);
             return (
               <TouchableOpacity
-                key={item}
-                onPress={() => {
-                  setQuery(item);
-                  handlePerformSearch(item);
-                }}
-                activeOpacity={0.7}
+                key={lang}
+                style={[styles.langChip, active && styles.langChipActive]}
+                onPress={() => handleToggleLanguage(lang)}
+                activeOpacity={0.75}
               >
-                {isSelected ? (
-                  <LinearGradient
-                    colors={[Colors.primary, '#8A0E1C']}
-                    style={styles.chipActiveGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                  >
-                    {item === 'Recent Upload' ? (
-                      <Sparkles color="#FFFFFF" size={11} strokeWidth={2.5} />
-                    ) : null}
-                    <Text style={styles.chipTextActive}>{item}</Text>
-                  </LinearGradient>
-                ) : (
-                  <View style={styles.chip}>
-                    {item === 'Recent Upload' ? (
-                      <Sparkles color={Colors.netflixRed} size={11} strokeWidth={2.5} />
-                    ) : null}
-                    <Text style={styles.chipText}>{item}</Text>
-                  </View>
-                )}
+                {active && lang !== 'All' ? (
+                  <Check color="#FFFFFF" size={12} strokeWidth={3} style={{ marginRight: 4 }} />
+                ) : null}
+                <Text style={[styles.langChipText, active && styles.langChipTextActive]}>
+                  {lang}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      {/* 4. Main Body Content */}
+      {/* 3. Main Body Content */}
       {loading ? (
         <View style={styles.stateCenter}>
           <ActivityIndicator size="small" color={Colors.netflixRed} />
@@ -1067,24 +2535,63 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           <AlertCircle color="#FF453A" size={44} strokeWidth={2.2} />
           <Text style={styles.notFoundTitle}>No Results Found</Text>
           <Text style={styles.notFoundSub}>
-            No movies found for "{searchedQuery}". Try another title or switch mirror.
+            No movies found for "{searchedQuery}". Try another title or return to home.
           </Text>
-          <TouchableOpacity
-            style={styles.switchMirrorBtn}
-            onPress={() => setUrlModalVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.switchMirrorBtnText}>Switch Mirror Domain</Text>
-          </TouchableOpacity>
+          <View style={styles.notFoundActionsRow}>
+            <TouchableOpacity
+              style={styles.backHomeBtnPrimary}
+              onPress={handleClearSearch}
+              activeOpacity={0.8}
+            >
+              <RotateCcw color="#FFFFFF" size={13} strokeWidth={2.4} style={{ marginRight: 6 }} />
+              <Text style={styles.backHomeBtnPrimaryText}>Back to Home</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.switchMirrorBtn}
+              onPress={() => setUrlModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.switchMirrorBtnText}>Switch Mirror</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      ) : hasSearched && results.length > 0 ? (
+      ) : hasSearched && filteredResults.length === 0 ? (
+        /* Filtered Out By Language State */
+        <View style={styles.stateCenter}>
+          <Film color="#8E8E93" size={44} strokeWidth={1.8} />
+          <Text style={styles.notFoundTitle}>No {selectedLanguages.join(', ')} Movies</Text>
+          <Text style={styles.notFoundSub}>
+            No movies match the selected language filter in the current feed.
+          </Text>
+          <View style={styles.notFoundActionsRow}>
+            <TouchableOpacity
+              style={styles.backHomeBtnPrimary}
+              onPress={() => setSelectedLanguages(['All'])}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.backHomeBtnPrimaryText}>Show All Languages</Text>
+            </TouchableOpacity>
+            {!isHomeFeed && (
+              <TouchableOpacity
+                style={styles.switchMirrorBtn}
+                onPress={handleClearSearch}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.switchMirrorBtnText}>Back to Home</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      ) : hasSearched && filteredResults.length > 0 ? (
         /* Results List with Lazy Loading & Pull-to-Refresh */
         <FlatList
           ref={flatListRef}
-          data={visibleResults}
+          data={visibleRecentlyAdded}
           keyExtractor={keyExtractor}
           renderItem={renderMovieCard}
-          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+          numColumns={2}
+          columnWrapperStyle={styles.listGridColumnWrapper}
+          contentContainerStyle={[styles.listGridContent, { paddingBottom: insets.bottom + 100 }]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
@@ -1106,17 +2613,106 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           }
           ListHeaderComponent={
             <View style={styles.listHeaderBox}>
-              <View style={styles.listHeaderMetaRow}>
-                <View style={styles.metaCountBadge}>
-                  <Text style={styles.resultsCount}>
-                    {results.length} Movies Available
+              {/* Section 0: Continue Watching (Only on default home feed when items exist) */}
+              {isHomeFeed && continueWatchingList.length > 0 && (
+                <View style={styles.continueWatchingSectionWrap}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleRow}>
+                      <View style={styles.sectionIconWrap}>
+                        <PlayCircle color={Colors.primary} size={16} strokeWidth={2.4} />
+                      </View>
+                      <Text style={styles.sectionTitle}>Continue Watching</Text>
+                    </View>
+                    <View style={styles.cwBadge}>
+                      <Text style={styles.cwBadgeText}>{continueWatchingList.length} Active</Text>
+                    </View>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.cwScroll}
+                  >
+                    {continueWatchingList.map((item) => (
+                      <ContinueWatchingCard
+                        key={item.id}
+                        item={item}
+                        onResume={() => handleResumeContinueWatching(item)}
+                        onRemove={() => continueWatchingService.remove(item.id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Section 1: Top Release for this week (Only on default home feed) */}
+              {isHomeFeed && topReleases.length > 0 && (
+                <View style={styles.topReleaseSectionWrap}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleRow}>
+                      <View style={styles.sectionIconWrap}>
+                        <Flame color={Colors.primary} size={16} strokeWidth={2.4} />
+                      </View>
+                      <Text style={styles.sectionTitle}>Top Release for this week</Text>
+                    </View>
+                    <View style={styles.topReleaseBadge}>
+                      <Text style={styles.topReleaseBadgeText}>{topReleases.length} Hot</Text>
+                    </View>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.topReleaseScroll}
+                  >
+                    {topReleases.map((item, index) => (
+                      <TopReleaseCard
+                        key={item.id || `tr-${index}`}
+                        item={item}
+                        rank={index + 1}
+                        isSaved={isMovieSaved(item)}
+                        onToggleSave={(p) => handleToggleSaveMovie(item, p)}
+                        enqueuePosterFetch={enqueuePosterFetch}
+                        onPress={() => {
+                          setDetailMovie(item);
+                          setDetailVisible(true);
+                        }}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Section 2: Recently added / Search Results */}
+              <View style={[styles.sectionHeader, isHomeFeed && topReleases.length > 0 && styles.sectionHeaderSpaced]}>
+                <View style={[styles.sectionTitleRow, { flex: 1, marginRight: 8 }]}>
+                  <View style={styles.sectionIconWrap}>
+                    {isHomeFeed ? (
+                      <Sparkles color={Colors.primary} size={15} strokeWidth={2.4} />
+                    ) : (
+                      <Search color={Colors.primary} size={15} strokeWidth={2.4} />
+                    )}
+                  </View>
+                  <Text style={styles.sectionTitle} numberOfLines={1}>
+                    {isHomeFeed ? 'Recently added' : `Results for "${searchedQuery}"`}
                   </Text>
                 </View>
-                <View style={styles.loadedBadge}>
-                  <Text style={styles.loadedBadgeText}>
-                    Showing {visibleResults.length} of {results.length}
-                  </Text>
-                </View>
+                {isHomeFeed ? (
+                  <View style={styles.recentMetaBadge}>
+                    <Text style={styles.recentMetaBadgeText}>
+                      {`${recentlyAdded.length} Movies`}
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.backToHomePill}
+                    onPress={handleClearSearch}
+                    activeOpacity={0.75}
+                  >
+                    <RotateCcw color="#FFFFFF" size={11} strokeWidth={2.4} style={{ marginRight: 4 }} />
+                    <Text style={styles.backToHomePillText}>Back to Home</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           }
@@ -1229,6 +2825,20 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             userAgent="Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
             injectedJavaScript={INJECTED_SCRAPER_JS}
             onMessage={handleWebViewMessage}
+          />
+        </View>
+      ) : null}
+
+      {/* Headless Poster Extractor WebView — navigates topic pages sequentially to extract poster images */}
+      {posterWebViewUrl ? (
+        <View style={styles.offscreenWebView}>
+          <WebView
+            source={{ uri: posterWebViewUrl }}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            userAgent="Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            injectedJavaScript={POSTER_EXTRACTOR_JS}
+            onMessage={handlePosterWebViewMessage}
           />
         </View>
       ) : null}
@@ -1406,13 +3016,34 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
       </Modal>
 
+      {/* 7. Movie Detail Sheet (Netflix-style full page sheet) */}
+      <MovieDetailSheet
+        visible={detailVisible}
+        movie={detailMovie}
+        streamingResId={streamingResId}
+        isSaved={detailMovie ? isMovieSaved(detailMovie) : false}
+        onToggleSave={() => detailMovie && handleToggleSaveMovie(detailMovie)}
+        onClose={() => setDetailVisible(false)}
+        onMovieDownload={handleMovieDownload}
+        onTorrentDownload={handleTorrentDownload}
+        onStream={handleStreamResolution}
+        onCopy={handleCopyMagnet}
+        onOpenExternal={handleOpenExternalPlayer}
+        enqueuePosterFetch={enqueuePosterFetch}
+        backendUrl={backendUrl}
+      />
+
       {/* In-App Live Video Player Modal */}
       <OfflinePlayerModal
         visible={streamPlayerVisible}
         item={activeStreamItem}
+        initialPositionSec={streamPlayerInitialPos}
+        posterUrl={streamPlayerPosterUrl}
         onClose={() => {
           setStreamPlayerVisible(false);
           setActiveStreamItem(null);
+          setStreamPlayerInitialPos(0);
+          setStreamPlayerPosterUrl(undefined);
         }}
       />
     </View>
@@ -1429,12 +3060,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingTop: 2,
+    paddingBottom: 8,
   },
   headerLeft: {
     flex: 1,
   },
-  headerTitleRow: {
+  headerBrandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -1445,29 +3077,67 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
+    elevation: 4,
   },
-  screenTitle: {
+  brandTitleCol: {
+    justifyContent: 'center',
+  },
+  brandTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  brandTitleV: {
+    color: Colors.primary,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+  brandTitleFlix: {
     color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.4,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+  brandCinemaBadge: {
+    backgroundColor: 'rgba(250, 36, 60, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  brandCinemaBadgeText: {
+    color: Colors.primary,
+    fontSize: 8.5,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   screenSubtitle: {
     color: '#8E8E93',
     fontSize: 10.5,
     fontWeight: '500',
-    marginTop: 1,
+    marginTop: -1,
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
   mirrorChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: '#16171D',
     borderWidth: 1,
     borderColor: '#262835',
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 14,
   },
   livePulseDot: {
     width: 6,
@@ -1477,9 +3147,19 @@ const styles = StyleSheet.create({
   },
   mirrorChipText: {
     color: '#E5E5EA',
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '600',
-    maxWidth: 120,
+    maxWidth: 95,
+  },
+  refreshHeaderBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   searchBarWrapper: {
     flexDirection: 'row',
@@ -1500,6 +3180,11 @@ const styles = StyleSheet.create({
     height: 42,
     gap: 8,
   },
+  searchBackBtn: {
+    padding: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   input: {
     flex: 1,
     color: '#FFFFFF',
@@ -1516,6 +3201,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  homeResetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    height: 42,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+  },
+  homeResetBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  backToHomePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  backToHomePillText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   searchBtnDisabled: {
     opacity: 0.45,
   },
@@ -1524,40 +3239,35 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
   },
-  suggestionsSection: {
-    paddingVertical: 6,
+  langFilterContainer: {
+    paddingVertical: 5,
+    paddingBottom: 6,
   },
-  suggestionsScroll: {
+  langFilterScroll: {
     paddingHorizontal: 16,
-    gap: 7,
+    gap: 8,
   },
-  chip: {
+  langChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#14151A',
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#16171E',
     borderWidth: 1,
-    borderColor: '#242633',
-    paddingHorizontal: 11,
-    paddingVertical: 5.5,
-    borderRadius: 16,
+    borderColor: '#262835',
   },
-  chipActiveGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 11,
-    paddingVertical: 5.5,
-    borderRadius: 16,
+  langChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
-  chipText: {
+  langChipText: {
     color: '#8E8E93',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
-  chipTextActive: {
+  langChipTextActive: {
     color: '#FFFFFF',
-    fontSize: 11,
     fontWeight: '700',
   },
   listContent: {
@@ -1565,41 +3275,263 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 36,
   },
-  listHeaderBox: {
+  listGridContent: {
+    paddingTop: 8,
+    paddingBottom: 36,
+  },
+  listGridColumnWrapper: {
+    gap: 12,
+    paddingHorizontal: 12,
     marginBottom: 12,
-    gap: 8,
   },
-  listHeaderMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  listHeaderBox: {
+    marginBottom: 10,
   },
-  metaCountBadge: {
-    backgroundColor: '#16171D',
+  continueWatchingSectionWrap: {
+    marginBottom: 18,
+  },
+  cwBadge: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     borderWidth: 1,
-    borderColor: '#262835',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 8,
   },
-  resultsCount: {
+  cwBadgeText: {
+    color: Colors.primary,
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  cwScroll: {
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  cwCard: {
+    width: 140,
+    height: 210,
+    borderRadius: 12,
+    backgroundColor: '#16171E',
+    borderWidth: 1,
+    borderColor: '#242634',
+    overflow: 'hidden',
+    marginRight: 10,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  cwGradientOverlay: {
+    ...StyleSheet.absoluteFill,
+  },
+  cwDismissBtn: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  cwCenterPlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cwPlayCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cwBottomInfo: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 10,
+  },
+  cwTitle: {
     color: '#FFFFFF',
     fontSize: 11.5,
     fontWeight: '700',
-    letterSpacing: 0.1,
+    marginBottom: 3,
   },
-  loadedBadge: {
-    backgroundColor: 'rgba(250, 36, 60, 0.1)',
+  cwMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+  },
+  cwRemainingText: {
+    color: '#8E8E93',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  cwResText: {
+    color: '#636366',
+    fontSize: 9.5,
+    fontWeight: '600',
+  },
+  cwProgressBarBg: {
+    width: '100%',
+    height: 3.5,
+    backgroundColor: '#2C2D3A',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  cwProgressBarFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: 2,
+  },
+  topReleaseSectionWrap: {
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  sectionHeaderSpaced: {
+    marginTop: 10,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  topReleaseBadge: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.28)',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 8,
   },
-  loadedBadgeText: {
+  topReleaseBadgeText: {
     color: Colors.primary,
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
+  },
+  recentMetaBadge: {
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  recentMetaBadgeText: {
+    color: '#E5E5EA',
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  topReleaseScroll: {
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  trCard: {
+    width: 140,
+    height: 210,
+    borderRadius: 12,
+    backgroundColor: '#16171E',
+    borderWidth: 1,
+    borderColor: '#242634',
+    overflow: 'hidden',
+    marginRight: 10,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  trGradientOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 30,
+  },
+  trTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 15,
+    letterSpacing: -0.2,
+  },
+  trRankBadge: {
+    position: 'absolute',
+    top: 7,
+    left: 7,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  trRankGradient: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trRankText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+  trQualityBadge: {
+    position: 'absolute',
+    bottom: 7,
+    right: 7,
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  trQualityText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  trLangBadge: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    backgroundColor: 'rgba(250, 36, 60, 0.85)',
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
   },
   lazyLoadFooter: {
     flexDirection: 'row',
@@ -1652,295 +3584,500 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  card: {
-    backgroundColor: '#14151A',
-    borderRadius: 14,
+  // ── Poster Grid Card (2-column Netflix/VFlix style) ──
+  pgCard: {
+    borderRadius: 12,
+    backgroundColor: '#16171E',
     borderWidth: 1,
-    borderColor: '#222430',
-    marginBottom: 12,
+    borderColor: '#242634',
     overflow: 'hidden',
-  },
-  cardInner: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-  },
-  // ── Poster thumbnail (left column, fixed width) ──
-  posterWrap: {
-    width: 86,
-    minHeight: 150,
-    backgroundColor: '#1C1C1E',
     position: 'relative',
-    overflow: 'hidden',
-    flexShrink: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  posterImage: {
-    ...StyleSheet.absoluteFillObject,
+  pgImage: {
+    ...StyleSheet.absoluteFill,
   },
-  posterShimmer: {
-    ...StyleSheet.absoluteFillObject,
+  pgShimmerCenter: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  posterLangBadge: {
+  pgGradientOverlay: {
     position: 'absolute',
-    bottom: 6,
-    left: 5,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 28,
   },
-  posterLangText: {
+  pgTitle: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '700',
+    lineHeight: 16,
+    letterSpacing: -0.2,
+  },
+  pgYearBadge: {
+    position: 'absolute',
+    top: 7,
+    left: 7,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  pgYearText: {
+    color: '#E5E5EA',
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
+  pgLangBadge: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    backgroundColor: 'rgba(250, 36, 60, 0.85)',
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  pgLangText: {
     color: '#FFFFFF',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  // ── Right content column ──
-  cardContent: {
+  pgQualityBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4.5,
+    paddingVertical: 1,
+  },
+  pgQualityText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+
+  // ── Movie Detail Sheet (Netflix-style full page sheet) ──
+  dsContainer: {
     flex: 1,
-    minWidth: 0,
-    minHeight: 150,
-    borderLeftWidth: 1,
-    borderLeftColor: '#222430',
+    backgroundColor: '#09090C',
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: 10,
-    paddingBottom: 8,
-    gap: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1C24',
+  dsHero: {
+    width: '100%',
+    position: 'relative',
+    justifyContent: 'flex-end',
   },
-  filmAvatar: {
+  cardBookmarkBtn: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  dsHeaderBookmarkBtn: {
+    position: 'absolute',
+    right: 60,
+    zIndex: 10,
     width: 36,
     height: 36,
-    borderRadius: 10,
-    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardTitleGroup: {
-    flex: 1,
-    gap: 5,
+  dsCloseBtn: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  movieTitle: {
+  dsMyListBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    marginTop: 8,
+  },
+  dsMyListBtnActive: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    borderColor: 'rgba(250, 36, 60, 0.4)',
+  },
+  dsMyListBtnText: {
     color: '#FFFFFF',
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: -0.2,
-    lineHeight: 18,
   },
-  metaBadgeRow: {
+  dsQuickActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  dsQuickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  dsQuickActionBtnText: {
+    color: '#E5E5EA',
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  dsHeroContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    zIndex: 2,
+    gap: 12,
+  },
+  dsHeroTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 28,
+    letterSpacing: -0.4,
+  },
+  dsBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 4,
-  },
-  yearChip: {
-    backgroundColor: '#1E202A',
-    borderWidth: 1,
-    borderColor: '#2B2E3C',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-  },
-  yearChipText: {
-    color: '#D1D5DB',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  langChip: {
-    backgroundColor: 'rgba(250, 36, 60, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.35)',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-  },
-  langText: {
-    color: Colors.primary,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  selectedQualityHeaderBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-    borderWidth: 1,
-  },
-  selectedQualityHeaderBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  resCountChip: {
-    backgroundColor: '#1A1C23',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-  },
-  qualityCount: {
-    color: '#8E8E93',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  openTopicBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dropdownContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  dropdownTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#191B22',
-    borderWidth: 1,
-    borderColor: '#262938',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  dropdownTriggerOpen: {
-    borderColor: '#3B82F6',
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-  },
-  dropdownTriggerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  qualityPill: {
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2.5,
-    borderRadius: 5,
-  },
-  qualityPillText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-  },
-  dropdownSpecs: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 6,
   },
-  dropdownSizeText: {
-    color: '#FFFFFF',
-    fontSize: 11.5,
+  dsMetaBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  dsMetaBadgeText: {
+    color: '#E5E5EA',
+    fontSize: 11,
     fontWeight: '700',
   },
-  dropdownAudioText: {
-    color: '#8E8E93',
-    fontSize: 10,
-    fontWeight: '500',
-    maxWidth: 110,
-  },
-  dropdownTriggerRight: {
+  dsCtaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 10,
+    marginTop: 2,
   },
-  dropdownActionText: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  dropdownMenu: {
-    backgroundColor: '#16171E',
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderColor: '#262938',
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
+  dsPlayBtn: {
+    flex: 1,
+    borderRadius: 12,
     overflow: 'hidden',
   },
-  dropdownOption: {
+  dsPlayGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#20222D',
-  },
-  dropdownOptionActive: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-  },
-  dropdownOptionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    flex: 1,
+    height: 44,
   },
-  dropdownOptionSize: {
+  dsPlayBtnText: {
     color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
-  dropdownOptionAudio: {
-    color: '#8E8E93',
-    fontSize: 10,
-    maxWidth: 120,
-  },
-  cardActionsWrapper: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    paddingBottom: 12,
-    gap: 7,
-  },
-  actionLineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionBtnWithText: {
+  dsDownloadBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 35,
-    borderRadius: 8,
+    gap: 8,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     borderWidth: 1,
-    paddingHorizontal: 6,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
   },
-  actionBtnText: {
-    fontSize: 11,
+  dsDownloadBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  dsInfoSection: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 20,
+  },
+  dsSectionBlock: {
+    gap: 10,
+  },
+  dsSectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.2,
   },
-  // 1. Download .torrent file: Clean Mint / Emerald Light Theme
-  btnDownloadLight: {
-    backgroundColor: '#ECFDF5',
-    borderColor: '#A7F3D0',
+  dsSectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  // 2. Redirect to torrent app: Warm Amber / Orange Light Theme
-  btnTorrentRedirectLight: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FED7AA',
+  dsSectionSubtitle: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '500',
   },
-  // 3. Copy Magnet / Link: Soft Indigo / Violet Light Theme
-  btnCopyLight: {
-    backgroundColor: '#EEF2FF',
-    borderColor: '#C7D2FE',
+  qmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    justifyContent: 'flex-end',
   },
-  // 4. Play Stream: Soft Rose / Crimson Light Theme
-  btnPlayLight: {
-    backgroundColor: '#FFF1F2',
-    borderColor: '#FECDD3',
+  qmSheet: {
+    backgroundColor: '#12131A',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderColor: '#242735',
+    maxHeight: '75%',
+    paddingTop: 10,
+    paddingHorizontal: 16,
+  },
+  qmHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3E4254',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  qmHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: 12,
+  },
+  qmHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  qmIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qmTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  qmSubtitle: {
+    color: '#8E8E93',
+    fontSize: 11.5,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  qmCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qmDestinationSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#161822',
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#262A38',
+  },
+  qmDestinationTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  qmDestinationTabActivePlay: {
+    backgroundColor: 'rgba(250, 36, 60, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.5)',
+  },
+  qmDestinationTabActiveDownload: {
+    backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 199, 89, 0.5)',
+  },
+  qmDestinationTabText: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  qmDestinationTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  qmScroll: {
+    maxHeight: 380,
+  },
+  qmScrollContent: {
+    gap: 9,
+    paddingVertical: 4,
+  },
+  qmOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#171922',
+    borderWidth: 1.2,
+    borderColor: '#282C3D',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    justifyContent: 'space-between',
+  },
+  qmCardLeft: {
+    flex: 1,
+    gap: 4,
+    marginRight: 10,
+  },
+  qmQualityBadge: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+  },
+  qmQualityBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  qmCardMeta: {
+    color: '#8E8E93',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  qmCardRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  qmSizeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(52, 199, 89, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 199, 89, 0.35)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  qmSizeBadgeText: {
+    color: '#30D158',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  qmActionCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qmLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 36,
+  },
+  qmLoadingText: {
+    color: '#8E8E93',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dsRawTitleCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#14151C',
+    borderWidth: 1,
+    borderColor: '#242634',
+    borderRadius: 8,
+    padding: 10,
+  },
+  dsRawTitleText: {
+    flex: 1,
+    color: '#AEAEB2',
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  dsStreamingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  dsStreamingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#34C759',
+  },
+  dsStreamingText: {
+    color: '#8E8E93',
+    fontSize: 11.5,
+    fontWeight: '500',
   },
   stateCenter: {
     flex: 1,
@@ -1979,6 +4116,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '600',
+  },
+  notFoundActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  backHomeBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.netflixRed,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 18,
+    shadowColor: Colors.netflixRed,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  backHomeBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '700',
   },
   idleTitle: {
     color: '#FFFFFF',

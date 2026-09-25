@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -50,10 +50,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '../constants/theme';
 import { DownloadItem } from '../types/downloads';
 import { useDownloads } from '../context/DownloadContext';
+import { continueWatchingService } from '../services/continueWatchingService';
 
 interface OfflinePlayerModalProps {
   visible: boolean;
   item: DownloadItem | null;
+  initialPositionSec?: number;
+  posterUrl?: string | null;
   onClose: () => void;
 }
 
@@ -158,12 +161,16 @@ interface HudState {
 export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   visible,
   item,
+  initialPositionSec = 0,
+  posterUrl = null,
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
   const { backendUrl } = useDownloads();
+
+  const lastSavedTimeRef = useRef<number>(0);
 
   const [contentUri, setContentUri] = useState<string>('');
   const [fileExisted, setFileExisted] = useState<boolean>(true);
@@ -219,6 +226,25 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   controlsLockedRef.current = controlsLocked;
   const windowDimsRef = useRef({ width: windowWidth, height: windowHeight });
   windowDimsRef.current = { width: windowWidth, height: windowHeight };
+
+  const saveCurrentProgress = useCallback(
+    (curTime: number, dur: number) => {
+      if (!item || dur <= 0 || curTime < 5) return;
+      const title = item.title || item.movieFileName || item.fileName || 'Movie';
+      const id = item.url || item.fileUri || item.id || title;
+      continueWatchingService.saveProgress({
+        id,
+        movieTitle: title,
+        currentTime: curTime,
+        duration: dur,
+        posterUrl: posterUrl || null,
+        streamUrl: item.url,
+        fileUri: item.fileUri,
+        topicUrl: item.url,
+      });
+    },
+    [item, posterUrl]
+  );
 
   const gestureRef = useRef<{
     mode: 'none' | 'brightness' | 'volume' | 'seek';
@@ -498,6 +524,9 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
   const handleClosePlayer = async () => {
     try {
+      if (currentTimeRef.current > 5 && durationRef.current > 0) {
+        saveCurrentProgress(currentTimeRef.current, durationRef.current);
+      }
       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       await ScreenOrientation.unlockAsync();
     } catch {}
@@ -859,6 +888,14 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     ? (contentUri || localFileUri)
     : streamHttpUrl;
 
+  const isOnlineStream = Boolean(
+    effectiveVideoSrc &&
+    (effectiveVideoSrc.includes('/api/stream') ||
+     rawUrl.startsWith('magnet:') ||
+     rawUrl.includes('urn:btih:') ||
+     item.speed?.includes('Stream'))
+  );
+
   const movieTitle = item.title || item.movieFileName || item.fileName || 'Movie';
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
@@ -956,9 +993,13 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
       <div id="subtitle-overlay"></div>
 
       <div id="fallbackNotice">
-        <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px;">Format Notice</div>
+        <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px; color: ${isOnlineStream ? '#FF453A' : '#FFFFFF'};">
+          ${isOnlineStream ? 'Server is not reachable' : 'Format Notice'}
+        </div>
         <div style="font-size: 12px; color: #aaa; line-height: 1.4; margin-bottom: 12px;">
-          This video file format may play best in VLC or MX Player.
+          ${isOnlineStream
+            ? 'The streaming server connection failed or the server is not reachable.<br/>Please ensure your streaming server is running.'
+            : 'This video file format may play best in VLC or MX Player.'}
         </div>
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
@@ -1088,12 +1129,23 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           }
         };
 
+        var hasInitialSeek = false;
+        var initSec = ${initialPositionSec > 0 ? Math.floor(initialPositionSec) : 0};
+
         v.addEventListener('loadedmetadata', function() {
+          if (!hasInitialSeek && initSec > 0) {
+            hasInitialSeek = true;
+            try { v.currentTime = initSec; } catch(e) {}
+          }
           emitTime();
           v.play().catch(function() {});
         });
         v.addEventListener('durationchange', emitTime);
         v.addEventListener('canplay', function() {
+          if (!hasInitialSeek && initSec > 0) {
+            hasInitialSeek = true;
+            try { v.currentTime = initSec; } catch(e) {}
+          }
           emitTime();
           v.play().catch(function() {});
         });
@@ -1155,6 +1207,10 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                   // Clear buffering once we receive a valid time update with currentTime > 0
                   if (data.currentTime > 0) {
                     setIsBuffering(false);
+                    if (Math.abs(data.currentTime - lastSavedTimeRef.current) >= 5) {
+                      lastSavedTimeRef.current = data.currentTime;
+                      saveCurrentProgress(data.currentTime, data.duration || durationRef.current);
+                    }
                   }
                 } else if (data.type === 'PLAYING') {
                   setIsPlaying(true);
@@ -1163,12 +1219,29 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                   setIsBuffering(true);
                 } else if (data.type === 'PAUSED') {
                   setIsPlaying(false);
+                  saveCurrentProgress(currentTimeRef.current, durationRef.current);
+                } else if (data.type === 'ENDED') {
+                  setIsPlaying(false);
+                  if (item) {
+                    const id = item.url || item.fileUri || item.id || item.title;
+                    if (id) continueWatchingService.remove(id);
+                  }
                 } else if (data.type === 'OPEN_EXTERNAL') {
                   handleOpenExternal();
                 } else if (data.type === 'CLOSE_PLAYER') {
                   handleClosePlayer();
                 } else if (data.type === 'VIDEO_ERROR') {
                   setPlayerError(true);
+                  if (isOnlineStream) {
+                    Alert.alert(
+                      'Server is not reachable',
+                      `Streaming server is not responding (${backendUrl}).\n\nPlease verify that your VFLEX streaming server is running and reachable.`,
+                      [
+                        { text: 'Go Back', onPress: handleClosePlayer },
+                        { text: 'Open in VLC / MX', onPress: handleOpenExternal },
+                      ]
+                    );
+                  }
                 }
               } catch {}
             }}
@@ -2585,7 +2658,7 @@ const styles = StyleSheet.create({
 
   // ── Buffering / Loading Overlay ──────────────────────────────────────
   bufferingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',

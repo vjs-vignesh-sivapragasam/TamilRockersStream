@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { SplashScreen } from '../src/components/SplashScreen';
 import { BottomNavBar, TabKey } from '../src/components/BottomNavBar';
-import { HomeScreen } from '../src/components/HomeScreen';
 import { MovieFinderScreen } from '../src/components/MovieFinderScreen';
+import { MyListScreen } from '../src/components/MyListScreen';
 import { BrowserScreen } from '../src/components/BrowserScreen';
 import { DownloadsScreen } from '../src/components/DownloadsScreen';
 import { SettingsScreen } from '../src/components/SettingsScreen';
-import { OnlineScreen } from '../src/components/OnlineScreen';
 import { DownloadProvider, useDownloads } from '../src/context/DownloadContext';
 import { TorrentEngineBridge } from '../src/components/torrent/TorrentEngineBridge';
 import { Colors } from '../src/constants/theme';
@@ -29,19 +28,15 @@ function AppContent() {
         {/* All screens stay mounted; only the active one is shown via display flex/none
             to preserve WebView state (browser keeps its current page) */}
         <View style={[styles.screen, activeTab === 'home' ? styles.screenVisible : styles.screenHidden]}>
-          <HomeScreen onNavigateToTab={setActiveTab} />
+          <MovieFinderScreen onNavigateToTab={setActiveTab} />
         </View>
 
-        <View style={[styles.screen, activeTab === 'finder' ? styles.screenVisible : styles.screenHidden]}>
-          <MovieFinderScreen onNavigateToTab={setActiveTab} />
+        <View style={[styles.screen, activeTab === 'mylist' ? styles.screenVisible : styles.screenHidden]}>
+          <MyListScreen onNavigateToTab={setActiveTab} />
         </View>
 
         <View style={[styles.screen, activeTab === 'browser' ? styles.screenVisible : styles.screenHidden]}>
           <BrowserScreen onNavigateToDownloads={() => setActiveTab('downloads')} />
-        </View>
-
-        <View style={[styles.screen, activeTab === 'online' ? styles.screenVisible : styles.screenHidden]}>
-          <OnlineScreen />
         </View>
 
         <View style={[styles.screen, activeTab === 'downloads' ? styles.screenVisible : styles.screenHidden]}>

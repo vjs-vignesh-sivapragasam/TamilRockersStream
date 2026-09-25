@@ -8,16 +8,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Home,
-  Search,
+  Clapperboard,
+  Bookmark,
   Globe,
   ArrowDownToLine,
   SlidersHorizontal,
-  Radio,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
-export type TabKey = 'home' | 'finder' | 'browser' | 'online' | 'downloads' | 'settings';
+export type TabKey = 'home' | 'mylist' | 'browser' | 'downloads' | 'settings';
 
 interface BottomNavBarProps {
   activeTab: TabKey;
@@ -123,10 +122,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   const insets = useSafeAreaInsets();
 
   const tabs: TabConfig[] = [
-    { key: 'home',      label: 'Home',      icon: Home },
-    { key: 'finder',    label: 'Finder',    icon: Search },
+    { key: 'home',      label: 'Home',      icon: Clapperboard },
+    { key: 'mylist',    label: 'My List',   icon: Bookmark },
     { key: 'browser',   label: 'Browser',   icon: Globe },
-    { key: 'online',    label: 'Online',    icon: Radio },
     { key: 'downloads', label: 'Downloads', icon: ArrowDownToLine, badge: downloadBadgeCount || undefined },
     { key: 'settings',  label: 'Settings',  icon: SlidersHorizontal },
   ];

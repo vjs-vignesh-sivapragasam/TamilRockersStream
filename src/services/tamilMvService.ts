@@ -100,12 +100,22 @@ export const tamilMvService = {
     const cleanTopicUrl = (url: string) =>
       url.split('#')[0].replace(/&.*$/, '').replace(/\/page\/\d+\/?$/, '/');
 
+    const stripForumBoilerplate = (str: string): string => {
+      if (!str) return '';
+      return str
+        .replace(/<[^>]*>/g, '')
+        .replace(/^(?:view\s+(?:the\s+)?topic|go\s+to\s+(?:the\s+)?topic)[\s:'"‘“\-]*/i, '')
+        .replace(/['"’”]+$/g, '')
+        .replace(/^['"‘“]+/g, '')
+        .trim();
+    };
+
     // 1. Matches anchors with title attribute (usually holds the complete full post title in IPS forums)
     const titleAttrRegex = /<a[^>]*href=["'](https?:\/\/[^"']*\/topic\/[^"']*)["'][^>]*title=["']([^"']+)["'][^>]*>/gi;
     let match;
     while ((match = titleAttrRegex.exec(html)) !== null) {
       const topicUrl = cleanTopicUrl(match[1]);
-      const titleAttr = match[2].replace(/<[^>]*>/g, '').trim();
+      const titleAttr = stripForumBoilerplate(match[2]);
       if (topicUrl && !topicUrl.includes('/topic/183-0') && titleAttr && titleAttr.length >= 3 && !/^(page|next|prev|last)$/i.test(titleAttr)) {
         topicMap.set(topicUrl, titleAttr);
       }
@@ -115,7 +125,7 @@ export const tamilMvService = {
     const topicRegex = /<a[^>]*href=["'](https?:\/\/[^"']*\/topic\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
     while ((match = topicRegex.exec(html)) !== null) {
       const topicUrl = cleanTopicUrl(match[1]);
-      const rawText = match[2].replace(/<[^>]*>/g, '').trim();
+      const rawText = stripForumBoilerplate(match[2]);
       if (!topicUrl || topicUrl.includes('/topic/183-0') || !rawText || rawText.length < 3) continue;
       if (/^\d+$/.test(rawText) || /^(next|prev|last|page)$/i.test(rawText)) continue;
 
@@ -165,9 +175,13 @@ export const tamilMvService = {
       );
 
       if (existing) {
-        const hasRes = existing.resolutions.some((res) => res.rawTitle === parsed.resolutions[0].rawTitle);
-        if (!hasRes) {
-          existing.resolutions.push(...parsed.resolutions);
+        for (const res of parsed.resolutions) {
+          const hasRes = existing.resolutions.some(
+            (r) => r.resolution === res.resolution && (r.size === res.size || !res.size)
+          );
+          if (!hasRes) {
+            existing.resolutions.push(res);
+          }
         }
       } else {
         results.push(parsed);
@@ -181,6 +195,16 @@ export const tamilMvService = {
    * Parse movie title, year, language, and resolution info from a post title
    */
   parseTitleMetadata(rawTitle: string, topicUrl: string): TamilMvMovieResult {
+    const stripForumBoilerplate = (str: string): string => {
+      if (!str) return '';
+      return str
+        .replace(/<[^>]*>/g, '')
+        .replace(/^(?:view\s+(?:the\s+)?topic|go\s+to\s+(?:the\s+)?topic)[\s:'"‘“\-]*/i, '')
+        .replace(/['"’”]+$/g, '')
+        .replace(/^['"‘“]+/g, '')
+        .trim();
+    };
+
     const isJunkText = (str: string) => {
       if (!str || str.length < 2) return true;
       const lower = str.toLowerCase().trim();
@@ -188,13 +212,14 @@ export const tamilMvService = {
         /^(languages?|rips?|exclusive|\-|\+|\[|\/)/i.test(lower) ||
         /^[-–—\s\d.+]+(?:gb|mb)?(?:\s*\+\s*rips?)?[\])]?$/i.test(lower) ||
         /^(page|next|prev|last|forum|topic)$/i.test(lower) ||
+        /^(view\s+(?:the\s+)?topic|go\s+to\s+topic)/i.test(lower) ||
         lower.includes('8.3gb') ||
         lower === 'languages' ||
         lower === 'language'
       );
     };
 
-    let titleToParse = (rawTitle || '').replace(/<[^>]*>/g, '').trim();
+    let titleToParse = stripForumBoilerplate(rawTitle || '');
 
     // If titleToParse is junk, badge-only, or lacks year, recover clean title from topicUrl slug!
     if (topicUrl && (isJunkText(titleToParse) || !/\b(19\d\d|20\d\d)\b/.test(titleToParse))) {
@@ -202,7 +227,7 @@ export const tamilMvService = {
       if (slugMatch && slugMatch[1]) {
         const slugDecoded = decodeURIComponent(slugMatch[1]).replace(/[-_]+/g, ' ').trim();
         if (slugDecoded.length > titleToParse.length || isJunkText(titleToParse)) {
-          titleToParse = slugDecoded;
+          titleToParse = stripForumBoilerplate(slugDecoded);
         }
       }
     }
@@ -210,6 +235,7 @@ export const tamilMvService = {
     // Strip bracketed language tags like [Tamil + Telugu + Hindi] or [Exclusive] at start
     titleToParse = titleToParse.replace(/^\[[^\]]*\]\s*/g, '');
     titleToParse = titleToParse.replace(/^www\.[^\s]+ - /i, '').trim();
+    titleToParse = stripForumBoilerplate(titleToParse);
 
     // Extract Year (e.g. 2024, 2025, 2026, 2023)
     const yearMatch = titleToParse.match(/\b(19\d\d|20\d\d)\b/);
@@ -227,8 +253,8 @@ export const tamilMvService = {
         .trim();
     }
 
-    // Clean leading & trailing punctuation, brackets, hyphens
-    cleanTitle = cleanTitle
+    // Clean leading & trailing punctuation, brackets, hyphens, and boilerplate
+    cleanTitle = stripForumBoilerplate(cleanTitle)
       .replace(/^[([{\-–—:_+\s]+/g, '')
       .replace(/[([{\-–—:_+\s]+$/g, '')
       .trim();
@@ -237,9 +263,9 @@ export const tamilMvService = {
     if (!cleanTitle || cleanTitle.length < 2 || isJunkText(cleanTitle)) {
       const parts = titleToParse.split(/\s+(?:tamil|telugu|hindi|malayalam|kannada|1080p|720p|4k|web|hdrip)\b/i);
       if (parts[0] && parts[0].trim().length >= 2 && !isJunkText(parts[0])) {
-        cleanTitle = parts[0].trim();
+        cleanTitle = stripForumBoilerplate(parts[0].trim());
       } else {
-        cleanTitle = titleToParse.slice(0, 30);
+        cleanTitle = stripForumBoilerplate(titleToParse.slice(0, 30));
       }
     }
 
@@ -259,6 +285,8 @@ export const tamilMvService = {
       }
     }
 
+    cleanTitle = stripForumBoilerplate(cleanTitle);
+
     if (isJunkText(cleanTitle)) {
       cleanTitle = 'Tamil Movie';
     }
@@ -270,16 +298,14 @@ export const tamilMvService = {
       .join(' ')
       .trim();
 
+    cleanTitle = stripForumBoilerplate(cleanTitle);
+
     // Extract Language
     let language = 'Tamil';
     const langMatch = rawTitle.match(/\b(Tamil|Telugu|Hindi|Malayalam|Kannada|English)\b/i);
     if (langMatch) {
       language = langMatch[1];
     }
-
-    // Extract Size (e.g. 2.9GB, 1.4GB, 700MB, 250MB, 4.5GB)
-    const sizeMatch = rawTitle.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
-    const size = sizeMatch ? sizeMatch[1].toUpperCase() : undefined;
 
     // Extract Codec (e.g. HEVC, AVC, x264, x265, 10Bit)
     const codecMatch = rawTitle.match(/\b(HEVC|AVC|x264|x265|H\.?264|H\.?265|10Bit)\b/i);
@@ -289,33 +315,104 @@ export const tamilMvService = {
     const audioMatch = rawTitle.match(/(DD\+?\s*5\.1|Atmos|AAC|MP3|\d+Kbps)/i);
     const audio = audioMatch ? audioMatch[1] : undefined;
 
-    // Detect Resolution (e.g. 4K, 2160p, 1080p, 720p, 480p, HDRip, WEB-DL)
-    let resolution = '1080p Full HD';
-    if (/4k|2160p|uhd/i.test(rawTitle)) {
-      resolution = '4K 2160p UHD';
-    } else if (/1080p/i.test(rawTitle)) {
-      resolution = '1080p Full HD';
-    } else if (/720p/i.test(rawTitle)) {
-      resolution = '720p HD';
-    } else if (/480p/i.test(rawTitle)) {
-      resolution = '480p SD';
-    } else if (/250mb/i.test(rawTitle)) {
-      resolution = 'HQ HDRip (250 MB)';
-    } else if (/700mb/i.test(rawTitle)) {
-      resolution = 'HQ HDRip (700 MB)';
-    } else if (/hdrip|web-dl|dvdrip/i.test(rawTitle)) {
-      resolution = 'HDRip / WEB-DL';
+    // Helper to get estimated clean size if not explicitly in segment
+    const getEstimateSize = (resName: string): string => {
+      if (/4k|2160p/i.test(resName)) return '6.5 GB';
+      if (/1080p/i.test(resName)) return '2.8 GB';
+      if (/720p.*hevc|hevc/i.test(resName)) return '850 MB';
+      if (/720p/i.test(resName)) return '1.4 GB';
+      if (/480p/i.test(resName)) return '450 MB';
+      if (/250mb/i.test(resName)) return '250 MB';
+      if (/700mb/i.test(resName)) return '700 MB';
+      return '1.4 GB';
+    };
+
+    const resolutions: MovieResolutionItem[] = [];
+
+    // Check if rawTitle lists multiple distinct resolutions separated by '|', '/', or multiple quality keywords
+    const hasMultipleRes =
+      (rawTitle.includes('|') || rawTitle.includes('/')) &&
+      /(1080p|720p|480p|4k|2160p|250mb|700mb|hevc)/i.test(rawTitle);
+
+    if (hasMultipleRes) {
+      const segments = rawTitle.split(/[|/]/);
+      for (const seg of segments) {
+        if (!/(1080p|720p|480p|4k|2160p|250mb|700mb|hevc|hdrip)/i.test(seg)) continue;
+        const segSizeMatch = seg.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
+        let segRes = '1080p Full HD';
+        if (/4k|2160p|uhd/i.test(seg)) segRes = '4K 2160p UHD';
+        else if (/1080p/i.test(seg)) segRes = '1080p Full HD';
+        else if (/720p.*hevc|hevc.*720p/i.test(seg)) segRes = '720p HEVC';
+        else if (/720p/i.test(seg)) segRes = '720p HD';
+        else if (/480p/i.test(seg)) segRes = '480p SD';
+        else if (/250mb/i.test(seg)) segRes = 'HQ HDRip (250 MB)';
+        else if (/700mb/i.test(seg)) segRes = 'HQ HDRip (700 MB)';
+        else if (/hevc/i.test(seg)) segRes = 'HEVC 10Bit';
+        else if (/hdrip|web-dl/i.test(seg)) segRes = 'HDRip / WEB-DL';
+
+        const segSize = segSizeMatch ? segSizeMatch[1].toUpperCase() : getEstimateSize(segRes);
+
+        if (!resolutions.some((r) => r.resolution === segRes)) {
+          resolutions.push({
+            id: `res-${Math.random().toString(36).substring(2, 9)}`,
+            resolution: segRes,
+            rawTitle: seg.trim(),
+            size: segSize,
+            audio,
+            codec,
+            topicUrl,
+          });
+        }
+      }
     }
 
-    const resolutionItem: MovieResolutionItem = {
-      id: `res-${Math.random().toString(36).substring(2, 9)}`,
-      resolution,
-      rawTitle,
-      size,
-      audio,
-      codec,
-      topicUrl,
+    if (resolutions.length === 0) {
+      // Single resolution extraction
+      let resolution = '1080p Full HD';
+      if (/4k|2160p|uhd/i.test(rawTitle)) {
+        resolution = '4K 2160p UHD';
+      } else if (/1080p/i.test(rawTitle)) {
+        resolution = '1080p Full HD';
+      } else if (/720p.*hevc|hevc.*720p/i.test(rawTitle)) {
+        resolution = '720p HEVC';
+      } else if (/720p/i.test(rawTitle)) {
+        resolution = '720p HD';
+      } else if (/480p/i.test(rawTitle)) {
+        resolution = '480p SD';
+      } else if (/250mb/i.test(rawTitle)) {
+        resolution = 'HQ HDRip (250 MB)';
+      } else if (/700mb/i.test(rawTitle)) {
+        resolution = 'HQ HDRip (700 MB)';
+      } else if (/hdrip|web-dl|dvdrip/i.test(rawTitle)) {
+        resolution = 'HDRip / WEB-DL';
+      }
+
+      const sizeMatch = rawTitle.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
+      const size = sizeMatch ? sizeMatch[1].toUpperCase() : getEstimateSize(resolution);
+
+      resolutions.push({
+        id: `res-${Math.random().toString(36).substring(2, 9)}`,
+        resolution,
+        rawTitle,
+        size,
+        audio,
+        codec,
+        topicUrl,
+      });
+    }
+
+    // Sort resolutions: 4K -> 1080p -> 720p -> 480p -> 250MB
+    const getResOrder = (res: string): number => {
+      if (/4k|2160p/i.test(res)) return 1;
+      if (/1080p/i.test(res)) return 2;
+      if (/720p.*hevc/i.test(res)) return 3;
+      if (/720p/i.test(res)) return 4;
+      if (/480p/i.test(res)) return 5;
+      if (/700mb/i.test(res)) return 6;
+      if (/250mb/i.test(res)) return 7;
+      return 8;
     };
+    resolutions.sort((a, b) => getResOrder(a.resolution) - getResOrder(b.resolution));
 
     return {
       id: `mv-${Math.random().toString(36).substring(2, 9)}`,
@@ -324,14 +421,18 @@ export const tamilMvService = {
       language,
       topicTitle: rawTitle,
       topicUrl,
-      resolutions: [resolutionItem],
+      resolutions,
     };
   },
 
   /**
-   * Extract direct magnet and .torrent download links from a topic page HTML
+   * Extract direct magnet and .torrent download links from a topic page HTML.
+   * If targetResolution is specified, finds the magnet specifically matching that quality.
    */
-  async extractMagnetFromTopic(topicUrl: string): Promise<{ magnetUrl?: string; torrentUrl?: string }> {
+  async extractMagnetFromTopic(
+    topicUrl: string,
+    targetResolution?: string
+  ): Promise<{ magnetUrl?: string; torrentUrl?: string }> {
     if (!topicUrl) return {};
     try {
       const controller = new AbortController();
@@ -350,15 +451,42 @@ export const tamilMvService = {
       if (!response.ok) return {};
       const html = await response.text();
 
-      // 1. Extract magnet URL
-      const magnetMatch = html.match(/href=["'](magnet:\?[^"']+)["']/i);
-      let magnetUrl = magnetMatch ? magnetMatch[1] : undefined;
-      if (magnetUrl) {
-        // Decode HTML entities like &amp; -> & so torrent clients and trackers parse correctly
-        magnetUrl = magnetUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+      // Find all magnet links with context
+      const magnetRegex = /href=["'](magnet:\?[^"']+)["']/gi;
+      let mMatch;
+      const allMagnets: { url: string; context: string }[] = [];
+
+      while ((mMatch = magnetRegex.exec(html)) !== null) {
+        let cleanMagnet = mMatch[1].replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+        const start = Math.max(0, mMatch.index - 250);
+        const context = html.substring(start, mMatch.index).replace(/<[^>]+>/g, ' ');
+        const dnMatch = cleanMagnet.match(/[?&]dn=([^&]+)/i);
+        const dn = dnMatch ? decodeURIComponent(dnMatch[1].replace(/\+/g, ' ')) : '';
+        allMagnets.push({ url: cleanMagnet, context: `${context} ${dn}`.toLowerCase() });
       }
 
-      // 2. Extract torrent file attachment URL
+      let selectedMagnet = allMagnets.length > 0 ? allMagnets[0].url : undefined;
+
+      if (targetResolution && allMagnets.length > 1) {
+        const target = targetResolution.toLowerCase();
+        let keyword = '';
+        if (/4k|2160p/i.test(target)) keyword = '4k';
+        else if (/1080p/i.test(target)) keyword = '1080p';
+        else if (/720p.*hevc|hevc/i.test(target)) keyword = 'hevc';
+        else if (/720p/i.test(target)) keyword = '720p';
+        else if (/480p/i.test(target)) keyword = '480p';
+        else if (/250mb/i.test(target)) keyword = '250mb';
+        else if (/700mb/i.test(target)) keyword = '700mb';
+
+        if (keyword) {
+          const match = allMagnets.find((m) => m.context.includes(keyword));
+          if (match) {
+            selectedMagnet = match.url;
+          }
+        }
+      }
+
+      // Extract torrent file attachment URL
       const torrentMatch =
         html.match(/href=["'](https?:\/\/[^"']+\.torrent[^"']*)["']/i) ||
         html.match(
@@ -369,7 +497,7 @@ export const tamilMvService = {
         torrentUrl = torrentUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
       }
 
-      return { magnetUrl, torrentUrl };
+      return { magnetUrl: selectedMagnet, torrentUrl };
     } catch (err) {
       console.warn('Failed to extract magnet from topic:', err);
       return {};
@@ -377,8 +505,141 @@ export const tamilMvService = {
   },
 
   /**
+   * Extract all resolution items with their exact file sizes, codecs, and magnet URLs
+   * directly from a topic page HTML.
+   */
+  async extractResolutionsFromTopic(topicUrl: string): Promise<MovieResolutionItem[]> {
+    if (!topicUrl) return [];
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      const response = await fetch(topicUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) return [];
+      const html = await response.text();
+
+      // Find first comment / post content container
+      const postMatch =
+        html.match(/data-role=["']commentContent["'][\s\S]*?(?:<\/div>\s*<\/div>|<!--post)/i) ||
+        html.match(/class=["'][^"']*ipsType_richText[^"']*["'][\s\S]*?<\/div>/i);
+      const searchArea = postMatch ? postMatch[0] : html;
+
+      // Extract all magnet links
+      const magnetRegex = /href=["'](magnet:\?[^"']+)["']/gi;
+      let mMatch;
+      const magnets: { url: string; index: number }[] = [];
+
+      while ((mMatch = magnetRegex.exec(searchArea)) !== null) {
+        let cleanMagnet = mMatch[1].replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+        magnets.push({ url: cleanMagnet, index: mMatch.index });
+      }
+
+      if (magnets.length === 0) return [];
+
+      const results: MovieResolutionItem[] = [];
+
+      for (let i = 0; i < magnets.length; i++) {
+        const { url: magnetUrl, index } = magnets[i];
+
+        // 1. Extract context text preceding this magnet link
+        const startIndex = Math.max(0, index - 300);
+        const precedingSnippet = searchArea.substring(startIndex, index);
+        const cleanPrecedingText = precedingSnippet.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+        // 2. Extract dn= from magnet
+        const dnMatch = magnetUrl.match(/[?&]dn=([^&]+)/i);
+        let dnText = dnMatch ? decodeURIComponent(dnMatch[1].replace(/\+/g, ' ')) : '';
+
+        const fullContext = `${cleanPrecedingText} ${dnText}`;
+
+        // 3. Extract Size
+        const sizeMatch = fullContext.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
+        let size = sizeMatch ? sizeMatch[1].toUpperCase() : undefined;
+
+        // 4. Extract Resolution
+        let resolution = '1080p Full HD';
+        if (/4k|2160p|uhd/i.test(fullContext)) {
+          resolution = '4K 2160p UHD';
+          if (!size) size = '6.5 GB';
+        } else if (/1080p/i.test(fullContext)) {
+          resolution = '1080p Full HD';
+          if (!size) size = '2.8 GB';
+        } else if (/720p.*hevc|hevc.*720p/i.test(fullContext)) {
+          resolution = '720p HEVC';
+          if (!size) size = '850 MB';
+        } else if (/720p/i.test(fullContext)) {
+          resolution = '720p HD';
+          if (!size) size = '1.4 GB';
+        } else if (/480p/i.test(fullContext)) {
+          resolution = '480p SD';
+          if (!size) size = '450 MB';
+        } else if (/250mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (250 MB)';
+          size = '250 MB';
+        } else if (/700mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (700 MB)';
+          size = '700 MB';
+        } else if (/hevc/i.test(fullContext)) {
+          resolution = 'HEVC 10Bit';
+          if (!size) size = '1.0 GB';
+        } else if (/hdrip|web-dl/i.test(fullContext)) {
+          resolution = 'HDRip / WEB-DL';
+          if (!size) size = '1.2 GB';
+        }
+
+        // 5. Codec & Audio
+        const codecMatch = fullContext.match(/\b(HEVC|AVC|x264|x265|H\.?264|H\.?265|10Bit)\b/i);
+        const codec = codecMatch ? codecMatch[1] : undefined;
+
+        const audioMatch = fullContext.match(/(DD\+?\s*5\.1|Atmos|AAC|MP3|\d+Kbps)/i);
+        const audio = audioMatch ? audioMatch[1] : undefined;
+
+        if (!results.some((r) => r.resolution === resolution && r.size === size)) {
+          results.push({
+            id: `res-topic-${i}-${Math.random().toString(36).substring(2, 7)}`,
+            resolution,
+            rawTitle: dnText || resolution,
+            size: size || '1.4 GB',
+            audio,
+            codec,
+            magnetUrl,
+            topicUrl,
+          });
+        }
+      }
+
+      // Sort resolutions
+      const getResOrder = (res: string): number => {
+        if (/4k|2160p/i.test(res)) return 1;
+        if (/1080p/i.test(res)) return 2;
+        if (/720p.*hevc/i.test(res)) return 3;
+        if (/720p/i.test(res)) return 4;
+        if (/480p/i.test(res)) return 5;
+        if (/700mb/i.test(res)) return 6;
+        if (/250mb/i.test(res)) return 7;
+        return 8;
+      };
+      results.sort((a, b) => getResOrder(a.resolution) - getResOrder(b.resolution));
+
+      return results;
+    } catch (err) {
+      console.warn('Failed to extract resolutions from topic:', err);
+      return [];
+    }
+  },
+
+  /**
    * Extract the movie poster/thumbnail image URL from a topic page.
-   * Looks for the first large content image (skips avatars, icons, banners).
+   * Looks for the first large content image (skips avatars, icons, banners, UI assets).
    */
   async extractPosterFromTopic(topicUrl: string): Promise<string | undefined> {
     if (!topicUrl) return undefined;
@@ -399,26 +660,71 @@ export const tamilMvService = {
       if (!response.ok) return undefined;
       const html = await response.text();
 
-      // Extract all <img> tags and their src attributes
-      const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-      let match;
-      const candidates: string[] = [];
+      // Derive origin from topicUrl so relative paths can be resolved
+      let topicOrigin = '';
+      try {
+        const u = new URL(topicUrl);
+        topicOrigin = u.origin; // e.g. "https://www.1tamilmv.lease"
+      } catch {}
 
-      while ((match = imgRegex.exec(html)) !== null) {
-        const src = match[1].replace(/&amp;/g, '&').trim();
-        // Skip tiny icons, avatars, emoticons, ads, tracking pixels
-        if (!src || src.length < 10) continue;
-        if (/\.(gif|svg|ico)(\?|$)/i.test(src)) continue;
-        if (/(avatar|emoji|emoticon|smilie|icon|logo|banner|ad|pixel|track)/i.test(src)) continue;
+      // Find first comment / post content container
+      const postMatch =
+        html.match(/data-role=["']commentContent["'][\s\S]*?(?:<\/div>\s*<\/div>|<!--post)/i) ||
+        html.match(/class=["'][^"']*ipsType_richText[^"']*["'][\s\S]*?<\/div>/i);
+      const searchArea = postMatch ? postMatch[0] : html;
+
+      // Extract all <img> tags and their src/data-src attributes
+      const imgRegex = /<img[^>]+(?:src|data-src|data-lazy-src|data-original)=["']([^"']+)["'][^>]*>/gi;
+      let match;
+
+      while ((match = imgRegex.exec(searchArea)) !== null) {
+        let src = match[1].replace(/&amp;/g, '&').trim();
+        if (!src || src.length < 8) continue;
         if (/data:image/i.test(src)) continue;
-        // Prefer images hosted on the same domain or known image hosts
-        if (/\.(jpg|jpeg|png|webp)(\?|$)/i.test(src)) {
-          candidates.push(src);
+        if (/\.(gif|svg|ico)(\?|$)/i.test(src)) continue;
+        if (
+          /(avatar|emoji|emoticon|smilie|icon|logo|banner|ad|pixel|track|torrborder|uTorrent|defaultPhoto|theme_images|ranks?|badges?)/i.test(
+            src
+          )
+        ) {
+          continue;
+        }
+
+        // Support standard image extensions AND query param images like pbs.twimg.com/media/...?format=jpg
+        const isImgExt = /\.(jpg|jpeg|png|webp)(\?|$)/i.test(src) || /format=(jpg|jpeg|png|webp)/i.test(src);
+        // Also support images hosted on known image hosting boards
+        const isKnownHost =
+          /(twimg\.com|pixelbb\.com|postimg|ibb\.co|imgur|imghippo|imagebam|turboimagehost)/i.test(src);
+
+        if (isImgExt || isKnownHost) {
+          // Convert relative URLs to absolute
+          if (src.startsWith('//')) {
+            src = 'https:' + src;
+          } else if (src.startsWith('/') && topicOrigin) {
+            src = topicOrigin + src;
+          }
+          if (src.startsWith('http://') || src.startsWith('https://')) {
+            return src;
+          }
         }
       }
 
-      // Return first candidate (usually the movie poster at the top of the post)
-      return candidates.length > 0 ? candidates[0] : undefined;
+      // Fallback: check og:image meta tag if present
+      const ogMatch =
+        html.match(/<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:image["']/i);
+      if (ogMatch && ogMatch[1]) {
+        let ogSrc = ogMatch[1].replace(/&amp;/g, '&').trim();
+        if (!/(logo|icon|avatar|default)/i.test(ogSrc) && !/\.(gif|svg|ico)(\?|$)/i.test(ogSrc)) {
+          if (ogSrc.startsWith('//')) ogSrc = 'https:' + ogSrc;
+          else if (ogSrc.startsWith('/') && topicOrigin) ogSrc = topicOrigin + ogSrc;
+          if (ogSrc.startsWith('http://') || ogSrc.startsWith('https://')) {
+            return ogSrc;
+          }
+        }
+      }
+
+      return undefined;
     } catch (err) {
       console.warn('Failed to extract poster from topic:', err);
       return undefined;
