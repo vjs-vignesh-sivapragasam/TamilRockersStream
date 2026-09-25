@@ -1036,7 +1036,7 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={['#E50914', '#B20710']}
+                colors={[Colors.primary, '#B51527']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.submitGradient}
@@ -1149,9 +1149,9 @@ export const DownloadsScreen: React.FC = () => {
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+                    backgroundColor: 'rgba(250, 36, 60, 0.12)',
                     borderWidth: 1,
-                    borderColor: 'rgba(229, 9, 20, 0.35)',
+                    borderColor: 'rgba(250, 36, 60, 0.35)',
                     borderRadius: 8,
                     paddingHorizontal: 10,
                     paddingVertical: 8,
@@ -1232,7 +1232,7 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={['#E50914', '#B20710']}
+                colors={[Colors.primary, '#B51527']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.submitGradient}
@@ -1282,7 +1282,7 @@ export const DownloadsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#141414',
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: 'row',
@@ -1335,7 +1335,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   storageCard: {
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 14,
     marginBottom: 20,
@@ -1418,12 +1418,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: 0.5,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
   },
   rescanStorageText: {
     color: Colors.netflixRed,
@@ -1444,7 +1444,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   activeCard: {
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
@@ -1532,7 +1532,7 @@ const styles = StyleSheet.create({
   },
   movieCard: {
     flexDirection: 'row',
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1,
@@ -1563,7 +1563,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(229, 9, 20, 0.9)',
+    backgroundColor: 'rgba(250, 36, 60, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1679,7 +1679,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modernModalSheet: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     paddingHorizontal: 20,
@@ -1716,11 +1716,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
   },
   sheetTitle: {
     color: '#FFFFFF',
@@ -1764,7 +1764,7 @@ const styles = StyleSheet.create({
   modernTabItemActive: {
     backgroundColor: '#262626',
     borderWidth: 0.5,
-    borderColor: 'rgba(229, 9, 20, 0.5)',
+    borderColor: 'rgba(250, 36, 60, 0.5)',
   },
   modernTabItemText: {
     color: '#888888',
@@ -1802,7 +1802,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
@@ -1820,12 +1820,12 @@ const styles = StyleSheet.create({
   },
   browseActionPill: {
     marginTop: 8,
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.4)',
+    borderColor: 'rgba(250, 36, 60, 0.4)',
   },
   browseActionText: {
     color: '#FF6B6B',

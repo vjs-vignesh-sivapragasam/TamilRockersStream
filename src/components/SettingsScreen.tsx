@@ -661,7 +661,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
           {/* Donate Us Card */}
           <TouchableOpacity
-            style={[styles.devCard, { marginTop: 10, borderColor: 'rgba(229, 9, 20, 0.4)' }]}
+            style={[styles.devCard, { marginTop: 10, borderColor: 'rgba(250, 36, 60, 0.4)' }]}
             activeOpacity={0.8}
             onPress={() => {
               if (onOpenDonate) onOpenDonate();
@@ -682,7 +682,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <Text style={styles.devCardRole}>Support Tracker Servers & Development</Text>
                 <Text style={styles.devCardSubtext}>Contribute via UPI or Buy a Coffee</Text>
               </View>
-              <ChevronRight color="#E50914" size={20} />
+              <ChevronRight color={Colors.primary} size={20} />
             </View>
           </TouchableOpacity>
         </View>
@@ -761,7 +761,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#141414',
+    backgroundColor: Colors.background,
   },
   header: {
     paddingHorizontal: 16,
@@ -791,7 +791,7 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   card: {
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 14,
     borderWidth: 1,
@@ -827,12 +827,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 6,
     borderWidth: 0.5,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
   },
   rescanBtnText: {
     color: Colors.netflixRed,
@@ -969,9 +969,9 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     borderWidth: 1.5,
-    borderColor: 'rgba(229, 9, 20, 0.4)',
+    borderColor: 'rgba(250, 36, 60, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1003,12 +1003,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   supportBadge: {
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.4)',
+    borderColor: 'rgba(250, 36, 60, 0.4)',
   },
   supportBadgeText: {
     color: '#FF6B6B',

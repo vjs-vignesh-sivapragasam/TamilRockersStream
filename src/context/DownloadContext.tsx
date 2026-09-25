@@ -138,7 +138,13 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     socketRef.current.on('torrent_progress', (data) => {
       setDownloads((prev) => prev.map(d => {
-        if (d.id === data.appId) {
+        const matchesId = d.id === data.appId;
+        const matchesHash = data.id && (
+          d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
+          d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase()
+        );
+
+        if (matchesId || matchesHash) {
           const speedStr = data.downloadSpeed >= 1024 * 1024 
             ? (data.downloadSpeed / 1024 / 1024).toFixed(1) + ' MB/s' 
             : (data.downloadSpeed / 1024).toFixed(0) + ' KB/s';
@@ -157,7 +163,13 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     socketRef.current.on('torrent_done', (data) => {
       setDownloads((prev) => prev.map(d => {
-        if (d.id === data.appId) {
+        const matchesId = d.id === data.appId;
+        const matchesHash = data.id && (
+          d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
+          d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase()
+        );
+
+        if (matchesId || matchesHash) {
           if (data.downloadUrl) {
             const finalItem = { ...d, url: backendUrl + data.downloadUrl, isTorrent: false };
             downloadService.startRealDownload(

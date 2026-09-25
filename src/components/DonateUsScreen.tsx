@@ -235,7 +235,7 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
                 <Text style={styles.perkText}>High-Speed Swarms</Text>
               </View>
               <View style={styles.perkPill}>
-                <Sparkles color="#E50914" size={13} />
+                <Sparkles color={Colors.primary} size={13} />
                 <Text style={styles.perkText}>Open & Free</Text>
               </View>
             </View>
@@ -315,7 +315,7 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={['#E50914', '#B20710']}
+                colors={[Colors.primary, '#B51527']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.payBtnGradient}
@@ -360,7 +360,7 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: Colors.background,
   },
   topHeader: {
     flexDirection: 'row',
@@ -370,13 +370,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 0.5,
     borderBottomColor: '#262626',
-    backgroundColor: '#121212',
+    backgroundColor: Colors.background,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -402,7 +402,7 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
     shadowColor: Colors.netflixRed,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
@@ -413,12 +413,12 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 14,
     borderWidth: 1.5,
-    borderColor: 'rgba(229, 9, 20, 0.4)',
+    borderColor: 'rgba(250, 36, 60, 0.4)',
   },
   heroTitle: {
     color: '#FFFFFF',
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
   },
   tierCardActive: {
     borderColor: Colors.netflixRed,
-    backgroundColor: 'rgba(229, 9, 20, 0.08)',
+    backgroundColor: 'rgba(250, 36, 60, 0.08)',
   },
   tierHeader: {
     flexDirection: 'row',

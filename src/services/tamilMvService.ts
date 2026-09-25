@@ -375,4 +375,57 @@ export const tamilMvService = {
       return {};
     }
   },
+
+  /**
+   * Extract the movie poster/thumbnail image URL from a topic page.
+   * Looks for the first large content image (skips avatars, icons, banners).
+   */
+  async extractPosterFromTopic(topicUrl: string): Promise<string | undefined> {
+    if (!topicUrl) return undefined;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+
+      const response = await fetch(topicUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) return undefined;
+      const html = await response.text();
+
+      // Extract all <img> tags and their src attributes
+      const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+      let match;
+      const candidates: string[] = [];
+
+      while ((match = imgRegex.exec(html)) !== null) {
+        const src = match[1].replace(/&amp;/g, '&').trim();
+        // Skip tiny icons, avatars, emoticons, ads, tracking pixels
+        if (!src || src.length < 10) continue;
+        if (/\.(gif|svg|ico)(\?|$)/i.test(src)) continue;
+        if (/(avatar|emoji|emoticon|smilie|icon|logo|banner|ad|pixel|track)/i.test(src)) continue;
+        if (/data:image/i.test(src)) continue;
+        // Prefer images hosted on the same domain or known image hosts
+        if (/\.(jpg|jpeg|png|webp)(\?|$)/i.test(src)) {
+          candidates.push(src);
+        }
+      }
+
+      // Return first candidate (usually the movie poster at the top of the post)
+      return candidates.length > 0 ? candidates[0] : undefined;
+    } catch (err) {
+      console.warn('Failed to extract poster from topic:', err);
+      return undefined;
+    }
+  },
 };
+
+// Module-level in-memory poster cache: topicUrl → posterUrl | null (null = confirmed no poster)
+export const posterCache = new Map<string, string | null>();
+

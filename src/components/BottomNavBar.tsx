@@ -13,10 +13,11 @@ import {
   Globe,
   ArrowDownToLine,
   SlidersHorizontal,
+  Radio,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
-export type TabKey = 'home' | 'finder' | 'browser' | 'downloads' | 'settings';
+export type TabKey = 'home' | 'finder' | 'browser' | 'online' | 'downloads' | 'settings';
 
 interface BottomNavBarProps {
   activeTab: TabKey;
@@ -31,10 +32,10 @@ interface TabConfig {
   badge?: number;
 }
 
-const RED = Colors.netflixRed;          // #FF0040
-const INACTIVE = '#4A4A5A';
-const NAV_BG = '#111114';
-const PILL_BG = 'rgba(255,0,64,0.13)';
+const RED = Colors.primary;
+const INACTIVE = Colors.textSecondary;
+const NAV_BG = Colors.navBg;
+const PILL_BG = Colors.navActivePill;
 
 /* ─────────────────────────── Tab Item ─────────────────────────── */
 function TabItem({
@@ -125,6 +126,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     { key: 'home',      label: 'Home',      icon: Home },
     { key: 'finder',    label: 'Finder',    icon: Search },
     { key: 'browser',   label: 'Browser',   icon: Globe },
+    { key: 'online',    label: 'Online',    icon: Radio },
     { key: 'downloads', label: 'Downloads', icon: ArrowDownToLine, badge: downloadBadgeCount || undefined },
     { key: 'settings',  label: 'Settings',  icon: SlidersHorizontal },
   ];

@@ -20,7 +20,7 @@ interface BrowserAddBookmarkModalProps {
   defaultTitle?: string;
 }
 
-const COLOR_SWATCHES = ['#E50914', '#01b4e4', '#f5c518', '#fa320a', '#4285f4', '#8a2be2', '#20b2aa'];
+const COLOR_SWATCHES = [Colors.primary, '#01b4e4', '#f5c518', '#fa320a', '#4285f4', '#8a2be2', '#20b2aa'];
 
 export const BrowserAddBookmarkModal: React.FC<BrowserAddBookmarkModalProps> = ({
   visible,
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 14,
     padding: 18,
     borderWidth: 1,

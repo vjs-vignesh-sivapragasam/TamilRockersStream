@@ -7,8 +7,10 @@ import { MovieFinderScreen } from '../src/components/MovieFinderScreen';
 import { BrowserScreen } from '../src/components/BrowserScreen';
 import { DownloadsScreen } from '../src/components/DownloadsScreen';
 import { SettingsScreen } from '../src/components/SettingsScreen';
+import { OnlineScreen } from '../src/components/OnlineScreen';
 import { DownloadProvider, useDownloads } from '../src/context/DownloadContext';
 import { TorrentEngineBridge } from '../src/components/torrent/TorrentEngineBridge';
+import { Colors } from '../src/constants/theme';
 
 function AppContent() {
   const [showSplash, setShowSplash] = useState(true);
@@ -36,6 +38,10 @@ function AppContent() {
 
         <View style={[styles.screen, activeTab === 'browser' ? styles.screenVisible : styles.screenHidden]}>
           <BrowserScreen onNavigateToDownloads={() => setActiveTab('downloads')} />
+        </View>
+
+        <View style={[styles.screen, activeTab === 'online' ? styles.screenVisible : styles.screenHidden]}>
+          <OnlineScreen />
         </View>
 
         <View style={[styles.screen, activeTab === 'downloads' ? styles.screenVisible : styles.screenHidden]}>
@@ -71,13 +77,13 @@ export default function MainScreen() {
 const styles = StyleSheet.create({
   rootContainer: {
     flex: 1,
-    backgroundColor: '#0D0D0D',
+    backgroundColor: Colors.background,
     flexDirection: 'column',
   },
   screenArea: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#0D0D0D',
+    backgroundColor: Colors.background,
   },
   screen: {
     position: 'absolute',

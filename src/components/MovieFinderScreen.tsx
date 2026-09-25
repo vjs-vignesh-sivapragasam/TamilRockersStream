@@ -13,6 +13,8 @@ import {
   Share,
   Platform,
   RefreshControl,
+  BackHandler,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -44,6 +46,7 @@ import {
   TamilMvMovieResult,
   MovieResolutionItem,
   POPULAR_MIRRORS,
+  posterCache,
 } from '../services/tamilMvService';
 import { useDownloads } from '../context/DownloadContext';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
@@ -51,6 +54,14 @@ import { DownloadItem } from '../types/downloads';
 
 interface MovieFinderScreenProps {
   onNavigateToTab?: (tab: any) => void;
+}
+
+interface StreamModalData {
+  movie: TamilMvMovieResult;
+  resItem: MovieResolutionItem;
+  magnet: string;
+  title: string;
+  streamUrl: string;
 }
 
 // Global in-memory cache for 0ms instant tab switching
@@ -73,7 +84,7 @@ const FINDER_CACHE_FILE = FileSystem.documentDirectory
 // Helper for quality badge styling
 const getQualityBadgeConfig = (res: string) => {
   if (/4k|2160p/i.test(res)) {
-    return { bg: 'rgba(229, 9, 20, 0.18)', border: 'rgba(229, 9, 20, 0.45)', text: '#FF4D4D' };
+    return { bg: 'rgba(250, 36, 60, 0.18)', border: 'rgba(250, 36, 60, 0.45)', text: Colors.primary };
   }
   if (/1080p/i.test(res)) {
     return { bg: 'rgba(10, 132, 255, 0.18)', border: 'rgba(10, 132, 255, 0.45)', text: '#5AC8FA' };
@@ -85,6 +96,26 @@ const getQualityBadgeConfig = (res: string) => {
     return { bg: 'rgba(191, 90, 242, 0.18)', border: 'rgba(191, 90, 242, 0.45)', text: '#DA8FFF' };
   }
   return { bg: 'rgba(142, 142, 147, 0.18)', border: 'rgba(142, 142, 147, 0.35)', text: '#E5E5EA' };
+};
+
+// Helper to prioritize 1080p or 720p by default
+const getInitialResolutionIndex = (resolutions: MovieResolutionItem[]): number => {
+  if (!resolutions || resolutions.length === 0) return 0;
+
+  // 1. First priority: 1080p
+  const idx1080 = resolutions.findIndex((r) =>
+    /\b1080p?\b/i.test(r.resolution) || /1080/i.test(r.resolution) || /1080/i.test(r.rawTitle || '')
+  );
+  if (idx1080 !== -1) return idx1080;
+
+  // 2. Second priority: 720p
+  const idx720 = resolutions.findIndex((r) =>
+    /\b720p?\b/i.test(r.resolution) || /720/i.test(r.resolution) || /720/i.test(r.rawTitle || '')
+  );
+  if (idx720 !== -1) return idx720;
+
+  // 3. Fallback to first available quality
+  return 0;
 };
 
 // Pure Component for Movie Card with Dynamic Resolution Dropdown and 2-Line Action Buttons
@@ -99,9 +130,39 @@ interface MovieCardItemProps {
 
 const MovieCardItem = React.memo<MovieCardItemProps>(
   ({ item, streamingResId, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
-    // Dynamic Resolution Dropdown State
-    const [selectedResIndex, setSelectedResIndex] = useState(0);
+    // Dynamic Resolution Dropdown State (Defaults to 1080p or 720p)
+    const [selectedResIndex, setSelectedResIndex] = useState(() =>
+      getInitialResolutionIndex(item.resolutions)
+    );
     const [dropdownOpen, setDropdownOpen] = useState(false);
+
+    // Lazy poster thumbnail state
+    const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+      // Check module-level cache first for instant render (no flicker on tab switch)
+      const cached = posterCache.get(item.topicUrl);
+      return cached !== undefined ? cached : null;
+    });
+    const [posterLoading, setPosterLoading] = useState(() => !posterCache.has(item.topicUrl));
+
+    // Lazy-load poster in background (only if not already cached)
+    useEffect(() => {
+      if (posterCache.has(item.topicUrl)) return; // already fetched
+      let cancelled = false;
+      setPosterLoading(true);
+      tamilMvService.extractPosterFromTopic(item.topicUrl).then((url) => {
+        if (cancelled) return;
+        const result = url || null;
+        posterCache.set(item.topicUrl, result);
+        setPosterUrl(result);
+        setPosterLoading(false);
+      });
+      return () => { cancelled = true; };
+    }, [item.topicUrl]);
+
+    // Keep default synced if resolutions change
+    useEffect(() => {
+      setSelectedResIndex(getInitialResolutionIndex(item.resolutions));
+    }, [item.resolutions]);
 
     // Selected Resolution
     const selectedRes = item.resolutions[selectedResIndex] || item.resolutions[0];
@@ -136,186 +197,220 @@ const MovieCardItem = React.memo<MovieCardItemProps>(
 
     return (
       <View style={styles.card}>
-        {/* Card Header with Poster Avatar & Movie Info */}
-        <View style={styles.cardHeader}>
-          <LinearGradient
-            colors={['#FF1E27', '#800005']}
-            style={styles.filmAvatar}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Film color="#FFFFFF" size={17} strokeWidth={2} />
-          </LinearGradient>
-
-          <View style={styles.cardTitleGroup}>
-            <Text style={styles.movieTitle} numberOfLines={1}>
-              {cleanMovieName}
-            </Text>
-            <View style={styles.metaBadgeRow}>
-              {item.year ? (
-                <View style={styles.yearChip}>
-                  <Text style={styles.yearChipText}>{item.year}</Text>
-                </View>
-              ) : null}
-              {item.language ? (
-                <View style={styles.langChip}>
-                  <Text style={styles.langText}>{item.language}</Text>
-                </View>
-              ) : null}
-              <View style={styles.resCountChip}>
-                <Text style={styles.qualityCount}>
-                  {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.openTopicBtn}
-            onPress={() => Linking.openURL(item.topicUrl)}
-            activeOpacity={0.7}
-            accessibilityLabel="Open Forum Post"
-          >
-            <ExternalLink color="#4B5563" size={13.5} strokeWidth={2.4} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Dynamic Resolution Dropdown Selector */}
-        {selectedRes ? (
-          <View style={styles.dropdownContainer}>
-            <TouchableOpacity
-              style={[styles.dropdownTrigger, dropdownOpen && styles.dropdownTriggerOpen]}
-              onPress={() => setDropdownOpen((prev) => !prev)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.dropdownTriggerLeft}>
-                <View style={[styles.qualityPill, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                  <Text style={[styles.qualityPillText, { color: badge.text }]}>
-                    {selectedRes.resolution}
-                  </Text>
-                </View>
-                <View style={styles.dropdownSpecs}>
-                  {selectedRes.size ? <Text style={styles.dropdownSizeText}>{selectedRes.size}</Text> : null}
-                  {selectedRes.audio ? (
-                    <Text style={styles.dropdownAudioText} numberOfLines={1}>
-                      {selectedRes.audio}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-
-              <View style={styles.dropdownTriggerRight}>
-                <Text style={styles.dropdownActionText}>
-                  {item.resolutions.length > 1 ? (dropdownOpen ? 'Close' : 'Select Quality') : 'Quality'}
-                </Text>
-                {item.resolutions.length > 1 ? (
-                  <ChevronDown
-                    color="#9CA3AF"
-                    size={15}
-                    style={{ transform: [{ rotate: dropdownOpen ? '180deg' : '0deg' }] }}
-                  />
-                ) : null}
-              </View>
-            </TouchableOpacity>
-
-            {/* Dropdown Options Menu */}
-            {dropdownOpen && item.resolutions.length > 1 ? (
-              <View style={styles.dropdownMenu}>
-                {item.resolutions.map((resOption, idx) => {
-                  const isSelected = idx === selectedResIndex;
-                  const optBadge = getQualityBadgeConfig(resOption.resolution);
-                  return (
-                    <TouchableOpacity
-                      key={resOption.id || `opt-${idx}`}
-                      style={[styles.dropdownOption, isSelected && styles.dropdownOptionActive]}
-                      onPress={() => {
-                        setSelectedResIndex(idx);
-                        setDropdownOpen(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.dropdownOptionLeft}>
-                        <View style={[styles.qualityPill, { backgroundColor: optBadge.bg, borderColor: optBadge.border }]}>
-                          <Text style={[styles.qualityPillText, { color: optBadge.text }]}>
-                            {resOption.resolution}
-                          </Text>
-                        </View>
-                        {resOption.size ? (
-                          <Text style={styles.dropdownOptionSize}>{resOption.size}</Text>
-                        ) : null}
-                        {resOption.audio ? (
-                          <Text style={styles.dropdownOptionAudio} numberOfLines={1}>
-                            {resOption.audio}
-                          </Text>
-                        ) : null}
-                      </View>
-                      {isSelected ? <Check color="#34C759" size={15} strokeWidth={2.5} /> : null}
-                    </TouchableOpacity>
-                  );
-                })}
+        {/* Card Layout: Poster Left + Content Right */}
+        <View style={styles.cardInner}>
+          {/* Movie Poster Thumbnail */}
+          <View style={styles.posterWrap}>
+            {posterUrl ? (
+              <Image
+                source={{ uri: posterUrl }}
+                style={styles.posterImage}
+                resizeMode="cover"
+              />
+            ) : posterLoading ? (
+              /* Shimmer placeholder while loading */
+              <LinearGradient
+                colors={['#1C1C1E', '#2C2C2E', '#1C1C1E']}
+                style={styles.posterShimmer}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Film color="#3A3A3C" size={28} strokeWidth={1.5} />
+              </LinearGradient>
+            ) : (
+              /* No poster found — show gradient fallback with icon */
+              <LinearGradient
+                colors={[Colors.primary, '#8A0E1C']}
+                style={styles.posterShimmer}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Film color="rgba(255,255,255,0.5)" size={28} strokeWidth={1.5} />
+              </LinearGradient>
+            )}
+            {/* Language badge on poster */}
+            {item.language ? (
+              <View style={styles.posterLangBadge}>
+                <Text style={styles.posterLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
               </View>
             ) : null}
           </View>
-        ) : null}
 
-        {/* 4 Light-Themed Action Buttons with Icon + Text in Two Lines */}
-        {selectedRes ? (
-          <View style={styles.cardActionsWrapper}>
-            {/* Line 1: Download .torrent & Open in Torrent App */}
-            <View style={styles.actionLineRow}>
-              {/* Button 1: Download .torrent file */}
-              <TouchableOpacity
-                onPress={() => onMovieDownload(selectedRes, item)}
-                activeOpacity={0.75}
-                style={[styles.actionBtnWithText, styles.btnDownloadLight]}
-                accessibilityLabel="Download .torrent file"
-              >
-                <Download color="#059669" size={14} strokeWidth={2.4} />
-                <Text style={[styles.actionBtnText, { color: '#047857' }]}>Download .torrent</Text>
-              </TouchableOpacity>
+          {/* Right Content */}
+          <View style={styles.cardContent}>
+            {/* Card Header */}
+            <View style={styles.cardHeader}>
+              <View style={styles.cardTitleGroup}>
+                <Text style={styles.movieTitle} numberOfLines={2}>
+                  {cleanMovieName}
+                </Text>
+                <View style={styles.metaBadgeRow}>
+                  {item.year ? (
+                    <View style={styles.yearChip}>
+                      <Text style={styles.yearChipText}>{item.year}</Text>
+                    </View>
+                  ) : null}
+                  {selectedRes ? (
+                    <View style={[styles.selectedQualityHeaderBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                      <Text style={[styles.selectedQualityHeaderBadgeText, { color: badge.text }]}>
+                        {selectedRes.resolution}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.resCountChip}>
+                    <Text style={styles.qualityCount}>
+                      {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-              {/* Button 2: Redirect to Torrent App */}
               <TouchableOpacity
-                onPress={() => onTorrentDownload(selectedRes, item)}
-                activeOpacity={0.75}
-                style={[styles.actionBtnWithText, styles.btnTorrentRedirectLight]}
-                accessibilityLabel="Redirect to Torrent App"
+                style={styles.openTopicBtn}
+                onPress={() => Linking.openURL(item.topicUrl)}
+                activeOpacity={0.7}
+                accessibilityLabel="Open Forum Post"
               >
-                <ExternalLink color="#EA580C" size={14} strokeWidth={2.4} />
-                <Text style={[styles.actionBtnText, { color: '#C2410C' }]}>Torrent App</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Line 2: Copy Magnet & Play Stream */}
-            <View style={styles.actionLineRow}>
-              {/* Button 3: Copy Magnet */}
-              <TouchableOpacity
-                onPress={() => onCopy(selectedRes)}
-                activeOpacity={0.75}
-                style={[styles.actionBtnWithText, styles.btnCopyLight]}
-                accessibilityLabel="Copy Magnet Link"
-              >
-                <Copy color="#4F46E5" size={14} strokeWidth={2.4} />
-                <Text style={[styles.actionBtnText, { color: '#4338CA' }]}>Copy Magnet</Text>
-              </TouchableOpacity>
-
-              {/* Button 4: Play Stream */}
-              <TouchableOpacity
-                onPress={() => onStream(selectedRes, item)}
-                activeOpacity={0.75}
-                style={[styles.actionBtnWithText, styles.btnPlayLight]}
-                accessibilityLabel="Play Stream"
-              >
-                {isStreaming ? (
-                  <ActivityIndicator size="small" color="#E11D48" />
-                ) : (
-                  <Play color="#E11D48" size={13} fill="#E11D48" strokeWidth={1} />
-                )}
-                <Text style={[styles.actionBtnText, { color: '#BE123C' }]}>Play Stream</Text>
+                <ExternalLink color="#4B5563" size={13.5} strokeWidth={2.4} />
               </TouchableOpacity>
             </View>
+
+            {/* Dynamic Resolution Dropdown Selector */}
+            {selectedRes ? (
+              <View style={styles.dropdownContainer}>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, dropdownOpen && styles.dropdownTriggerOpen]}
+                  onPress={() => setDropdownOpen((prev) => !prev)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.dropdownTriggerLeft}>
+                    <View style={[styles.qualityPill, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                      <Text style={[styles.qualityPillText, { color: badge.text }]}>
+                        {selectedRes.resolution}
+                      </Text>
+                    </View>
+                    <View style={styles.dropdownSpecs}>
+                      {selectedRes.size ? <Text style={styles.dropdownSizeText}>{selectedRes.size}</Text> : null}
+                      {selectedRes.audio ? (
+                        <Text style={styles.dropdownAudioText} numberOfLines={1}>
+                          {selectedRes.audio}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  <View style={styles.dropdownTriggerRight}>
+                    <Text style={styles.dropdownActionText}>
+                      {item.resolutions.length > 1 ? (dropdownOpen ? 'Close' : 'Change Quality') : 'Quality'}
+                    </Text>
+                    {item.resolutions.length > 1 ? (
+                      <ChevronDown
+                        color="#9CA3AF"
+                        size={15}
+                        style={{ transform: [{ rotate: dropdownOpen ? '180deg' : '0deg' }] }}
+                      />
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+
+                {/* Dropdown Options Menu */}
+                {dropdownOpen && item.resolutions.length > 1 ? (
+                  <View style={styles.dropdownMenu}>
+                    {item.resolutions.map((resOption, idx) => {
+                      const isSelected = idx === selectedResIndex;
+                      const optBadge = getQualityBadgeConfig(resOption.resolution);
+                      return (
+                        <TouchableOpacity
+                          key={resOption.id || `opt-${idx}`}
+                          style={[styles.dropdownOption, isSelected && styles.dropdownOptionActive]}
+                          onPress={() => {
+                            setSelectedResIndex(idx);
+                            setDropdownOpen(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.dropdownOptionLeft}>
+                            <View style={[styles.qualityPill, { backgroundColor: optBadge.bg, borderColor: optBadge.border }]}>
+                              <Text style={[styles.qualityPillText, { color: optBadge.text }]}>
+                                {resOption.resolution}
+                              </Text>
+                            </View>
+                            {resOption.size ? (
+                              <Text style={styles.dropdownOptionSize}>{resOption.size}</Text>
+                            ) : null}
+                            {resOption.audio ? (
+                              <Text style={styles.dropdownOptionAudio} numberOfLines={1}>
+                                {resOption.audio}
+                              </Text>
+                            ) : null}
+                          </View>
+                          {isSelected ? <Check color="#34C759" size={15} strokeWidth={2.5} /> : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {/* 4 Action Buttons */}
+            {selectedRes ? (
+              <View style={styles.cardActionsWrapper}>
+                {/* Line 1: Download .torrent & Open in Torrent App */}
+                <View style={styles.actionLineRow}>
+                  <TouchableOpacity
+                    onPress={() => onMovieDownload(selectedRes, item)}
+                    activeOpacity={0.75}
+                    style={[styles.actionBtnWithText, styles.btnDownloadLight]}
+                    accessibilityLabel="Download .torrent file"
+                  >
+                    <Download color="#059669" size={14} strokeWidth={2.4} />
+                    <Text style={[styles.actionBtnText, { color: '#047857' }]}>Download .torrent</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => onTorrentDownload(selectedRes, item)}
+                    activeOpacity={0.75}
+                    style={[styles.actionBtnWithText, styles.btnTorrentRedirectLight]}
+                    accessibilityLabel="Redirect to Torrent App"
+                  >
+                    <ExternalLink color="#EA580C" size={14} strokeWidth={2.4} />
+                    <Text style={[styles.actionBtnText, { color: '#C2410C' }]}>Torrent App</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Line 2: Copy Magnet & Play Stream */}
+                <View style={styles.actionLineRow}>
+                  <TouchableOpacity
+                    onPress={() => onCopy(selectedRes)}
+                    activeOpacity={0.75}
+                    style={[styles.actionBtnWithText, styles.btnCopyLight]}
+                    accessibilityLabel="Copy Magnet Link"
+                  >
+                    <Copy color="#4F46E5" size={14} strokeWidth={2.4} />
+                    <Text style={[styles.actionBtnText, { color: '#4338CA' }]}>Copy Magnet</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => onStream(selectedRes, item)}
+                    activeOpacity={0.75}
+                    style={[styles.actionBtnWithText, styles.btnPlayLight]}
+                    accessibilityLabel="Play Stream"
+                  >
+                    {isStreaming ? (
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                    ) : (
+                      <Play color={Colors.primary} size={13} fill={Colors.primary} strokeWidth={1} />
+                    )}
+                    <Text style={[styles.actionBtnText, { color: Colors.primary }]} numberOfLines={1}>
+                      Play {selectedRes ? selectedRes.resolution : 'Stream'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
           </View>
-        ) : null}
+        </View>
       </View>
     );
   }
@@ -362,6 +457,21 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const [streamPlayerVisible, setStreamPlayerVisible] = useState(false);
   const [activeStreamItem, setActiveStreamItem] = useState<DownloadItem | null>(null);
   const [streamingResId, setStreamingResId] = useState<string | null>(null);
+  const [streamModalVisible, setStreamModalVisible] = useState(false);
+  const [streamModalData, setStreamModalData] = useState<StreamModalData | null>(null);
+
+  // Hardware Back Button handler for Stream Options Modal
+  useEffect(() => {
+    if (!streamModalVisible) return;
+
+    const onBackPress = () => {
+      setStreamModalVisible(false);
+      return true;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [streamModalVisible]);
 
   // Configurable Mirror URL State
   const [currentBaseUrl, setCurrentBaseUrl] = useState(tamilMvService.getBaseUrl());
@@ -640,72 +750,28 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
         if (magnet) {
           const finalMagnet = magnet;
-          Alert.alert(
-            'Stream Movie',
-            `Choose how to stream "${title}":`,
-            [
-              {
-                text: '🟧 Play in VLC Player (Recommended)',
-                onPress: async () => {
-                  try {
-                    await Linking.openURL(`vlc://${finalMagnet}`);
-                  } catch {
-                    try {
-                      await Linking.openURL(finalMagnet);
-                    } catch {
-                      Alert.alert(
-                        'VLC Not Detected',
-                        'VLC for Android is recommended for direct torrent streaming with full .MKV & HEVC hardware acceleration. Would you like to stream in Browser instead?',
-                        [
-                          {
-                            text: 'Open in Browser',
-                            onPress: () =>
-                              Linking.openURL(
-                                `https://webtor.io/show?magnet=${encodeURIComponent(finalMagnet)}`
-                              ),
-                          },
-                          { text: 'Cancel', style: 'cancel' },
-                        ]
-                      );
-                    }
-                  }
-                },
-              },
-              {
-                text: '▶ Stream in App (Stremio Engine)',
-                onPress: () => {
-                  const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(finalMagnet)}`;
-                  const streamDownloadItem: DownloadItem = {
-                    id: `stream_${Date.now()}`,
-                    title,
-                    fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-                    fileUri: '',
-                    url: liveStreamUrl,
-                    status: 'completed',
-                    progress: 1,
-                    totalBytes: 0,
-                    downloadedBytes: 0,
-                    speed: 'Stremio Engine Stream',
-                    isTorrent: false,
-                    createdAt: Date.now(),
-                  };
+          // Always use /api/stream/play?magnet= so the backend gets the full magnet
+          // (includes all embedded trackers for faster peer discovery)
+          const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(finalMagnet)}`;
 
-                  setActiveStreamItem(streamDownloadItem);
-                  setStreamPlayerVisible(true);
-                },
-              },
-              {
-                text: '🌐 Stream in Browser (Webtor Cloud)',
-                onPress: () => {
-                  const webtorUrl = `https://webtor.io/show?magnet=${encodeURIComponent(finalMagnet)}`;
-                  Linking.openURL(webtorUrl).catch((err) => {
-                    Alert.alert('Error', 'Could not open browser: ' + err.message);
-                  });
-                },
-              },
-              { text: 'Cancel', style: 'cancel' },
-            ]
-          );
+          // Directly launch internal player — no intermediate modal
+          const streamDownloadItem: DownloadItem = {
+            id: `stream_${Date.now()}`,
+            title,
+            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+            fileUri: '',
+            url: streamUrl,
+            status: 'completed',
+            progress: 1,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            speed: 'VFlix Internal Stream',
+            isTorrent: false,
+            createdAt: Date.now(),
+          };
+
+          setActiveStreamItem(streamDownloadItem);
+          setStreamPlayerVisible(true);
         } else {
           Alert.alert(
             'Stream Unavailable',
@@ -724,6 +790,27 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     },
     [backendUrl]
   );
+
+  const handleLaunchInternalPlayer = useCallback((data: StreamModalData) => {
+    setStreamModalVisible(false);
+    const streamDownloadItem: DownloadItem = {
+      id: `stream_${Date.now()}`,
+      title: data.title,
+      fileName: `${data.movie.movieTitle}_${data.resItem.resolution}.mp4`,
+      fileUri: '',
+      url: data.streamUrl,
+      status: 'completed',
+      progress: 1,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      speed: 'VFlix Internal Stream',
+      isTorrent: false,
+      createdAt: Date.now(),
+    };
+
+    setActiveStreamItem(streamDownloadItem);
+    setStreamPlayerVisible(true);
+  }, []);
 
   // 4. Copy Magnet / Link
   const handleCopyMagnet = useCallback(async (resItem: MovieResolutionItem) => {
@@ -860,7 +947,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         <View style={styles.headerLeft}>
           <View style={styles.headerTitleRow}>
             <LinearGradient
-              colors={['#FF1E27', '#800005']}
+              colors={[Colors.primary, '#8A0E1C']}
               style={styles.headerLogoBadge}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -890,7 +977,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       {/* 2. Modern Glassmorphic Search Bar */}
       <View style={styles.searchBarWrapper}>
         <View style={styles.searchBar}>
-          <Search color="#FF4D4D" size={16} strokeWidth={2.5} />
+          <Search color={Colors.primary} size={16} strokeWidth={2.5} />
           <TextInput
             style={styles.input}
             placeholder="Search movie title (e.g. Leo, Amaran)..."
@@ -914,7 +1001,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           activeOpacity={0.8}
         >
           <LinearGradient
-            colors={!query.trim() ? ['#2C1A1E', '#1F1215'] : ['#E50914', '#B20710']}
+            colors={!query.trim() ? ['#221C1E', '#181416'] : [Colors.primary, '#B51527']}
             style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -944,7 +1031,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
               >
                 {isSelected ? (
                   <LinearGradient
-                    colors={['#E50914', '#990000']}
+                    colors={[Colors.primary, '#8A0E1C']}
                     style={styles.chipActiveGradient}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
@@ -1055,7 +1142,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           accessibilityLabel="Scroll to top"
         >
           <LinearGradient
-            colors={['#FF1E27', '#990005']}
+            colors={[Colors.primary, '#8A0E1C']}
             style={styles.scrollTopGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -1146,6 +1233,179 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
       ) : null}
 
+      {/* 6. Refactored Play Stream Selection Modal with Internal Player Default */}
+      <Modal
+        visible={streamModalVisible && !!streamModalData}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setStreamModalVisible(false)}
+      >
+        <View style={styles.streamModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setStreamModalVisible(false)}
+          />
+
+          <View style={[styles.streamModalSheet, { paddingBottom: Math.max(insets.bottom + 16, 26) }]}>
+            {/* Sheet Handle */}
+            <View style={styles.sheetHandle} />
+
+            {/* Header */}
+            <View style={styles.streamModalHeader}>
+              <View style={styles.streamBadgeRow}>
+                <View style={styles.streamResBadge}>
+                  <Text style={styles.streamResBadgeText}>
+                    {streamModalData?.resItem.resolution || '1080p'}
+                  </Text>
+                </View>
+
+                {streamModalData?.resItem.size ? (
+                  <View style={styles.streamSizeBadge}>
+                    <Text style={styles.streamSizeBadgeText}>
+                      {streamModalData.resItem.size}
+                    </Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.streamEngineBadge}>
+                  <View style={styles.streamEngineDot} />
+                  <Text style={styles.streamEngineText}>VFlix Engine</Text>
+                </View>
+              </View>
+
+              <Text style={styles.streamModalTitle} numberOfLines={2}>
+                {streamModalData?.movie.movieTitle}
+              </Text>
+              <Text style={styles.streamModalSubtitle}>
+                Selected Quality: {streamModalData?.resItem.resolution || '1080p'} {streamModalData?.resItem.size ? `• ${streamModalData.resItem.size}` : ''}
+              </Text>
+            </View>
+
+            {/* Options List */}
+            <View style={styles.streamOptionsList}>
+              {/* Option 1: DEFAULT - Internal In-App Player */}
+              <TouchableOpacity
+                style={styles.defaultStreamBtn}
+                activeOpacity={0.85}
+                onPress={() => streamModalData && handleLaunchInternalPlayer(streamModalData)}
+              >
+                <LinearGradient
+                  colors={[Colors.primary, '#B51527']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.defaultStreamGradient}
+                >
+                  <View style={styles.defaultStreamIconWrap}>
+                    <Play color="#FFFFFF" size={22} fill="#FFFFFF" />
+                  </View>
+                  <View style={styles.defaultStreamTextWrap}>
+                    <View style={styles.defaultTitleRow}>
+                      <Text style={styles.defaultStreamTitle}>
+                        Play in Internal Player ({streamModalData?.resItem.resolution || '1080p'})
+                      </Text>
+                      <View style={styles.defaultTagPill}>
+                        <Text style={styles.defaultTagText}>DEFAULT</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.defaultStreamSub}>
+                      Stream {streamModalData?.resItem.resolution} {streamModalData?.resItem.size ? `(${streamModalData.resItem.size})` : ''} • Gestures, audio & subtitles
+                    </Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Option 2: External Player (VLC / MX) */}
+              <TouchableOpacity
+                style={styles.secondaryStreamBtn}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (!streamModalData) return;
+                  setStreamModalVisible(false);
+                  const target = streamModalData.streamUrl || streamModalData.magnet;
+                  Linking.openURL(`vlc://${target}`).catch(() => {
+                    Linking.openURL(target).catch(() => {
+                      Alert.alert(
+                        'VLC Not Detected',
+                        'VLC for Android is recommended for direct hardware accelerated torrent playback.'
+                      );
+                    });
+                  });
+                }}
+              >
+                <View style={[styles.secondaryIconCircle, { backgroundColor: 'rgba(255, 140, 0, 0.15)' }]}>
+                  <Tv color="#FF9800" size={19} />
+                </View>
+                <View style={styles.secondaryTextWrap}>
+                  <Text style={styles.secondaryTitle}>Play in VLC / MX Player</Text>
+                  <Text style={styles.secondarySub}>
+                    Hardware accelerated playback in external media player
+                  </Text>
+                </View>
+                <ExternalLink color="#666" size={15} />
+              </TouchableOpacity>
+
+              {/* Option 3: Webtor Cloud in Browser */}
+              <TouchableOpacity
+                style={styles.secondaryStreamBtn}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (!streamModalData) return;
+                  setStreamModalVisible(false);
+                  const webtorUrl = `https://webtor.io/show?magnet=${encodeURIComponent(streamModalData.magnet)}`;
+                  Linking.openURL(webtorUrl).catch((err) => {
+                    Alert.alert('Error', 'Could not open browser: ' + err.message);
+                  });
+                }}
+              >
+                <View style={[styles.secondaryIconCircle, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                  <Globe color="#3B82F6" size={19} />
+                </View>
+                <View style={styles.secondaryTextWrap}>
+                  <Text style={styles.secondaryTitle}>Stream in Browser (Webtor Cloud)</Text>
+                  <Text style={styles.secondarySub}>
+                    No local backend needed • Cloud proxy playback
+                  </Text>
+                </View>
+                <ExternalLink color="#666" size={15} />
+              </TouchableOpacity>
+
+              {/* Option 4: Share / Copy Stream URL */}
+              <TouchableOpacity
+                style={styles.secondaryStreamBtn}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (!streamModalData) return;
+                  Share.share({
+                    message: streamModalData.streamUrl,
+                    title: `Stream URL: ${streamModalData.title}`,
+                  }).catch(() => {});
+                }}
+              >
+                <View style={[styles.secondaryIconCircle, { backgroundColor: 'rgba(255, 255, 255, 0.08)' }]}>
+                  <Copy color="#AEAEB2" size={17} />
+                </View>
+                <View style={styles.secondaryTextWrap}>
+                  <Text style={styles.secondaryTitle}>Share / Copy Stream Link</Text>
+                  <Text style={styles.secondarySub}>
+                    Direct HTTP Range URL for VLC, Kodi, or download tools
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Cancel Button */}
+            <TouchableOpacity
+              style={styles.streamCancelBtn}
+              activeOpacity={0.7}
+              onPress={() => setStreamModalVisible(false)}
+            >
+              <Text style={styles.streamCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* In-App Live Video Player Modal */}
       <OfflinePlayerModal
         visible={streamPlayerVisible}
@@ -1162,7 +1422,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0C0E',
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: 'row',
@@ -1329,15 +1589,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   loadedBadge: {
-    backgroundColor: 'rgba(255, 30, 39, 0.1)',
+    backgroundColor: 'rgba(250, 36, 60, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 30, 39, 0.28)',
+    borderColor: 'rgba(250, 36, 60, 0.28)',
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 8,
   },
   loadedBadgeText: {
-    color: '#FF4D4D',
+    color: Colors.primary,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1400,11 +1660,56 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     overflow: 'hidden',
   },
+  cardInner: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  // ── Poster thumbnail (left column, fixed width) ──
+  posterWrap: {
+    width: 86,
+    minHeight: 150,
+    backgroundColor: '#1C1C1E',
+    position: 'relative',
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  posterImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  posterShimmer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  posterLangBadge: {
+    position: 'absolute',
+    bottom: 6,
+    left: 5,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  posterLangText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  // ── Right content column ──
+  cardContent: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 150,
+    borderLeftWidth: 1,
+    borderLeftColor: '#222430',
+  },
   cardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    gap: 10,
+    alignItems: 'flex-start',
+    padding: 10,
+    paddingBottom: 8,
+    gap: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#1A1C24',
   },
@@ -1417,18 +1722,20 @@ const styles = StyleSheet.create({
   },
   cardTitleGroup: {
     flex: 1,
-    gap: 4,
+    gap: 5,
   },
   movieTitle: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 13.5,
     fontWeight: '700',
     letterSpacing: -0.2,
+    lineHeight: 18,
   },
   metaBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    flexWrap: 'wrap',
+    gap: 4,
   },
   yearChip: {
     backgroundColor: '#1E202A',
@@ -1444,17 +1751,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   langChip: {
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.35)',
+    borderColor: 'rgba(250, 36, 60, 0.35)',
     paddingHorizontal: 6,
     paddingVertical: 1.5,
     borderRadius: 5,
   },
   langText: {
-    color: '#FF4D4D',
+    color: Colors.primary,
     fontSize: 10,
     fontWeight: '800',
+  },
+  selectedQualityHeaderBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  selectedQualityHeaderBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   resCountChip: {
     backgroundColor: '#1A1C23',
@@ -1755,5 +2073,188 @@ const styles = StyleSheet.create({
     width: 360,
     height: 640,
     opacity: 0.01,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3A3A3C',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  streamModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    justifyContent: 'flex-end',
+  },
+  streamModalSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: '#24262E',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  streamModalHeader: {
+    marginBottom: 16,
+  },
+  streamBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  streamResBadge: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.4)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  streamResBadgeText: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  streamSizeBadge: {
+    backgroundColor: '#24262E',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  streamSizeBadgeText: {
+    color: '#E0E0E0',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  streamEngineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(70, 211, 105, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  streamEngineDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#46D369',
+  },
+  streamEngineText: {
+    color: '#46D369',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  streamModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  streamModalSubtitle: {
+    color: '#8E8E93',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  streamOptionsList: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  defaultStreamBtn: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  defaultStreamGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    gap: 12,
+  },
+  defaultStreamIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  defaultStreamTextWrap: {
+    flex: 1,
+  },
+  defaultTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  defaultStreamTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  defaultTagPill: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
+  defaultTagText: {
+    color: Colors.primary,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  defaultStreamSub: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 11,
+    marginTop: 3,
+    lineHeight: 15,
+  },
+  secondaryStreamBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: '#2A2C34',
+    padding: 12,
+    borderRadius: 12,
+    gap: 12,
+  },
+  secondaryIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryTextWrap: {
+    flex: 1,
+  },
+  secondaryTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  secondarySub: {
+    color: '#8E8E93',
+    fontSize: 10,
+    marginTop: 2,
+    lineHeight: 13,
+  },
+  streamCancelBtn: {
+    backgroundColor: '#202127',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  streamCancelBtnText: {
+    color: '#8E8E93',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

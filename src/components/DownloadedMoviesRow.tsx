@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
   },
   cardFooter: {
     padding: 8,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     gap: 2,
   },
   itemTitle: {
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   emptyCard: {
-    backgroundColor: '#1C1C1C',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 16,
     borderWidth: 1,
@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
   },

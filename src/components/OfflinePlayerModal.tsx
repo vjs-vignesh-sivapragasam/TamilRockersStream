@@ -14,6 +14,8 @@ import {
   GestureResponderEvent,
   Alert,
   ScrollView,
+  BackHandler,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -21,6 +23,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   X,
+  ArrowLeft,
   Play,
   Pause,
   RotateCcw,
@@ -46,6 +49,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '../constants/theme';
 import { DownloadItem } from '../types/downloads';
+import { useDownloads } from '../context/DownloadContext';
 
 interface OfflinePlayerModalProps {
   visible: boolean;
@@ -159,11 +163,13 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
+  const { backendUrl } = useDownloads();
 
   const [contentUri, setContentUri] = useState<string>('');
   const [fileExisted, setFileExisted] = useState<boolean>(true);
   const [playerError, setPlayerError] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isBuffering, setIsBuffering] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [controlsVisible, setControlsVisible] = useState<boolean>(true);
@@ -232,11 +238,25 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
   const seekPreviewRef = useRef<number | null>(null);
 
+  // Android hardware back button handler
+  useEffect(() => {
+    if (!visible) return;
+
+    const onBackPress = () => {
+      handleClosePlayer();
+      return true;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [visible]);
+
   useEffect(() => {
     if (!item) return;
 
     setPlayerError(false);
     setIsPlaying(true);
+    setIsBuffering(true);
     setCurrentTime(0);
     setDuration(0);
     setBrightness(1.0);
@@ -594,6 +614,15 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
     // 2. If it's an online stream / magnet
     if (streamUrl) {
+      let decodedHttp = streamUrl;
+      const hashMatch = streamUrl.match(/urn:btih:([a-zA-Z0-9]{40}|[a-zA-Z0-9]{32})/i);
+      const hash = hashMatch ? hashMatch[1].toLowerCase() : '';
+      if (hash) {
+        decodedHttp = `${backendUrl}/api/stream/${hash}`;
+      } else if (streamUrl.startsWith('magnet:')) {
+        decodedHttp = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(streamUrl)}`;
+      }
+
       const magnetMatch = streamUrl.match(/magnet=([^&]+)/);
       const magnet = magnetMatch
         ? decodeURIComponent(magnetMatch[1])
@@ -606,7 +635,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           {
             text: '🟧 Open in VLC Player',
             onPress: async () => {
-              const target = magnet || streamUrl;
+              const target = decodedHttp || magnet || streamUrl;
               try {
                 await Linking.openURL(`vlc://${target}`);
               } catch {
@@ -624,7 +653,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           {
             text: '▶ Open in Video Player (MX / System)',
             onPress: async () => {
-              const target = streamUrl;
+              const target = decodedHttp || streamUrl;
               const intentUri = `intent:${target}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
               try {
                 await Linking.openURL(intentUri);
@@ -815,7 +844,21 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   if (!item) return null;
 
   const localFileUri = item.fileUri || item.movieFileUri || '';
-  const httpFallback = item.url || '';
+  const rawUrl = item.url || '';
+
+  // Decode magnet URL or infoHash into streamable backend HTTP URL
+  let streamHttpUrl = rawUrl;
+  if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
+    streamHttpUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
+  } else if (/^[a-fA-F0-9]{40}$/.test(rawUrl)) {
+    streamHttpUrl = `${backendUrl}/api/stream/${rawUrl.toLowerCase()}`;
+  }
+
+  // Prioritize physically existing local file, otherwise use decoded backend HTTP stream URL
+  const effectiveVideoSrc = (fileExisted && (contentUri || localFileUri))
+    ? (contentUri || localFileUri)
+    : streamHttpUrl;
+
   const movieTitle = item.title || item.movieFileName || item.fileName || 'Movie';
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
@@ -888,7 +931,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         .actionBtn {
           display: inline-block;
           margin-top: 14px;
-          background-color: #E50914;
+          background-color: #FA243C;
           color: #ffffff;
           padding: 10px 20px;
           border-radius: 20px;
@@ -907,23 +950,24 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         webkit-playsinline
         autoplay
         preload="auto"
-        ${httpFallback ? `src="${httpFallback}"` : localFileUri ? `src="${localFileUri}"` : contentUri ? `src="${contentUri}"` : ''}
-      >
-        ${httpFallback ? `<source src="${httpFallback}" />` : ''}
-        ${localFileUri ? `<source src="${localFileUri}" />` : ''}
-        ${contentUri ? `<source src="${contentUri}" />` : ''}
-      </video>
+        ${effectiveVideoSrc ? `src="${effectiveVideoSrc}"` : ''}
+      ></video>
 
       <div id="subtitle-overlay"></div>
 
       <div id="fallbackNotice">
         <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px;">Format Notice</div>
-        <div style="font-size: 12px; color: #aaa; line-height: 1.4;">
+        <div style="font-size: 12px; color: #aaa; line-height: 1.4; margin-bottom: 12px;">
           This video file format may play best in VLC or MX Player.
         </div>
-        <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
-          Open in VLC / MX Player
-        </a>
+        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+          <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
+            Open in VLC / MX
+          </a>
+          <a class="actionBtn" style="background-color: #333333;" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'CLOSE_PLAYER'}))">
+            Go Back
+          </a>
+        </div>
       </div>
 
       <script>
@@ -1044,15 +1088,24 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           }
         };
 
-        v.addEventListener('loadedmetadata', emitTime);
+        v.addEventListener('loadedmetadata', function() {
+          emitTime();
+          v.play().catch(function() {});
+        });
         v.addEventListener('durationchange', emitTime);
-        v.addEventListener('canplay', emitTime);
+        v.addEventListener('canplay', function() {
+          emitTime();
+          v.play().catch(function() {});
+        });
         v.addEventListener('timeupdate', emitTime);
         v.addEventListener('seeking', function() { emitTime(); updateSubtitle(v.currentTime); });
         v.addEventListener('seeked', function() { emitTime(); updateSubtitle(v.currentTime); });
         v.addEventListener('play', function() { post({ type: 'PLAYING' }); });
+        v.addEventListener('playing', function() { post({ type: 'PLAYING' }); });
         v.addEventListener('pause', function() { post({ type: 'PAUSED' }); });
         v.addEventListener('ended', function() { post({ type: 'ENDED' }); });
+        v.addEventListener('waiting', function() { post({ type: 'BUFFERING' }); });
+        v.addEventListener('stalled', function() { post({ type: 'BUFFERING' }); });
 
         v.addEventListener('error', function() {
           if (notice) notice.style.display = 'block';
@@ -1099,12 +1152,21 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                   if (data.duration && data.duration > 0) {
                     setDuration(data.duration);
                   }
+                  // Clear buffering once we receive a valid time update with currentTime > 0
+                  if (data.currentTime > 0) {
+                    setIsBuffering(false);
+                  }
                 } else if (data.type === 'PLAYING') {
                   setIsPlaying(true);
+                  setIsBuffering(false);
+                } else if (data.type === 'BUFFERING') {
+                  setIsBuffering(true);
                 } else if (data.type === 'PAUSED') {
                   setIsPlaying(false);
                 } else if (data.type === 'OPEN_EXTERNAL') {
                   handleOpenExternal();
+                } else if (data.type === 'CLOSE_PLAYER') {
+                  handleClosePlayer();
                 } else if (data.type === 'VIDEO_ERROR') {
                   setPlayerError(true);
                 }
@@ -1122,6 +1184,28 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             ]}
           />
         </View>
+
+        {/* Buffering / Fetching Loader Overlay */}
+        {isBuffering && !playerError && (
+          <View style={styles.bufferingOverlay} pointerEvents="none">
+            {/* Spinner ring */}
+            <View style={styles.bufferingCard}>
+              <View style={styles.bufferingSpinnerWrap}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+              </View>
+              <Text style={styles.bufferingTitle}>Please wait…</Text>
+              <Text style={styles.bufferingSubtitle}>
+                Fetching stream & preparing video{'\n'}This may take a few seconds
+              </Text>
+              {/* Animated dots row */}
+              <View style={styles.bufferingDotsRow}>
+                <View style={[styles.bufferingDot, { opacity: 1 }]} />
+                <View style={[styles.bufferingDot, { opacity: 0.6 }]} />
+                <View style={[styles.bufferingDot, { opacity: 0.3 }]} />
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* MX Player Style On-Screen HUD for Brightness, Volume & Seek */}
         {hud.visible && (
@@ -1212,9 +1296,11 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
               <TouchableOpacity
                 style={styles.circleBtn}
                 onPress={handleClosePlayer}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
+                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                accessibilityLabel="Go Back"
               >
-                <X color="#FFFFFF" size={22} />
+                <ArrowLeft color="#FFFFFF" size={24} />
               </TouchableOpacity>
 
               <View style={styles.titleInfo}>
@@ -1372,6 +1458,29 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                     )}
                     <Text style={styles.bottomActionText}>
                       {isFullscreen ? 'Exit Full' : 'Fullscreen'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Screen Fit / Stretch / Fill */}
+                  <TouchableOpacity
+                    style={styles.bottomActionItem}
+                    onPress={handleCycleScaleMode}
+                    activeOpacity={0.7}
+                  >
+                    {scaleMode === 'fit' ? (
+                      <Minimize color="#FFFFFF" size={18} />
+                    ) : scaleMode === 'stretch' ? (
+                      <Maximize color={Colors.primary} size={18} />
+                    ) : (
+                      <Maximize color="#FFD700" size={18} />
+                    )}
+                    <Text
+                      style={[
+                        styles.bottomActionText,
+                        scaleMode !== 'fit' && { color: scaleMode === 'stretch' ? Colors.primary : '#FFD700', fontWeight: '700' },
+                      ]}
+                    >
+                      {scaleMode === 'fit' ? 'Fit' : scaleMode === 'stretch' ? 'Stretch' : 'Fill'}
                     </Text>
                   </TouchableOpacity>
 
@@ -1938,7 +2047,7 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     borderRadius: 33,
-    backgroundColor: 'rgba(229, 9, 20, 0.9)',
+    backgroundColor: 'rgba(250, 36, 60, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -2135,7 +2244,7 @@ const styles = StyleSheet.create({
   },
   captionsTopBtnActive: {
     borderColor: Colors.netflixRed,
-    backgroundColor: 'rgba(229, 9, 20, 0.25)',
+    backgroundColor: 'rgba(250, 36, 60, 0.25)',
   },
   captionsTopBtnText: {
     color: '#888888',
@@ -2178,7 +2287,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2262,7 +2371,7 @@ const styles = StyleSheet.create({
   },
   trackItemRowActive: {
     borderColor: Colors.netflixRed,
-    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
   },
   trackItemLeft: {
     flexDirection: 'row',
@@ -2370,7 +2479,7 @@ const styles = StyleSheet.create({
   },
   chipBtnActive: {
     borderColor: Colors.netflixRed,
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
   },
   chipBtnText: {
     color: '#888888',
@@ -2399,7 +2508,7 @@ const styles = StyleSheet.create({
   },
   colorItemBtnActive: {
     borderColor: Colors.netflixRed,
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
   },
   colorDot: {
     width: 12,
@@ -2472,5 +2581,64 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
+  },
+
+  // ── Buffering / Loading Overlay ──────────────────────────────────────
+  bufferingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+  },
+  bufferingCard: {
+    backgroundColor: 'rgba(28, 28, 30, 0.95)',
+    borderRadius: 20,
+    paddingVertical: 32,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    minWidth: 220,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  bufferingSpinnerWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  bufferingTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    marginBottom: 8,
+  },
+  bufferingSubtitle: {
+    color: '#A7A7A7',
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+  },
+  bufferingDotsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  bufferingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.primary,
   },
 });

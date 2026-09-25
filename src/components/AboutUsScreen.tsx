@@ -286,7 +286,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
               <View style={styles.featureItem}>
                 <View style={styles.featureIconBox}>
-                  <Sparkles color="#E50914" size={18} />
+                  <Sparkles color={Colors.primary} size={18} />
                 </View>
                 <View style={styles.featureTextBox}>
                   <Text style={styles.featureTitle}>Direct Device Storage Access</Text>
@@ -306,7 +306,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={['#E50914', '#B20710']}
+                colors={[Colors.primary, '#B51527']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.donateBannerGradient}
@@ -338,7 +338,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: Colors.background,
   },
   topHeader: {
     flexDirection: 'row',
@@ -348,13 +348,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 0.5,
     borderBottomColor: '#262626',
-    backgroundColor: '#121212',
+    backgroundColor: Colors.background,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -380,8 +380,8 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
-    shadowColor: '#E50914',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 16,
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: 'rgba(229, 9, 20, 0.25)',
+    backgroundColor: 'rgba(250, 36, 60, 0.25)',
   },
   avatarBorder: {
     width: 104,
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 14,

@@ -45,7 +45,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
         {/* Bottom Fade Gradient into Dashboard background */}
         <LinearGradient
-          colors={['transparent', 'rgba(20,20,20,0.6)', 'rgba(20,20,20,0.95)', '#141414']}
+          colors={['transparent', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.85)', Colors.background]}
           locations={[0, 0.5, 0.8, 1]}
           style={styles.bottomGradient}
         >

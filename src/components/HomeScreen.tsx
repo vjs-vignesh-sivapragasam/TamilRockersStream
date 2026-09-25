@@ -534,7 +534,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#141414',
+    backgroundColor: Colors.background,
   },
   topHeader: {
     flexDirection: 'row',
@@ -575,12 +575,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(229, 9, 20, 0.18)',
+    backgroundColor: 'rgba(250, 36, 60, 0.18)',
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.45)',
+    borderColor: 'rgba(250, 36, 60, 0.45)',
   },
   donateHeaderBtnText: {
     color: '#FFFFFF',
@@ -685,7 +685,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   heroSizeBadge: {
-    backgroundColor: 'rgba(229, 9, 20, 0.85)',
+    backgroundColor: 'rgba(250, 36, 60, 0.85)',
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 3,
@@ -783,7 +783,7 @@ const styles = StyleSheet.create({
   },
   movieCard: {
     flexDirection: 'row',
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1,
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(229, 9, 20, 0.9)',
+    backgroundColor: 'rgba(250, 36, 60, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -914,12 +914,12 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.3)',
+    borderColor: 'rgba(250, 36, 60, 0.3)',
   },
   emptyTitle: {
     color: '#FFFFFF',
@@ -963,7 +963,7 @@ const styles = StyleSheet.create({
   sampleCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E1E1E',
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 14,
     borderWidth: 1,
