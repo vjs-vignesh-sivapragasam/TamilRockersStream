@@ -15,6 +15,8 @@
       "largeHeap": true,
       "permissions": [
         "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET",
         "ACCESS_NETWORK_STATE"
       ]
     },
@@ -24,6 +26,18 @@
     "plugins": [
       "expo-router"
     ],
-    "scheme": "vflix"
+    "scheme": "vflix",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "11e42153-6578-4595-a79e-c21c6f6f70ed"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/11e42153-6578-4595-a79e-c21c6f6f70ed"
+    }
   }
 }

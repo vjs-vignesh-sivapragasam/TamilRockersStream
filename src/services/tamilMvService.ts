@@ -30,11 +30,9 @@ export const DEFAULT_TAMILMV_URL = 'https://www.1tamilmv.lease';
 
 export const POPULAR_MIRRORS = [
   'https://www.1tamilmv.lease',
+  'https://www.1tamilmv.meme',
   'https://www.1tamilmv.rocks',
-  'https://www.1tamilmv.click',
-  'https://www.1tamilmv.net',
-  'https://www.1tamilmv.vin',
-  'https://www.1tamilblasters.com',
+  'https://www.1tamilmv.li',
 ];
 
 let configuredBaseUrl = DEFAULT_TAMILMV_URL;
@@ -61,8 +59,11 @@ export const tamilMvService = {
     const term = query.trim();
     if (!term) return [];
 
+    const isRecent = !term || /^recent/i.test(term);
     const baseUrl = overrideUrl ? overrideUrl.replace(/\/+$/, '') : configuredBaseUrl;
-    const searchUrl = `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
+    const searchUrl = isRecent
+      ? baseUrl
+      : `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
 
     try {
       const controller = new AbortController();
@@ -83,7 +84,7 @@ export const tamilMvService = {
       }
 
       const html = await response.text();
-      return this.parseSearchResults(html, baseUrl, term);
+      return this.parseSearchResults(html, baseUrl, isRecent ? '' : term);
     } catch (err: any) {
       console.warn('TamilMV Search Fetch error:', err?.message || err);
       throw err;
@@ -94,34 +95,40 @@ export const tamilMvService = {
    * Parse forum topic results from raw HTML search page
    */
   parseSearchResults(html: string, baseUrl: string, searchTerm: string): TamilMvMovieResult[] {
-    const rawItems: { topicUrl: string; rawTitle: string }[] = [];
-    const seenUrls = new Set<string>();
+    const topicMap = new Map<string, string>();
 
-    // 1. Matches ipsStreamItem_title anchors
-    const streamItemRegex = /<span[^>]*class=["'][^"']*ipsStreamItem_title[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["'](https?:\/\/[^"']*\/index\.php\?\/forums\/topic\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const cleanTopicUrl = (url: string) =>
+      url.split('#')[0].replace(/&.*$/, '').replace(/\/page\/\d+\/?$/, '/');
+
+    // 1. Matches anchors with title attribute (usually holds the complete full post title in IPS forums)
+    const titleAttrRegex = /<a[^>]*href=["'](https?:\/\/[^"']*\/topic\/[^"']*)["'][^>]*title=["']([^"']+)["'][^>]*>/gi;
     let match;
-    while ((match = streamItemRegex.exec(html)) !== null) {
-      const topicUrl = match[1];
-      const rawTitle = match[2].replace(/<[^>]*>/g, '').trim();
-      if (rawTitle && !seenUrls.has(topicUrl)) {
-        seenUrls.add(topicUrl);
-        rawItems.push({ topicUrl, rawTitle });
+    while ((match = titleAttrRegex.exec(html)) !== null) {
+      const topicUrl = cleanTopicUrl(match[1]);
+      const titleAttr = match[2].replace(/<[^>]*>/g, '').trim();
+      if (topicUrl && !topicUrl.includes('/topic/183-0') && titleAttr && titleAttr.length >= 3 && !/^(page|next|prev|last)$/i.test(titleAttr)) {
+        topicMap.set(topicUrl, titleAttr);
       }
     }
 
-    // 2. Fallback general topic anchor regex
-    const topicRegex = /href=["'](https?:\/\/[^"']*\/index\.php\?\/forums\/topic\/(\d+-[^"'/]+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    // 2. Matches topic links and their inner text (keep the longest, most descriptive text)
+    const topicRegex = /<a[^>]*href=["'](https?:\/\/[^"']*\/topic\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
     while ((match = topicRegex.exec(html)) !== null) {
-      const topicUrl = match[1];
-      const rawTitle = match[3].replace(/<[^>]*>/g, '').trim();
-      if (rawTitle && rawTitle.length >= 4 && !seenUrls.has(topicUrl)) {
-        // Exclude pagination / author link noise
-        if (!/^\d+$/.test(rawTitle) && !/page|prev|next|last/i.test(rawTitle)) {
-          seenUrls.add(topicUrl);
-          rawItems.push({ topicUrl, rawTitle });
-        }
+      const topicUrl = cleanTopicUrl(match[1]);
+      const rawText = match[2].replace(/<[^>]*>/g, '').trim();
+      if (!topicUrl || topicUrl.includes('/topic/183-0') || !rawText || rawText.length < 3) continue;
+      if (/^\d+$/.test(rawText) || /^(next|prev|last|page)$/i.test(rawText)) continue;
+
+      const existing = topicMap.get(topicUrl);
+      if (!existing || rawText.length > existing.length) {
+        topicMap.set(topicUrl, rawText);
       }
     }
+
+    const rawItems: { topicUrl: string; rawTitle: string }[] = [];
+    topicMap.forEach((rawTitle, topicUrl) => {
+      rawItems.push({ topicUrl, rawTitle });
+    });
 
     return this.parseRawTopicItems(rawItems, searchTerm);
   },
@@ -131,36 +138,33 @@ export const tamilMvService = {
    */
   parseRawTopicItems(
     rawItems: { topicUrl: string; rawTitle: string }[],
-    searchTerm: string
+    searchTerm: string = ''
   ): TamilMvMovieResult[] {
     const results: TamilMvMovieResult[] = [];
-    const searchWords = searchTerm
+    const searchWords = (searchTerm || '')
       .toLowerCase()
       .split(/[\s_\-.]+/)
-      .filter((w) => w.length > 1);
+      .filter((w) => w.length > 1 && !/^(recent|upload|uploads|movies?|all)$/i.test(w));
 
     for (const item of rawItems) {
-      const rawTitle = item.rawTitle.trim();
-      const titleLower = rawTitle.toLowerCase();
-
-      // Check if search terms match
+      if (!item.topicUrl || item.topicUrl.includes('/topic/183-0')) continue;
+      const parsed = this.parseTitleMetadata(item.rawTitle.trim(), item.topicUrl);
+      
+      // Check if search terms match (skip check if search was generic like "Recent Upload")
       if (searchWords.length > 0) {
-        const matchesAll = searchWords.every((word) => titleLower.includes(word));
-        const matchesAny = searchWords.some((word) => titleLower.includes(word));
-        if (!matchesAll && !matchesAny) continue;
+        const titleLower = `${parsed.movieTitle} ${parsed.topicTitle} ${parsed.topicUrl}`.toLowerCase();
+        const matches = searchWords.some((word) => titleLower.includes(word));
+        if (!matches) continue;
       }
-
-      const parsed = this.parseTitleMetadata(rawTitle, item.topicUrl);
 
       // Group resolutions under the same movie title
       const existing = results.find(
         (r) =>
           r.movieTitle.toLowerCase() === parsed.movieTitle.toLowerCase() ||
-          (parsed.movieTitle.length > 3 && r.movieTitle.toLowerCase().includes(parsed.movieTitle.toLowerCase()))
+          (parsed.movieTitle.length > 3 && r.movieTitle.toLowerCase() === parsed.movieTitle.toLowerCase())
       );
 
       if (existing) {
-        // Check if resolution already listed
         const hasRes = existing.resolutions.some((res) => res.rawTitle === parsed.resolutions[0].rawTitle);
         if (!hasRes) {
           existing.resolutions.push(...parsed.resolutions);
@@ -177,26 +181,94 @@ export const tamilMvService = {
    * Parse movie title, year, language, and resolution info from a post title
    */
   parseTitleMetadata(rawTitle: string, topicUrl: string): TamilMvMovieResult {
+    const isJunkText = (str: string) => {
+      if (!str || str.length < 2) return true;
+      const lower = str.toLowerCase().trim();
+      return (
+        /^(languages?|rips?|exclusive|\-|\+|\[|\/)/i.test(lower) ||
+        /^[-–—\s\d.+]+(?:gb|mb)?(?:\s*\+\s*rips?)?[\])]?$/i.test(lower) ||
+        /^(page|next|prev|last|forum|topic)$/i.test(lower) ||
+        lower.includes('8.3gb') ||
+        lower === 'languages' ||
+        lower === 'language'
+      );
+    };
+
+    let titleToParse = (rawTitle || '').replace(/<[^>]*>/g, '').trim();
+
+    // If titleToParse is junk, badge-only, or lacks year, recover clean title from topicUrl slug!
+    if (topicUrl && (isJunkText(titleToParse) || !/\b(19\d\d|20\d\d)\b/.test(titleToParse))) {
+      const slugMatch = topicUrl.match(/\/topic\/\d+[-_]?([^/?#]+)/i);
+      if (slugMatch && slugMatch[1]) {
+        const slugDecoded = decodeURIComponent(slugMatch[1]).replace(/[-_]+/g, ' ').trim();
+        if (slugDecoded.length > titleToParse.length || isJunkText(titleToParse)) {
+          titleToParse = slugDecoded;
+        }
+      }
+    }
+
+    // Strip bracketed language tags like [Tamil + Telugu + Hindi] or [Exclusive] at start
+    titleToParse = titleToParse.replace(/^\[[^\]]*\]\s*/g, '');
+    titleToParse = titleToParse.replace(/^www\.[^\s]+ - /i, '').trim();
+
     // Extract Year (e.g. 2024, 2025, 2026, 2023)
-    const yearMatch = rawTitle.match(/\b(19\d\d|20\d\d)\b/);
+    const yearMatch = titleToParse.match(/\b(19\d\d|20\d\d)\b/);
     const year = yearMatch ? yearMatch[1] : '';
 
-    // Extract Clean Movie Title
-    let cleanTitle = rawTitle;
+    let cleanTitle = titleToParse;
     if (year) {
-      const parts = rawTitle.split(year);
-      cleanTitle = parts[0].replace(/[(\[\\/]/g, '').trim();
+      const idx = titleToParse.indexOf(year);
+      cleanTitle = titleToParse.substring(0, idx).trim();
     } else {
       cleanTitle = cleanTitle
         .replace(/www\.[^\s]+ - /gi, '')
         .replace(/(\[|\().*?(\]|\))/g, '')
-        .replace(/1080p|720p|4k|2160p|hdrip|web-dl|dvdrip|x264|hevc|aac/gi, '')
+        .replace(/\b(1080p|720p|4k|2160p|hdrip|web-dl|dvdrip|x264|hevc|aac|esub|sample|true)\b/gi, '')
         .trim();
     }
 
-    // Clean prefix like "www.1TamilMV.rocks - "
-    cleanTitle = cleanTitle.replace(/^www\.[^\s]+ - /i, '').trim();
-    if (!cleanTitle) cleanTitle = rawTitle.slice(0, 30);
+    // Clean leading & trailing punctuation, brackets, hyphens
+    cleanTitle = cleanTitle
+      .replace(/^[([{\-–—:_+\s]+/g, '')
+      .replace(/[([{\-–—:_+\s]+$/g, '')
+      .trim();
+
+    // If still empty or junk, try fallback split on language/specs keywords
+    if (!cleanTitle || cleanTitle.length < 2 || isJunkText(cleanTitle)) {
+      const parts = titleToParse.split(/\s+(?:tamil|telugu|hindi|malayalam|kannada|1080p|720p|4k|web|hdrip)\b/i);
+      if (parts[0] && parts[0].trim().length >= 2 && !isJunkText(parts[0])) {
+        cleanTitle = parts[0].trim();
+      } else {
+        cleanTitle = titleToParse.slice(0, 30);
+      }
+    }
+
+    // Secondary recovery from slug if cleanTitle is STILL junk
+    if (isJunkText(cleanTitle) && topicUrl) {
+      const slugMatch = topicUrl.match(/\/topic\/\d+[-_]?([^/?#]+)/i);
+      if (slugMatch && slugMatch[1]) {
+        const slugText = decodeURIComponent(slugMatch[1]).replace(/[-_]+/g, ' ').trim();
+        const sYear = slugText.match(/\b(19\d\d|20\d\d)\b/);
+        if (sYear) {
+          cleanTitle = slugText.substring(0, slugText.indexOf(sYear[1])).trim();
+        } else {
+          cleanTitle = slugText
+            .replace(/\b(tamil|telugu|hindi|malayalam|kannada|english|web|dl|hdrip|dvdrip|x264|x265|hevc|aac|esub|true|uncut|hq|rip|rips)\b/gi, '')
+            .trim();
+        }
+      }
+    }
+
+    if (isJunkText(cleanTitle)) {
+      cleanTitle = 'Tamil Movie';
+    }
+
+    // Format Title with clean Title Case
+    cleanTitle = cleanTitle
+      .split(/\s+/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ')
+      .trim();
 
     // Extract Language
     let language = 'Tamil';
@@ -280,7 +352,11 @@ export const tamilMvService = {
 
       // 1. Extract magnet URL
       const magnetMatch = html.match(/href=["'](magnet:\?[^"']+)["']/i);
-      const magnetUrl = magnetMatch ? magnetMatch[1] : undefined;
+      let magnetUrl = magnetMatch ? magnetMatch[1] : undefined;
+      if (magnetUrl) {
+        // Decode HTML entities like &amp; -> & so torrent clients and trackers parse correctly
+        magnetUrl = magnetUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+      }
 
       // 2. Extract torrent file attachment URL
       const torrentMatch =
@@ -288,7 +364,10 @@ export const tamilMvService = {
         html.match(
           /href=["'](https?:\/\/[^"']*\/index\.php\?\/applications\/core\/interface\/file\/attachment\.php\?[^"']+)["']/i
         );
-      const torrentUrl = torrentMatch ? torrentMatch[1] : undefined;
+      let torrentUrl = torrentMatch ? torrentMatch[1] : undefined;
+      if (torrentUrl) {
+        torrentUrl = torrentUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+      }
 
       return { magnetUrl, torrentUrl };
     } catch (err) {

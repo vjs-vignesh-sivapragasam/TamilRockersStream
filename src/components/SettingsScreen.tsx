@@ -358,9 +358,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 {[
-                  { label: 'Cloud Tunnel (Live)', url: 'https://gold-ways-remain.loca.lt' },
-                  { label: 'Android Emulator', url: 'http://10.0.2.2:3000' },
+                  { label: 'Wi-Fi LAN (Fastest)', url: 'http://192.168.1.6:3000' },
+                  { label: 'Cloud Tunnel (Live)', url: 'https://wild-results-help.loca.lt' },
                   { label: 'Local PC', url: 'http://localhost:3000' },
+                  { label: 'Android Emulator', url: 'http://10.0.2.2:3000' },
                 ].map((item) => {
                   const isActive = customServerUrl.toLowerCase() === item.url.toLowerCase();
                   return (

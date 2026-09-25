@@ -12,9 +12,11 @@ import {
   ScrollView,
   Share,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
@@ -34,8 +36,7 @@ import {
   Flame,
   Radio,
   Tv,
-  ChevronLeft,
-  ChevronRight,
+  ArrowUp,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import {
@@ -66,96 +67,27 @@ let globalCachedFinderState: {
 };
 
 const FINDER_CACHE_FILE = FileSystem.documentDirectory
-  ? `${FileSystem.documentDirectory}finder_cache_v3.json`
+  ? `${FileSystem.documentDirectory}finder_cache_v4.json`
   : '';
 
-// Helper for quality badge colors
-const getQualityBadgeColor = (res: string) => {
-  if (/4k|2160p/i.test(res)) return '#E50914';
-  if (/1080p/i.test(res)) return '#007AFF';
-  if (/720p/i.test(res)) return '#34C759';
-  if (/250mb/i.test(res)) return '#AF52DE';
-  return '#48484A';
+// Helper for quality badge styling
+const getQualityBadgeConfig = (res: string) => {
+  if (/4k|2160p/i.test(res)) {
+    return { bg: 'rgba(229, 9, 20, 0.18)', border: 'rgba(229, 9, 20, 0.45)', text: '#FF4D4D' };
+  }
+  if (/1080p/i.test(res)) {
+    return { bg: 'rgba(10, 132, 255, 0.18)', border: 'rgba(10, 132, 255, 0.45)', text: '#5AC8FA' };
+  }
+  if (/720p/i.test(res)) {
+    return { bg: 'rgba(52, 199, 89, 0.18)', border: 'rgba(52, 199, 89, 0.45)', text: '#30D158' };
+  }
+  if (/250mb/i.test(res)) {
+    return { bg: 'rgba(191, 90, 242, 0.18)', border: 'rgba(191, 90, 242, 0.45)', text: '#DA8FFF' };
+  }
+  return { bg: 'rgba(142, 142, 147, 0.18)', border: 'rgba(142, 142, 147, 0.35)', text: '#E5E5EA' };
 };
 
-// Pure Component for Resolution Row
-interface ResolutionRowItemProps {
-  resItem: MovieResolutionItem;
-  movie: TamilMvMovieResult;
-  isStreaming: boolean;
-  onMovieDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
-  onTorrentDownload: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
-  onStream: (res: MovieResolutionItem, movie: TamilMvMovieResult) => void;
-  onCopy: (res: MovieResolutionItem) => void;
-}
-
-const ResolutionRowItem = React.memo<ResolutionRowItemProps>(
-  ({ resItem, movie, isStreaming, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
-    const badgeColor = getQualityBadgeColor(resItem.resolution);
-
-    return (
-      <View style={styles.resRow}>
-        {/* Left: Quality Badge & Specs */}
-        <View style={styles.resLeft}>
-          <View style={[styles.qualityPill, { backgroundColor: badgeColor }]}>
-            <Text style={styles.qualityPillText}>{resItem.resolution}</Text>
-          </View>
-          {resItem.size ? <Text style={styles.sizeText}>{resItem.size}</Text> : null}
-          {resItem.audio ? <Text style={styles.codecText}>• {resItem.audio}</Text> : null}
-        </View>
-
-        {/* Right: 4 Clean Uniform Action Buttons (No text) */}
-        <View style={styles.resRightActions}>
-          {/* Action 1: Movie Download (Direct to Downloads Manager) */}
-          <TouchableOpacity
-            style={styles.actionIconBtnDownload}
-            onPress={() => onMovieDownload(resItem, movie)}
-            activeOpacity={0.7}
-            accessibilityLabel="Movie Download"
-          >
-            <Download color="#FFFFFF" size={14} />
-          </TouchableOpacity>
-
-          {/* Action 2: Torrent Option */}
-          <TouchableOpacity
-            style={styles.actionIconBtnTorrent}
-            onPress={() => onTorrentDownload(resItem, movie)}
-            activeOpacity={0.7}
-            accessibilityLabel="Torrent Download"
-          >
-            <Flame color="#FF9500" size={14} />
-          </TouchableOpacity>
-
-          {/* Action 3: Online Stream (In-App Player) */}
-          <TouchableOpacity
-            style={styles.actionIconBtnStream}
-            onPress={() => onStream(resItem, movie)}
-            activeOpacity={0.7}
-            accessibilityLabel="Online Stream"
-          >
-            {isStreaming ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
-            )}
-          </TouchableOpacity>
-
-          {/* Action 4: Copy Magnet / Link */}
-          <TouchableOpacity
-            style={styles.actionIconBtnCopy}
-            onPress={() => onCopy(resItem)}
-            activeOpacity={0.7}
-            accessibilityLabel="Copy Link"
-          >
-            <Copy color="#8E8E93" size={14} />
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-);
-
-// Pure Component for Movie Card
+// Pure Component for Movie Card with Dynamic Resolution Dropdown and 2-Line Action Buttons
 interface MovieCardItemProps {
   item: TamilMvMovieResult;
   streamingResId: string | null;
@@ -167,17 +99,57 @@ interface MovieCardItemProps {
 
 const MovieCardItem = React.memo<MovieCardItemProps>(
   ({ item, streamingResId, onMovieDownload, onTorrentDownload, onStream, onCopy }) => {
+    // Dynamic Resolution Dropdown State
+    const [selectedResIndex, setSelectedResIndex] = useState(0);
+    const [dropdownOpen, setDropdownOpen] = useState(false);
+
+    // Selected Resolution
+    const selectedRes = item.resolutions[selectedResIndex] || item.resolutions[0];
+    const isStreaming = selectedRes ? streamingResId === selectedRes.id : false;
+    const badge = getQualityBadgeConfig(selectedRes?.resolution || '1080p');
+
+    // Robust Title Sanitizer: Guarantees clean movie name even if scraped/cached data was irregular
+    const cleanMovieName = useMemo(() => {
+      const isBad = (name?: string) =>
+        !name ||
+        name.length < 2 ||
+        /^(languages?|rips?)|^[-–—\s\d.+]+(?:gb|mb)?/i.test(name.trim());
+
+      if (!isBad(item.movieTitle)) {
+        return item.movieTitle;
+      }
+
+      // Recover from topicUrl
+      const fallbackUrl = item.topicUrl || item.resolutions[0]?.topicUrl || '';
+      if (fallbackUrl) {
+        const parsed = tamilMvService.parseTitleMetadata(
+          item.resolutions[0]?.rawTitle || item.movieTitle || '',
+          fallbackUrl
+        );
+        if (!isBad(parsed.movieTitle)) {
+          return parsed.movieTitle;
+        }
+      }
+
+      return 'Tamil Movie';
+    }, [item.movieTitle, item.topicUrl, item.resolutions]);
+
     return (
       <View style={styles.card}>
-        {/* Card Header with Film Avatar & Movie Info */}
+        {/* Card Header with Poster Avatar & Movie Info */}
         <View style={styles.cardHeader}>
-          <View style={styles.filmAvatar}>
-            <Film color={Colors.netflixRed} size={18} />
-          </View>
+          <LinearGradient
+            colors={['#FF1E27', '#800005']}
+            style={styles.filmAvatar}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Film color="#FFFFFF" size={17} strokeWidth={2} />
+          </LinearGradient>
 
           <View style={styles.cardTitleGroup}>
             <Text style={styles.movieTitle} numberOfLines={1}>
-              {item.movieTitle}
+              {cleanMovieName}
             </Text>
             <View style={styles.metaBadgeRow}>
               {item.year ? (
@@ -190,9 +162,11 @@ const MovieCardItem = React.memo<MovieCardItemProps>(
                   <Text style={styles.langText}>{item.language}</Text>
                 </View>
               ) : null}
-              <Text style={styles.qualityCount}>
-                • {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
-              </Text>
+              <View style={styles.resCountChip}>
+                <Text style={styles.qualityCount}>
+                  {item.resolutions.length} {item.resolutions.length === 1 ? 'quality' : 'qualities'}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -200,26 +174,148 @@ const MovieCardItem = React.memo<MovieCardItemProps>(
             style={styles.openTopicBtn}
             onPress={() => Linking.openURL(item.topicUrl)}
             activeOpacity={0.7}
+            accessibilityLabel="Open Forum Post"
           >
-            <ExternalLink color="#8E8E93" size={15} />
+            <ExternalLink color="#4B5563" size={13.5} strokeWidth={2.4} />
           </TouchableOpacity>
         </View>
 
-        {/* Grouped Resolutions List */}
-        <View style={styles.resolutionsList}>
-          {item.resolutions.map((res) => (
-            <ResolutionRowItem
-              key={res.id}
-              resItem={res}
-              movie={item}
-              isStreaming={streamingResId === res.id}
-              onMovieDownload={onMovieDownload}
-              onTorrentDownload={onTorrentDownload}
-              onStream={onStream}
-              onCopy={onCopy}
-            />
-          ))}
-        </View>
+        {/* Dynamic Resolution Dropdown Selector */}
+        {selectedRes ? (
+          <View style={styles.dropdownContainer}>
+            <TouchableOpacity
+              style={[styles.dropdownTrigger, dropdownOpen && styles.dropdownTriggerOpen]}
+              onPress={() => setDropdownOpen((prev) => !prev)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.dropdownTriggerLeft}>
+                <View style={[styles.qualityPill, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                  <Text style={[styles.qualityPillText, { color: badge.text }]}>
+                    {selectedRes.resolution}
+                  </Text>
+                </View>
+                <View style={styles.dropdownSpecs}>
+                  {selectedRes.size ? <Text style={styles.dropdownSizeText}>{selectedRes.size}</Text> : null}
+                  {selectedRes.audio ? (
+                    <Text style={styles.dropdownAudioText} numberOfLines={1}>
+                      {selectedRes.audio}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={styles.dropdownTriggerRight}>
+                <Text style={styles.dropdownActionText}>
+                  {item.resolutions.length > 1 ? (dropdownOpen ? 'Close' : 'Select Quality') : 'Quality'}
+                </Text>
+                {item.resolutions.length > 1 ? (
+                  <ChevronDown
+                    color="#9CA3AF"
+                    size={15}
+                    style={{ transform: [{ rotate: dropdownOpen ? '180deg' : '0deg' }] }}
+                  />
+                ) : null}
+              </View>
+            </TouchableOpacity>
+
+            {/* Dropdown Options Menu */}
+            {dropdownOpen && item.resolutions.length > 1 ? (
+              <View style={styles.dropdownMenu}>
+                {item.resolutions.map((resOption, idx) => {
+                  const isSelected = idx === selectedResIndex;
+                  const optBadge = getQualityBadgeConfig(resOption.resolution);
+                  return (
+                    <TouchableOpacity
+                      key={resOption.id || `opt-${idx}`}
+                      style={[styles.dropdownOption, isSelected && styles.dropdownOptionActive]}
+                      onPress={() => {
+                        setSelectedResIndex(idx);
+                        setDropdownOpen(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.dropdownOptionLeft}>
+                        <View style={[styles.qualityPill, { backgroundColor: optBadge.bg, borderColor: optBadge.border }]}>
+                          <Text style={[styles.qualityPillText, { color: optBadge.text }]}>
+                            {resOption.resolution}
+                          </Text>
+                        </View>
+                        {resOption.size ? (
+                          <Text style={styles.dropdownOptionSize}>{resOption.size}</Text>
+                        ) : null}
+                        {resOption.audio ? (
+                          <Text style={styles.dropdownOptionAudio} numberOfLines={1}>
+                            {resOption.audio}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {isSelected ? <Check color="#34C759" size={15} strokeWidth={2.5} /> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* 4 Light-Themed Action Buttons with Icon + Text in Two Lines */}
+        {selectedRes ? (
+          <View style={styles.cardActionsWrapper}>
+            {/* Line 1: Download .torrent & Open in Torrent App */}
+            <View style={styles.actionLineRow}>
+              {/* Button 1: Download .torrent file */}
+              <TouchableOpacity
+                onPress={() => onMovieDownload(selectedRes, item)}
+                activeOpacity={0.75}
+                style={[styles.actionBtnWithText, styles.btnDownloadLight]}
+                accessibilityLabel="Download .torrent file"
+              >
+                <Download color="#059669" size={14} strokeWidth={2.4} />
+                <Text style={[styles.actionBtnText, { color: '#047857' }]}>Download .torrent</Text>
+              </TouchableOpacity>
+
+              {/* Button 2: Redirect to Torrent App */}
+              <TouchableOpacity
+                onPress={() => onTorrentDownload(selectedRes, item)}
+                activeOpacity={0.75}
+                style={[styles.actionBtnWithText, styles.btnTorrentRedirectLight]}
+                accessibilityLabel="Redirect to Torrent App"
+              >
+                <ExternalLink color="#EA580C" size={14} strokeWidth={2.4} />
+                <Text style={[styles.actionBtnText, { color: '#C2410C' }]}>Torrent App</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Line 2: Copy Magnet & Play Stream */}
+            <View style={styles.actionLineRow}>
+              {/* Button 3: Copy Magnet */}
+              <TouchableOpacity
+                onPress={() => onCopy(selectedRes)}
+                activeOpacity={0.75}
+                style={[styles.actionBtnWithText, styles.btnCopyLight]}
+                accessibilityLabel="Copy Magnet Link"
+              >
+                <Copy color="#4F46E5" size={14} strokeWidth={2.4} />
+                <Text style={[styles.actionBtnText, { color: '#4338CA' }]}>Copy Magnet</Text>
+              </TouchableOpacity>
+
+              {/* Button 4: Play Stream */}
+              <TouchableOpacity
+                onPress={() => onStream(selectedRes, item)}
+                activeOpacity={0.75}
+                style={[styles.actionBtnWithText, styles.btnPlayLight]}
+                accessibilityLabel="Play Stream"
+              >
+                {isStreaming ? (
+                  <ActivityIndicator size="small" color="#E11D48" />
+                ) : (
+                  <Play color="#E11D48" size={13} fill="#E11D48" strokeWidth={1} />
+                )}
+                <Text style={[styles.actionBtnText, { color: '#BE123C' }]}>Play Stream</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -235,23 +331,32 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const [results, setResults] = useState<TamilMvMovieResult[]>(globalCachedFinderState.results);
   const [hasSearched, setHasSearched] = useState(globalCachedFinderState.hasSearched);
 
-  // Pagination State (6 movies per page)
-  const PAGE_SIZE = 6;
-  const [currentPage, setCurrentPage] = useState(1);
+  // Lazy Loading Infinite Scroll State
+  const INITIAL_BATCH_SIZE = 12;
+  const BATCH_LOAD_STEP = 10;
+  const [displayedCount, setDisplayedCount] = useState(INITIAL_BATCH_SIZE);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
-
   const visibleResults = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return results.slice(start, start + PAGE_SIZE);
-  }, [results, currentPage]);
+    return results.slice(0, displayedCount);
+  }, [results, displayedCount]);
 
-  const handlePageChange = (newPage: number) => {
-    const page = Math.max(1, Math.min(totalPages, newPage));
-    setCurrentPage(page);
+  const handleLoadMore = useCallback(() => {
+    if (displayedCount < results.length) {
+      setDisplayedCount((prev) => Math.min(prev + BATCH_LOAD_STEP, results.length));
+    }
+  }, [displayedCount, results.length]);
+
+  const handleScroll = useCallback((event: any) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    setShowScrollTop(offsetY > 350);
+  }, []);
+
+  const handleScrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-  };
+  }, []);
 
   // In-App Video Streaming Player State
   const [streamPlayerVisible, setStreamPlayerVisible] = useState(false);
@@ -267,6 +372,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
   const [webViewSearchUrl, setWebViewSearchUrl] = useState('');
   const webViewRef = useRef<WebView>(null);
   const searchTimeoutRef = useRef<any>(null);
+  const activeSearchTermRef = useRef(globalCachedFinderState.searchedQuery || 'Recent Upload');
 
   // Quick filter suggestions
   const suggestions = [
@@ -282,9 +388,17 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     'Lover',
   ];
 
-  // Restore persisted state from storage on first mount if cache is empty
+  // Restore persisted state from storage on first mount or auto-fetch Recent Upload
   useEffect(() => {
-    if (globalCachedFinderState.results.length === 0 && FINDER_CACHE_FILE) {
+    if (globalCachedFinderState.results.length > 0) {
+      setQuery(globalCachedFinderState.query);
+      setSearchedQuery(globalCachedFinderState.searchedQuery);
+      setResults(globalCachedFinderState.results);
+      setHasSearched(globalCachedFinderState.hasSearched);
+      return;
+    }
+
+    if (FINDER_CACHE_FILE) {
       FileSystem.readAsStringAsync(FINDER_CACHE_FILE)
         .then((content) => {
           try {
@@ -294,17 +408,23 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
               setSearchedQuery(parsed.searchedQuery || '');
               setResults(parsed.results);
               setHasSearched(Boolean(parsed.hasSearched));
-              setCurrentPage(1);
+              setDisplayedCount(INITIAL_BATCH_SIZE);
               globalCachedFinderState = {
                 query: parsed.query || '',
                 searchedQuery: parsed.searchedQuery || '',
                 results: parsed.results,
                 hasSearched: Boolean(parsed.hasSearched),
               };
+              return;
             }
           } catch {}
+          handlePerformSearch('Recent Upload');
         })
-        .catch(() => {});
+        .catch(() => {
+          handlePerformSearch('Recent Upload');
+        });
+    } else {
+      handlePerformSearch('Recent Upload');
     }
   }, []);
 
@@ -318,7 +438,8 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     setResults(newResults);
     setSearchedQuery(newSearchedQuery);
     setHasSearched(newHasSearched);
-    setCurrentPage(1);
+    setDisplayedCount(INITIAL_BATCH_SIZE);
+    setIsRefreshing(false);
     if (newQuery !== undefined) setQuery(newQuery);
 
     const newState = {
@@ -346,28 +467,30 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
+    activeSearchTermRef.current = term;
     setLoading(true);
     setHasSearched(true);
     setSearchedQuery(term);
     setResults([]);
-    setCurrentPage(1);
+    setDisplayedCount(INITIAL_BATCH_SIZE);
 
     const isRecent = /^recent/i.test(term);
+    const ts = Date.now();
     const searchUrl = isRecent
-      ? `${currentBaseUrl}/`
-      : `${currentBaseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
+      ? `${currentBaseUrl}/?_t=${ts}`
+      : `${currentBaseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic&_t=${ts}`;
 
     setWebViewSearchUrl(searchUrl);
 
     // Timeout safety fallback
     searchTimeoutRef.current = setTimeout(() => {
       setLoading(false);
-    }, 12000);
+    }, 15000);
 
     // Try direct fetch first
     try {
       const data = isRecent
-        ? await tamilMvService.searchMovie('Tamil', currentBaseUrl)
+        ? await tamilMvService.searchMovie('Recent Upload', currentBaseUrl)
         : await tamilMvService.searchMovie(term, currentBaseUrl);
 
       if (data && data.length > 0) {
@@ -381,14 +504,21 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     }
   };
 
+  const handlePullToRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await handlePerformSearch(searchedQuery || 'Recent Upload');
+    setIsRefreshing(false);
+  }, [searchedQuery]);
+
   const handleWebViewMessage = (event: any) => {
     try {
       const payload = JSON.parse(event.nativeEvent.data);
       if (payload.type === 'SCRAPED_TOPICS' && Array.isArray(payload.items)) {
         if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-        const filterTerm = /^recent/i.test(searchedQuery) ? '' : searchedQuery;
+        const currentTerm = activeSearchTermRef.current;
+        const filterTerm = /^recent/i.test(currentTerm) ? '' : currentTerm;
         const parsed = tamilMvService.parseRawTopicItems(payload.items, filterTerm);
-        updateFinderState(parsed, searchedQuery, true);
+        updateFinderState(parsed, currentTerm, true);
         setLoading(false);
       }
     } catch (e) {
@@ -515,6 +645,33 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             `Choose how to stream "${title}":`,
             [
               {
+                text: '🟧 Play in VLC Player (Recommended)',
+                onPress: async () => {
+                  try {
+                    await Linking.openURL(`vlc://${finalMagnet}`);
+                  } catch {
+                    try {
+                      await Linking.openURL(finalMagnet);
+                    } catch {
+                      Alert.alert(
+                        'VLC Not Detected',
+                        'VLC for Android is recommended for direct torrent streaming with full .MKV & HEVC hardware acceleration. Would you like to stream in Browser instead?',
+                        [
+                          {
+                            text: 'Open in Browser',
+                            onPress: () =>
+                              Linking.openURL(
+                                `https://webtor.io/show?magnet=${encodeURIComponent(finalMagnet)}`
+                              ),
+                          },
+                          { text: 'Cancel', style: 'cancel' },
+                        ]
+                      );
+                    }
+                  }
+                },
+              },
+              {
                 text: '▶ Stream in App (Stremio Engine)',
                 onPress: () => {
                   const liveStreamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(finalMagnet)}`;
@@ -538,7 +695,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
                 },
               },
               {
-                text: '🌐 Stream in Browser (Webtor)',
+                text: '🌐 Stream in Browser (Webtor Cloud)',
                 onPress: () => {
                   const webtorUrl = `https://webtor.io/show?magnet=${encodeURIComponent(finalMagnet)}`;
                   Linking.openURL(webtorUrl).catch((err) => {
@@ -611,73 +768,69 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   const keyExtractor = useCallback((item: TamilMvMovieResult) => item.id, []);
 
-  // Clean Pagination Bar Component
-  const renderPaginationBar = () => {
-    if (totalPages <= 1) return null;
+  // Lazy Load Footer Component
+  const renderListFooter = useCallback(() => {
+    if (results.length === 0) return null;
+
+    if (displayedCount < results.length) {
+      return (
+        <View style={styles.lazyLoadFooter}>
+          <ActivityIndicator size="small" color={Colors.netflixRed} />
+          <Text style={styles.lazyLoadText}>
+            Loading more movies ({visibleResults.length} / {results.length})...
+          </Text>
+        </View>
+      );
+    }
 
     return (
-      <View style={styles.paginationBar}>
-        <TouchableOpacity
-          style={[styles.pageNavBtn, currentPage === 1 && styles.pageNavBtnDisabled]}
-          onPress={() => handlePageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-          activeOpacity={0.7}
-        >
-          <ChevronLeft color={currentPage === 1 ? '#48484A' : '#FFFFFF'} size={15} />
-          <Text style={[styles.pageNavBtnText, currentPage === 1 && styles.pageNavBtnTextDisabled]}>
-            Prev
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.pageNumbersRow}>
-          {Array.from({ length: totalPages }, (_, i) => i + 1)
-            .slice(Math.max(0, currentPage - 3), Math.min(totalPages, currentPage + 2))
-            .map((pageNum) => (
-              <TouchableOpacity
-                key={pageNum}
-                style={[styles.pageNumPill, currentPage === pageNum && styles.pageNumPillActive]}
-                onPress={() => handlePageChange(pageNum)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.pageNumText, currentPage === pageNum && styles.pageNumTextActive]}>
-                  {pageNum}
-                </Text>
-              </TouchableOpacity>
-            ))}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.pageNavBtn, currentPage === totalPages && styles.pageNavBtnDisabled]}
-          onPress={() => handlePageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.pageNavBtnText, currentPage === totalPages && styles.pageNavBtnTextDisabled]}>
-            Next
-          </Text>
-          <ChevronRight color={currentPage === totalPages ? '#48484A' : '#FFFFFF'} size={15} />
-        </TouchableOpacity>
+      <View style={styles.endOfListFooter}>
+        <View style={styles.endOfListDivider} />
+        <Text style={styles.endOfListText}>All {results.length} movies loaded</Text>
+        <View style={styles.endOfListDivider} />
       </View>
     );
-  };
+  }, [displayedCount, results.length, visibleResults.length]);
 
   const INJECTED_SCRAPER_JS = `
     (function() {
       function sendResults() {
         try {
-          var items = [];
-          var links = document.querySelectorAll('a[href*="/forums/topic/"]');
-          var seen = {};
+          var topicMap = {};
+          var links = document.querySelectorAll('a[href*="topic/"]');
           for (var i = 0; i < links.length; i++) {
             var a = links[i];
-            var href = a.href;
-            var text = (a.innerText || a.textContent || '').trim();
-            if (!href || !text || text.length < 3 || seen[href]) continue;
-            if (/^\\d+$/.test(text) || text.toLowerCase() === 'next' || text.toLowerCase() === 'prev' || text.toLowerCase() === 'last') continue;
-            seen[href] = true;
-            items.push({ topicUrl: href, rawTitle: text });
+            var rawHref = a.href || '';
+            var cleanUrl = rawHref.split('#')[0].replace(/&.*$/, '').replace(/\\/page\\/\\d+\\/?$/, '/');
+            if (!cleanUrl || cleanUrl.indexOf('topic/') === -1 || cleanUrl.indexOf('/topic/183-0') !== -1) continue;
+            
+            var titleAttr = (a.getAttribute('title') || '').replace(/<[^>]*>/g, '').trim();
+            var innerText = (a.innerText || a.textContent || '').replace(/<[^>]*>/g, '').trim();
+            
+            var candidates = [titleAttr, innerText];
+            for (var c = 0; c < candidates.length; c++) {
+              var text = candidates[c];
+              if (!text || text.length < 3) continue;
+              var lower = text.toLowerCase();
+              if (/^\\d+$/.test(text) || lower === 'next' || lower === 'prev' || lower === 'last' || lower === 'page') continue;
+              
+              if (!topicMap[cleanUrl] || text.length > topicMap[cleanUrl].length) {
+                topicMap[cleanUrl] = text;
+              }
+            }
+            if (!topicMap[cleanUrl] && innerText && innerText.length >= 3) {
+              topicMap[cleanUrl] = innerText;
+            }
           }
-          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          
+          var items = [];
+          for (var url in topicMap) {
+            if (topicMap.hasOwnProperty(url)) {
+              items.push({ topicUrl: url, rawTitle: topicMap[url] });
+            }
+          }
+          
+          if (items.length > 0 && window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'SCRAPED_TOPICS',
               items: items
@@ -686,22 +839,39 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         } catch(e) {}
       }
 
+      sendResults();
       if (document.readyState === 'complete') {
-        setTimeout(sendResults, 500);
+        setTimeout(sendResults, 300);
       } else {
-        window.addEventListener('load', function() { setTimeout(sendResults, 700); });
+        window.addEventListener('load', function() { setTimeout(sendResults, 400); });
       }
+      setTimeout(sendResults, 1000);
       setTimeout(sendResults, 2000);
+      setTimeout(sendResults, 3500);
+      setTimeout(sendResults, 5000);
     })();
     true;
   `;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 6 }]}>
-      {/* 1. Header */}
+      {/* 1. Modern Header with Glowing Accent & Live Mirror Chip */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.screenTitle}>Finder</Text>
+          <View style={styles.headerTitleRow}>
+            <LinearGradient
+              colors={['#FF1E27', '#800005']}
+              style={styles.headerLogoBadge}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Film color="#FFFFFF" size={16} strokeWidth={2.5} />
+            </LinearGradient>
+            <View>
+              <Text style={styles.screenTitle}>Movie Finder</Text>
+              <Text style={styles.screenSubtitle}>Search & Stream HD Torrents</Text>
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -709,22 +879,22 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           onPress={() => setUrlModalVisible(true)}
           activeOpacity={0.75}
         >
-          <Globe color="#34C759" size={12} />
+          <View style={styles.livePulseDot} />
           <Text style={styles.mirrorChipText} numberOfLines={1}>
             {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}
           </Text>
-          <ChevronDown color="#8E8E93" size={12} />
+          <ChevronDown color="#FFFFFF" size={13} strokeWidth={2.5} />
         </TouchableOpacity>
       </View>
 
-      {/* 2. Unified Search Input */}
+      {/* 2. Modern Glassmorphic Search Bar */}
       <View style={styles.searchBarWrapper}>
         <View style={styles.searchBar}>
-          <Search color="#8E8E93" size={16} />
+          <Search color="#FF4D4D" size={16} strokeWidth={2.5} />
           <TextInput
             style={styles.input}
             placeholder="Search movie title (e.g. Leo, Amaran)..."
-            placeholderTextColor="#636366"
+            placeholderTextColor="#8E8E93"
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={() => handlePerformSearch()}
@@ -733,22 +903,28 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => setQuery('')} style={styles.clearBtn}>
-              <X color="#8E8E93" size={14} />
+              <X color="#FFFFFF" size={15} strokeWidth={2.5} />
             </TouchableOpacity>
           )}
         </View>
 
         <TouchableOpacity
-          style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
           onPress={() => handlePerformSearch()}
           disabled={!query.trim() || loading}
           activeOpacity={0.8}
         >
-          {loading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.searchBtnText}>Search</Text>
-          )}
+          <LinearGradient
+            colors={!query.trim() ? ['#2C1A1E', '#1F1215'] : ['#E50914', '#B20710']}
+            style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.searchBtnText}>Search</Text>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </View>
 
@@ -760,19 +936,32 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             return (
               <TouchableOpacity
                 key={item}
-                style={[styles.chip, isSelected && styles.chipActive]}
                 onPress={() => {
                   setQuery(item);
                   handlePerformSearch(item);
                 }}
                 activeOpacity={0.7}
               >
-                {item === 'Recent Upload' ? (
-                  <Sparkles color={isSelected ? '#FFFFFF' : Colors.netflixRed} size={11} />
-                ) : null}
-                <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                  {item}
-                </Text>
+                {isSelected ? (
+                  <LinearGradient
+                    colors={['#E50914', '#990000']}
+                    style={styles.chipActiveGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    {item === 'Recent Upload' ? (
+                      <Sparkles color="#FFFFFF" size={11} strokeWidth={2.5} />
+                    ) : null}
+                    <Text style={styles.chipTextActive}>{item}</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={styles.chip}>
+                    {item === 'Recent Upload' ? (
+                      <Sparkles color={Colors.netflixRed} size={11} strokeWidth={2.5} />
+                    ) : null}
+                    <Text style={styles.chipText}>{item}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
@@ -788,7 +977,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
       ) : hasSearched && results.length === 0 ? (
         /* Clean Not Found State */
         <View style={styles.stateCenter}>
-          <AlertCircle color="#48484A" size={40} />
+          <AlertCircle color="#FF453A" size={44} strokeWidth={2.2} />
           <Text style={styles.notFoundTitle}>No Results Found</Text>
           <Text style={styles.notFoundSub}>
             No movies found for "{searchedQuery}". Try another title or switch mirror.
@@ -802,44 +991,79 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           </TouchableOpacity>
         </View>
       ) : hasSearched && results.length > 0 ? (
-        /* Results List with Pagination Header & Footer */
+        /* Results List with Lazy Loading & Pull-to-Refresh */
         <FlatList
           ref={flatListRef}
           data={visibleResults}
           keyExtractor={keyExtractor}
           renderItem={renderMovieCard}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
           showsVerticalScrollIndicator={false}
-          initialNumToRender={5}
-          maxToRenderPerBatch={5}
-          windowSize={5}
-          updateCellsBatchingPeriod={50}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={35}
           removeClippedSubviews={Platform.OS === 'android'}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.4}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handlePullToRefresh}
+              tintColor={Colors.netflixRed}
+              colors={[Colors.netflixRed]}
+              progressBackgroundColor="#16171D"
+            />
+          }
           ListHeaderComponent={
             <View style={styles.listHeaderBox}>
               <View style={styles.listHeaderMetaRow}>
-                <Text style={styles.resultsCount}>
-                  Found {results.length} Movie{results.length === 1 ? '' : 's'}
-                </Text>
-                <Text style={styles.pageCount}>
-                  Page {currentPage} of {totalPages}
-                </Text>
+                <View style={styles.metaCountBadge}>
+                  <Text style={styles.resultsCount}>
+                    {results.length} Movies Available
+                  </Text>
+                </View>
+                <View style={styles.loadedBadge}>
+                  <Text style={styles.loadedBadgeText}>
+                    Showing {visibleResults.length} of {results.length}
+                  </Text>
+                </View>
               </View>
-              {renderPaginationBar()}
             </View>
           }
-          ListFooterComponent={renderPaginationBar}
+          ListFooterComponent={renderListFooter}
         />
       ) : (
         /* Clean Idle State */
         <View style={styles.stateCenter}>
-          <Layers color="#2C2C2E" size={44} />
+          <Layers color="#FF3B30" size={48} strokeWidth={2} />
           <Text style={styles.idleTitle}>Quick Movie & Quality Finder</Text>
           <Text style={styles.idleSub}>
             Type any movie name or select a year chip to list all download and stream qualities.
           </Text>
         </View>
       )}
+
+      {/* Floating Scroll to Top Button */}
+      {showScrollTop ? (
+        <TouchableOpacity
+          style={[styles.scrollTopBtn, { bottom: insets.bottom + 20 }]}
+          onPress={handleScrollToTop}
+          activeOpacity={0.85}
+          accessibilityLabel="Scroll to top"
+        >
+          <LinearGradient
+            colors={['#FF1E27', '#990005']}
+            style={styles.scrollTopGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <ArrowUp color="#FFFFFF" size={19} strokeWidth={2.5} />
+          </LinearGradient>
+        </TouchableOpacity>
+      ) : null}
 
       {/* 5. Clean Mirror Config Modal */}
       <Modal
@@ -859,7 +1083,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Source Mirror Domain</Text>
               <TouchableOpacity onPress={() => setUrlModalVisible(false)}>
-                <X color="#8E8E93" size={18} />
+                <X color="#FFFFFF" size={18} strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
 
@@ -938,56 +1162,82 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0D0D',
+    backgroundColor: '#0B0C0E',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 10,
   },
   headerLeft: {
     flex: 1,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerLogoBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   screenTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
+  },
+  screenSubtitle: {
+    color: '#8E8E93',
+    fontSize: 10.5,
+    fontWeight: '500',
+    marginTop: 1,
   },
   mirrorChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#1C1C1E',
-    borderWidth: 0.5,
-    borderColor: '#2C2C2E',
+    gap: 6,
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  livePulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#34C759',
   },
   mirrorChipText: {
     color: '#E5E5EA',
     fontSize: 11,
     fontWeight: '600',
-    maxWidth: 130,
+    maxWidth: 120,
   },
   searchBarWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 10,
+    backgroundColor: '#16171D',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#262835',
     paddingHorizontal: 12,
-    height: 40,
+    height: 42,
     gap: 8,
   },
   input: {
@@ -1000,42 +1250,45 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   searchBtn: {
-    backgroundColor: Colors.netflixRed,
-    borderRadius: 10,
-    height: 40,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    height: 42,
+    paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   searchBtnDisabled: {
-    opacity: 0.4,
+    opacity: 0.45,
   },
   searchBtnText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   suggestionsSection: {
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
   suggestionsScroll: {
     paddingHorizontal: 16,
-    gap: 6,
+    gap: 7,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#161618',
-    borderWidth: 0.5,
-    borderColor: '#28282E',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+    backgroundColor: '#14151A',
+    borderWidth: 1,
+    borderColor: '#242633',
+    paddingHorizontal: 11,
+    paddingVertical: 5.5,
+    borderRadius: 16,
   },
-  chipActive: {
-    backgroundColor: 'rgba(255, 0, 64, 0.15)',
-    borderColor: Colors.netflixRed,
+  chipActiveGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 11,
+    paddingVertical: 5.5,
+    borderRadius: 16,
   },
   chipText: {
     color: '#8E8E93',
@@ -1044,6 +1297,8 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 16,
@@ -1051,7 +1306,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   listHeaderBox: {
-    marginBottom: 10,
+    marginBottom: 12,
     gap: 8,
   },
   listHeaderMetaRow: {
@@ -1059,80 +1314,89 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  resultsCount: {
-    color: '#E5E5EA',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+  metaCountBadge: {
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  pageCount: {
-    color: '#8E8E93',
+  resultsCount: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  loadedBadge: {
+    backgroundColor: 'rgba(255, 30, 39, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 30, 39, 0.28)',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  loadedBadgeText: {
+    color: '#FF4D4D',
     fontSize: 11,
+    fontWeight: '700',
+  },
+  lazyLoadFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 18,
+  },
+  lazyLoadText: {
+    color: '#8E8E93',
+    fontSize: 12,
     fontWeight: '600',
   },
-  paginationBar: {
+  endOfListFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#161618',
-    borderRadius: 10,
-    borderWidth: 0.5,
-    borderColor: '#242428',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginVertical: 4,
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
   },
-  pageNavBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#242428',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+  endOfListDivider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#222430',
   },
-  pageNavBtnDisabled: {
-    opacity: 0.35,
-    backgroundColor: '#18181A',
-  },
-  pageNavBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  pageNavBtnTextDisabled: {
+  endOfListText: {
     color: '#636366',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
-  pageNumbersRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  scrollTopBtn: {
+    position: 'absolute',
+    right: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    zIndex: 99,
   },
-  pageNumPill: {
-    minWidth: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#1C1C1E',
+  scrollTopGradient: {
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 6,
-  },
-  pageNumPillActive: {
-    backgroundColor: Colors.netflixRed,
-  },
-  pageNumText: {
-    color: '#AEAEB2',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  pageNumTextActive: {
-    color: '#FFFFFF',
   },
   card: {
-    backgroundColor: '#161618',
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: '#242428',
+    backgroundColor: '#14151A',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#222430',
     marginBottom: 12,
     overflow: 'hidden',
   },
@@ -1141,16 +1405,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     gap: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#202024',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1C24',
   },
   filmAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 0, 64, 0.12)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255, 0, 64, 0.25)',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1160,7 +1421,7 @@ const styles = StyleSheet.create({
   },
   movieTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 14.5,
     fontWeight: '700',
     letterSpacing: -0.2,
   },
@@ -1170,111 +1431,198 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   yearChip: {
-    backgroundColor: '#242428',
+    backgroundColor: '#1E202A',
+    borderWidth: 1,
+    borderColor: '#2B2E3C',
     paddingHorizontal: 6,
     paddingVertical: 1.5,
-    borderRadius: 4,
+    borderRadius: 5,
   },
   yearChipText: {
-    color: '#AEAEB2',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  langChip: {
-    backgroundColor: 'rgba(255, 0, 64, 0.1)',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 4,
-  },
-  langText: {
-    color: Colors.netflixRed,
+    color: '#D1D5DB',
     fontSize: 10,
     fontWeight: '700',
   },
-  qualityCount: {
-    color: '#636366',
-    fontSize: 11,
-  },
-  openTopicBtn: {
-    padding: 6,
-  },
-  resolutionsList: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 7,
-  },
-  resRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  resLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  qualityPill: {
+  langChip: {
+    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 9, 20, 0.35)',
     paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingVertical: 1.5,
+    borderRadius: 5,
   },
-  qualityPillText: {
-    color: '#FFFFFF',
+  langText: {
+    color: '#FF4D4D',
     fontSize: 10,
     fontWeight: '800',
   },
-  sizeText: {
-    color: '#E5E5EA',
-    fontSize: 11,
+  resCountChip: {
+    backgroundColor: '#1A1C23',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+  },
+  qualityCount: {
+    color: '#8E8E93',
+    fontSize: 10,
     fontWeight: '600',
   },
-  codecText: {
-    color: '#636366',
-    fontSize: 10,
+  openTopicBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  resRightActions: {
+  dropdownContainer: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#191B22',
+    borderWidth: 1,
+    borderColor: '#262938',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  dropdownTriggerOpen: {
+    borderColor: '#3B82F6',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  dropdownTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  qualityPill: {
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+  },
+  qualityPillText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+  },
+  dropdownSpecs: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  actionIconBtnDownload: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: Colors.netflixRed,
-    justifyContent: 'center',
-    alignItems: 'center',
+  dropdownSizeText: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
   },
-  actionIconBtnTorrent: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 149, 0, 0.15)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255, 149, 0, 0.35)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  dropdownAudioText: {
+    color: '#8E8E93',
+    fontSize: 10,
+    fontWeight: '500',
+    maxWidth: 110,
   },
-  actionIconBtnStream: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
+  dropdownTriggerRight: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
   },
-  actionIconBtnCopy: {
-    width: 30,
-    height: 30,
-    borderRadius: 6,
-    backgroundColor: '#242428',
-    justifyContent: 'center',
+  dropdownActionText: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  dropdownMenu: {
+    backgroundColor: '#16171E',
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: '#262938',
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#20222D',
+  },
+  dropdownOptionActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  dropdownOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  dropdownOptionSize: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dropdownOptionAudio: {
+    color: '#8E8E93',
+    fontSize: 10,
+    maxWidth: 120,
+  },
+  cardActionsWrapper: {
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 12,
+    gap: 7,
+  },
+  actionLineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionBtnWithText: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 35,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+  },
+  actionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  // 1. Download .torrent file: Clean Mint / Emerald Light Theme
+  btnDownloadLight: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  // 2. Redirect to torrent app: Warm Amber / Orange Light Theme
+  btnTorrentRedirectLight: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
+  },
+  // 3. Copy Magnet / Link: Soft Indigo / Violet Light Theme
+  btnCopyLight: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+  },
+  // 4. Play Stream: Soft Rose / Crimson Light Theme
+  btnPlayLight: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#FECDD3',
   },
   stateCenter: {
     flex: 1,
@@ -1404,8 +1752,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -2000,
     left: -2000,
-    width: 320,
-    height: 400,
+    width: 360,
+    height: 640,
     opacity: 0.01,
   },
 });

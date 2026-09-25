@@ -18,6 +18,27 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
+// Reliable tier-1 public trackers to speed up peer discovery
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://tracker.bitsearch.to:1337/announce',
+  'udp://explodie.org:6969/announce',
+  'http://tracker.openbittorrent.com:80/announce',
+  'http://tracker.ipv6tracker.ru:80/announce',
+];
+
+// Prevent uncaught errors (like aborted client streams) from crashing node server
+process.on('uncaughtException', (err) => {
+  console.warn('[Server Warning] Caught unhandled exception:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Server Warning] Caught unhandled rejection:', reason);
+});
+
 // Initialize Torrent Engine
 const client = new WebTorrent();
 client.on('error', (err) => {
@@ -40,11 +61,16 @@ app.use('/downloads', express.static(DOWNLOAD_DIR));
  * Handle adding a torrent (shared logic for Magnet and .torrent file)
  */
 function addTorrentToEngine(torrentId, appId) {
+  let cleanId = torrentId;
+  if (typeof torrentId === 'string') {
+    cleanId = torrentId.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+  }
+
   // Check if torrent already exists
-  const existing = client.get(torrentId);
+  const existing = client.get(cleanId);
   if (existing) return existing.infoHash;
 
-  client.add(torrentId, { path: DOWNLOAD_DIR }, (torrent) => {
+  client.add(cleanId, { path: DOWNLOAD_DIR, announce: DEFAULT_TRACKERS }, (torrent) => {
     console.log(`[Torrent Added] ${torrent.name}`);
     
     // Broadcast newly added torrent
@@ -155,27 +181,56 @@ function getStreamContentType(fileName) {
 
 // Direct HTTP Range Video Streaming for any active torrent or magnet (Stremio-style)
 app.get('/api/stream/play', (req, res) => {
-  const magnetOrHash = req.query.magnet || req.query.hash || req.query.url;
-  if (!magnetOrHash) return res.status(400).send('Magnet link or hash required');
+  const rawMagnet = req.query.magnet || req.query.hash || req.query.url;
+  if (!rawMagnet) return res.status(400).send('Magnet link or hash required');
 
-  let torrent = client.get(magnetOrHash);
+  // Sanitize magnet: remove &amp; and HTML entities so trackers parse properly
+  const cleanMagnet = rawMagnet.toString().replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+
+  // Extract infoHash from magnet or hash if present to avoid duplicate adds
+  let infoHash = null;
+  const hashMatch = cleanMagnet.match(/urn:btih:([a-zA-Z0-9]{40}|[a-zA-Z0-9]{32})/i);
+  if (hashMatch) {
+    infoHash = hashMatch[1].toLowerCase();
+  } else if (/^[a-zA-Z0-9]{40}$/i.test(cleanMagnet)) {
+    infoHash = cleanMagnet.toLowerCase();
+  }
+
+  let torrent = (infoHash ? client.get(infoHash) : null) || client.get(cleanMagnet);
   if (!torrent) {
     try {
       // deselect: true ensures sequential on-demand piece downloading (Stremio mode)
-      torrent = client.add(magnetOrHash, { path: DOWNLOAD_DIR, deselect: true });
-      console.log(`[Stremio Stream Added] ${magnetOrHash.substring(0, 60)}...`);
+      torrent = client.add(cleanMagnet, {
+        path: DOWNLOAD_DIR,
+        deselect: true,
+        announce: DEFAULT_TRACKERS,
+      });
+      torrent.on('error', (err) => {
+        console.warn('[Torrent Stream Warning]:', err.message);
+      });
+      console.log(`[Stremio Stream Added] ${(torrent.name || cleanMagnet).substring(0, 60)}...`);
     } catch (e) {
-      return res.status(500).send('Failed to add torrent: ' + e.message);
+      if (infoHash) {
+        torrent = client.get(infoHash);
+      }
+      if (!torrent) {
+        return res.status(500).send('Failed to add torrent: ' + e.message);
+      }
     }
   }
 
   const serveStream = () => {
+    if (res.writableEnded || res.destroyed) return;
+
     const videoExts = ['.mp4', '.mkv', '.avi', '.webm', '.ts', '.mov', '.m4v'];
-    let file = torrent.files.find(f => videoExts.includes(path.extname(f.name).toLowerCase()));
-    if (!file && torrent.files.length > 0) {
+    let file = torrent.files && torrent.files.find(f => videoExts.includes(path.extname(f.name).toLowerCase()));
+    if (!file && torrent.files && torrent.files.length > 0) {
       file = torrent.files.reduce((a, b) => a.length > b.length ? a : b);
     }
-    if (!file) return res.status(404).send('No video file in torrent yet');
+    if (!file) {
+      if (!res.headersSent) res.status(404).send('No video file in torrent yet');
+      return;
+    }
 
     // Prioritize this file's pieces for streaming
     if (typeof file.select === 'function') {
@@ -195,8 +250,13 @@ app.get('/api/stream/play', (req, res) => {
         'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
       });
       const stream = file.createReadStream();
+      stream.on('error', (err) => {
+        console.warn('[Stream Pipe error]:', err.message);
+      });
       stream.pipe(res);
-      req.on('close', () => stream.destroy());
+      req.on('close', () => {
+        try { stream.destroy(); } catch (_) {}
+      });
       return;
     }
 
@@ -217,20 +277,34 @@ app.get('/api/stream/play', (req, res) => {
     });
 
     const stream = file.createReadStream({ start, end });
+    stream.on('error', (err) => {
+      console.warn('[Stream Pipe error]:', err.message);
+    });
     stream.pipe(res);
-    req.on('close', () => stream.destroy());
+    req.on('close', () => {
+      try { stream.destroy(); } catch (_) {}
+    });
+  };
+
+  let served = false;
+  const triggerStream = () => {
+    if (served || res.headersSent || res.destroyed) return;
+    served = true;
+    serveStream();
   };
 
   if (torrent.files && torrent.files.length > 0) {
-    serveStream();
+    triggerStream();
   } else {
-    torrent.once('ready', serveStream);
+    torrent.once('ready', triggerStream);
+    torrent.once('metadata', triggerStream);
     const timeout = setTimeout(() => {
-      if (!res.headersSent) {
-        res.status(504).send('Torrent metadata fetching timeout');
+      if (!res.headersSent && !served && !res.destroyed) {
+        res.status(504).send('Torrent metadata fetching timeout. Ensure torrent has active seeders.');
       }
     }, 45000);
     torrent.once('ready', () => clearTimeout(timeout));
+    torrent.once('metadata', () => clearTimeout(timeout));
   }
 });
 
@@ -264,8 +338,13 @@ app.get('/api/stream/:infoHash', (req, res) => {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
     });
     const stream = file.createReadStream();
+    stream.on('error', (err) => {
+      console.warn('[Stream Pipe error]:', err.message);
+    });
     stream.pipe(res);
-    req.on('close', () => stream.destroy());
+    req.on('close', () => {
+      try { stream.destroy(); } catch (_) {}
+    });
     return;
   }
 
@@ -286,8 +365,13 @@ app.get('/api/stream/:infoHash', (req, res) => {
   });
 
   const stream = file.createReadStream({ start, end });
+  stream.on('error', (err) => {
+    console.warn('[Stream Pipe error]:', err.message);
+  });
   stream.pipe(res);
-  req.on('close', () => stream.destroy());
+  req.on('close', () => {
+    try { stream.destroy(); } catch (_) {}
+  });
 });
 
 app.get('/api/torrents', (req, res) => {

@@ -567,26 +567,92 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
   const handleOpenExternal = async () => {
     const localFileUri = item?.fileUri || item?.movieFileUri || '';
+    const streamUrl = item?.url || '';
     const movieTitle = item?.title || item?.movieFileName || item?.fileName || 'Movie';
-    try {
-      const uriToOpen = contentUri || localFileUri;
-      if (uriToOpen) {
-        const can = await Linking.canOpenURL(uriToOpen).catch(() => false);
+
+    // 1. If it's a local downloaded file
+    const localUri = contentUri || localFileUri;
+    if (localUri && !localUri.startsWith('http')) {
+      try {
+        const can = await Linking.canOpenURL(localUri).catch(() => false);
         if (can) {
-          await Linking.openURL(uriToOpen);
+          await Linking.openURL(localUri);
           return;
         }
+      } catch {}
+      try {
+        await Share.share({
+          title: movieTitle,
+          message: `Play movie: ${movieTitle}`,
+          url: localUri,
+        });
+        return;
+      } catch (shareErr) {
+        console.warn('Could not launch external player:', shareErr);
       }
-    } catch {}
+    }
 
-    try {
-      await Share.share({
-        title: movieTitle,
-        message: `Play movie: ${movieTitle}`,
-        url: localFileUri,
-      });
-    } catch (shareErr) {
-      console.warn('Could not launch external player:', shareErr);
+    // 2. If it's an online stream / magnet
+    if (streamUrl) {
+      const magnetMatch = streamUrl.match(/magnet=([^&]+)/);
+      const magnet = magnetMatch
+        ? decodeURIComponent(magnetMatch[1])
+        : (streamUrl.startsWith('magnet:') ? streamUrl : null);
+
+      Alert.alert(
+        'Play in External Video Player',
+        `Torrent formats (.MKV, HEVC, AC3) play best in VLC or MX Player:`,
+        [
+          {
+            text: '🟧 Open in VLC Player',
+            onPress: async () => {
+              const target = magnet || streamUrl;
+              try {
+                await Linking.openURL(`vlc://${target}`);
+              } catch {
+                try {
+                  await Linking.openURL(target);
+                } catch {
+                  Alert.alert(
+                    'VLC Not Installed',
+                    'Install VLC for Android from the Play Store for direct high-speed torrent streaming.'
+                  );
+                }
+              }
+            },
+          },
+          {
+            text: '▶ Open in Video Player (MX / System)',
+            onPress: async () => {
+              const target = streamUrl;
+              const intentUri = `intent:${target}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
+              try {
+                await Linking.openURL(intentUri);
+              } catch {
+                try {
+                  await Linking.openURL(target);
+                } catch (e: any) {
+                  Alert.alert('Notice', 'Could not open video player.');
+                }
+              }
+            },
+          },
+          ...(magnet
+            ? [
+                {
+                  text: '🌐 Stream in Webtor (Cloud)',
+                  onPress: () => {
+                    Linking.openURL(`https://webtor.io/show?magnet=${encodeURIComponent(magnet)}`).catch(
+                      () => {}
+                    );
+                  },
+                },
+              ]
+            : []),
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
     }
   };
 

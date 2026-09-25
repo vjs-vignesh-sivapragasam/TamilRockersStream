@@ -48,21 +48,17 @@ function TabItem({
 }) {
   // Animated values
   const bounce     = useRef(new Animated.Value(1)).current;
-  const dotScale   = useRef(new Animated.Value(isActive ? 1 : 0)).current;
-  const dotOpacity = useRef(new Animated.Value(isActive ? 1 : 0)).current;
   const labelAnim  = useRef(new Animated.Value(isActive ? 1 : 0)).current;
   const bgAnim     = useRef(new Animated.Value(isActive ? 1 : 0)).current;
   const iconY      = useRef(new Animated.Value(isActive ? -2 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(dotScale,   { toValue: isActive ? 1 : 0, friction: 7, tension: 120, useNativeDriver: true }),
-      Animated.timing(dotOpacity, { toValue: isActive ? 1 : 0, duration: 180, useNativeDriver: true }),
       Animated.timing(labelAnim,  { toValue: isActive ? 1 : 0, duration: 160, useNativeDriver: true }),
       Animated.timing(bgAnim,     { toValue: isActive ? 1 : 0, duration: 200, useNativeDriver: false }),
       Animated.spring(iconY,      { toValue: isActive ? -3 : 0, friction: 7, tension: 100, useNativeDriver: true }),
     ]).start();
-  }, [isActive, dotScale, dotOpacity, labelAnim, bgAnim, iconY]);
+  }, [isActive, labelAnim, bgAnim, iconY]);
 
   const handlePress = () => {
     Animated.sequence([
@@ -112,17 +108,6 @@ function TabItem({
         >
           {tab.label}
         </Animated.Text>
-
-        {/* Active dot indicator */}
-        <Animated.View
-          style={[
-            styles.activeDot,
-            {
-              opacity: dotOpacity,
-              transform: [{ scale: dotScale }],
-            },
-          ]}
-        />
       </Animated.View>
     </TouchableOpacity>
   );
@@ -250,18 +235,5 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 10,
     letterSpacing: 0.1,
-  },
-
-  /* Active dot */
-  activeDot: {
-    marginTop: 2,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: RED,
-    shadowColor: RED,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 4,
   },
 });

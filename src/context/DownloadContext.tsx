@@ -10,8 +10,21 @@ import { torrentEngine } from '../services/torrentEngine';
 import { resolveTorrentMoviePayload } from '../utils/bencode';
 import { debridService } from '../services/debridService';
 
-// Default public backend URL
-export const DEFAULT_BACKEND_URL = 'https://gold-ways-remain.loca.lt';
+// Default backend URL with auto-detection for physical phones running Expo Go
+const resolveDefaultBackendUrl = (): string => {
+  try {
+    const hostUri = Constants.expoConfig?.hostUri;
+    if (hostUri) {
+      const ip = hostUri.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+        return `http://${ip}:3000`;
+      }
+    }
+  } catch {}
+  return 'http://192.168.1.6:3000';
+};
+
+export const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const BACKEND_CONFIG_FILE = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}backend_config.json`
   : '';
@@ -59,14 +72,16 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const activeDownloadsCount = downloads.filter((d) => d.status === 'downloading').length;
 
-  // Load persisted custom backend URL if present
+  // Load persisted custom backend URL if present (ignoring old dead tunnels)
   useEffect(() => {
     if (BACKEND_CONFIG_FILE) {
       FileSystem.readAsStringAsync(BACKEND_CONFIG_FILE).then((content) => {
         try {
           const parsed = JSON.parse(content);
-          if (parsed.backendUrl) {
+          if (parsed.backendUrl && !parsed.backendUrl.includes('.loca.lt')) {
             setBackendUrlState(parsed.backendUrl);
+          } else {
+            setBackendUrlState(resolveDefaultBackendUrl());
           }
         } catch {}
       }).catch(() => {});
