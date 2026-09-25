@@ -554,7 +554,8 @@ app.get('/api/stream/play', (req, res) => {
 app.get('/api/stream/:infoHash', (req, res) => {
   const { infoHash } = req.params;
   const magnet = req.query.magnet;
-  const isRaw = req.query.raw === '1' || Boolean(req.headers.range) || Boolean(req.headers.accept && req.headers.accept.includes('video/'));
+  const ua = (req.headers['user-agent'] || '').toLowerCase();
+  const isRaw = req.query.raw === '1' || Boolean(req.headers.range) || Boolean(req.headers.accept && req.headers.accept.includes('video/')) || ua.includes('expo') || ua.includes('okhttp') || ua.includes('cfnetwork');
   let torrent = client.get(infoHash.toLowerCase());
 
   if (!torrent) {
@@ -648,7 +649,7 @@ app.get('/api/torrents', (req, res) => {
 });
 
 // Start Server
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ VFlix Torrent Backend is running on port ${PORT}`);
   console.log(`📡 Ready to receive torrents and stream progress via WebSockets!`);

@@ -46,15 +46,42 @@ export function parseMagnetUri(uri: string): ParsedTorrentInfo | null {
   };
 }
 
+export function extractInfoHashFromUrl(url: string): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+
+  if (trimmed.startsWith('magnet:?')) {
+    const parsed = parseMagnetUri(trimmed);
+    if (parsed && parsed.infoHash) {
+      return parsed.infoHash.toLowerCase();
+    }
+    const match = trimmed.match(/urn:btih:([a-fA-F0-9]{40}|[a-fA-F0-9]{32})/i);
+    if (match) return match[1].toLowerCase();
+  }
+
+  const streamMatch = trimmed.match(/\/api\/stream\/([a-fA-F0-9]{40}|[a-fA-F0-9]{32})/i);
+  if (streamMatch) {
+    return streamMatch[1].toLowerCase();
+  }
+
+  if (/^[a-fA-F0-9]{40}$/i.test(trimmed) || /^[a-fA-F0-9]{32}$/i.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+
+  return null;
+}
+
 export function isTorrentUrl(url: string): boolean {
   if (!url) return false;
   const trimmed = url.trim().toLowerCase();
   if (trimmed.startsWith('magnet:?')) return true;
-  
+  if (trimmed.includes('/api/stream/')) return true;
+  if (extractInfoHashFromUrl(url)) return true;
+
   // Clean query string and fragments for path inspection
   const cleanUrl = trimmed.split('?')[0].split('#')[0];
   if (cleanUrl.endsWith('.torrent')) return true;
-  
+
   // Check for common torrent download query params or path segments
   if (trimmed.includes('.torrent')) return true;
   if (trimmed.includes('download.php') && (trimmed.includes('torrent') || trimmed.includes('id='))) return true;
@@ -64,20 +91,30 @@ export function isTorrentUrl(url: string): boolean {
 }
 
 export function extractTorrentFileName(url: string, suggestedTitle?: string): string {
+  const isStream = url.includes('/api/stream/');
+  const infoHash = extractInfoHashFromUrl(url);
+
   if (suggestedTitle && suggestedTitle.trim().length > 0) {
     let title = suggestedTitle.trim();
-    if (!title.toLowerCase().endsWith('.torrent') && !title.includes('.')) {
-      title += '.torrent';
+    if (isStream || infoHash || !title.includes('.')) {
+      if (!title.match(/\.(mp4|mkv|avi|webm|ts|mov)$/i) && !title.toLowerCase().endsWith('.torrent')) {
+        title += isStream || infoHash ? '.mp4' : '.torrent';
+      }
     }
     return title;
   }
 
   if (url.startsWith('magnet:?')) {
     const parsed = parseMagnetUri(url);
-    if (parsed && parsed.name) {
-      return parsed.name.endsWith('.torrent') ? parsed.name : `${parsed.name}.torrent`;
+    if (parsed && parsed.name && parsed.name !== 'Torrent Download') {
+      const name = parsed.name;
+      return name.match(/\.(mp4|mkv|avi|webm)$/i) ? name : `${name}.mp4`;
     }
-    return 'magnet-download.torrent';
+    return infoHash ? `Movie_${infoHash.substring(0, 10)}.mp4` : 'magnet-download.mp4';
+  }
+
+  if (infoHash) {
+    return `Movie_${infoHash.substring(0, 10)}.mp4`;
   }
 
   try {
@@ -86,13 +123,16 @@ export function extractTorrentFileName(url: string, suggestedTitle?: string): st
     const last = segments[segments.length - 1];
     if (last) {
       const decoded = decodeURIComponent(last);
+      if (decoded.match(/\.(mp4|mkv|avi|webm|ts|mov)$/i)) {
+        return decoded;
+      }
       return decoded.toLowerCase().endsWith('.torrent') ? decoded : `${decoded}.torrent`;
     }
   } catch {
     // fallback
   }
 
-  return `download-${Date.now()}.torrent`;
+  return `download-${Date.now()}.mp4`;
 }
 
 /**

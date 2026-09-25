@@ -6,6 +6,7 @@ import {
   extractTorrentFileName,
   parseTorrentMetadata,
   parseMagnetUri,
+  extractInfoHashFromUrl,
 } from '../utils/bencode';
 
 export function formatBytes(bytes: number, decimals = 1): string {
@@ -415,21 +416,28 @@ class DownloadService {
 
   public createDownloadItem(rawUrl: string, suggestedTitle?: string): DownloadItem {
     const url = sanitizeDownloadUrl(rawUrl);
-    const isTorrent = isTorrentUrl(url);
+    const infoHash = extractInfoHashFromUrl(url);
+    const isStreamUrl = url.includes('/api/stream/');
+    const isTorrent = isTorrentUrl(url) && !isStreamUrl && !infoHash;
     const fileName = extractTorrentFileName(url, suggestedTitle);
     const id = `dl-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    let initialTitle = suggestedTitle || fileName.replace(/\.torrent$/i, '');
+    let initialTitle = suggestedTitle || fileName.replace(/\.(torrent|mp4|mkv)$/i, '');
     let initialMetadata = undefined;
 
     if (url.startsWith('magnet:?')) {
       const magnetInfo = parseMagnetUri(url);
       if (magnetInfo) {
-        initialTitle = magnetInfo.name;
+        if (magnetInfo.name && magnetInfo.name !== 'Torrent Download') {
+          initialTitle = magnetInfo.name;
+        }
         initialMetadata = magnetInfo;
       }
+    } else if (infoHash) {
+      initialTitle = suggestedTitle || `Movie (${infoHash.substring(0, 8)})`;
     }
 
+    initialTitle = cleanTitleFromFilename(initialTitle);
     const fileUri = this.baseDir ? `${this.baseDir}${fileName}` : fileName;
 
     return {

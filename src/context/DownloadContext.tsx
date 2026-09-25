@@ -7,7 +7,7 @@ import { io, Socket } from 'socket.io-client';
 import { DownloadItem, StorageStats } from '../types/downloads';
 import { downloadService } from '../services/downloadService';
 import { torrentEngine } from '../services/torrentEngine';
-import { resolveTorrentMoviePayload } from '../utils/bencode';
+import { resolveTorrentMoviePayload, extractInfoHashFromUrl } from '../utils/bencode';
 import { debridService } from '../services/debridService';
 
 // Default backend URL with auto-detection for physical phones running Expo Go
@@ -446,12 +446,35 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const startDownload = useCallback(
     async (url: string, suggestedTitle?: string): Promise<DownloadItem> => {
-      const initialItem = downloadService.createDownloadItem(url, suggestedTitle);
+      let targetUrl = url.trim();
+      const infoHash = extractInfoHashFromUrl(targetUrl);
+      const isStreamEndpoint = targetUrl.includes('/api/stream/');
+
+      // If it's a magnet link, infoHash, or stream endpoint URL:
+      if (infoHash || isStreamEndpoint) {
+        if (infoHash) {
+          targetUrl = `${backendUrl}/api/stream/${infoHash}?raw=1`;
+        } else if (isStreamEndpoint) {
+          targetUrl = targetUrl.replace(/http:\/\/(localhost|127\.0\.0\.1):3000/g, backendUrl);
+          if (!targetUrl.includes('raw=1')) {
+            targetUrl += (targetUrl.includes('?') ? '&raw=1' : '?raw=1');
+          }
+        }
+        
+        // Pre-warm backend torrent engine stream in background
+        if (infoHash) {
+          fetch(`${backendUrl}/api/stream/warmup?hash=${infoHash}`, {
+            headers: { 'Bypass-Tunnel-Reminder': 'true' }
+          }).catch(() => {});
+        }
+      }
+
+      const initialItem = downloadService.createDownloadItem(targetUrl, suggestedTitle);
       
       setDownloads((prev) => [initialItem, ...prev]);
 
       if (initialItem.isTorrent) {
-        // Resolve the real movie video file from the torrent
+        // Resolve the real movie video file from the torrent file
         resolveTorrentMoviePayload(initialItem.url, suggestedTitle).then((resolved) => {
           const movieFileName = resolved.movieFileName;
           const movieFileUri = `${downloadService.getDownloadsDirectory()}${movieFileName}`;
@@ -549,7 +572,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
           }
         });
       } else {
-        // Direct media download (MP4, MKV, etc.)
+        // Direct HTTP stream or media download (MP4, MKV, /api/stream/...)
         downloadService.startRealDownload(
           initialItem,
           (progressUpdates) => {
@@ -570,7 +593,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       return initialItem;
     },
-    [updateItem]
+    [backendUrl, updateItem]
   );
 
   const pauseDownload = useCallback(
