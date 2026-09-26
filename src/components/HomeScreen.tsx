@@ -143,7 +143,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
   // Top featured movie for hero banner if at least 1 movie downloaded
   const heroMovie = completedDownloads.length > 0 ? completedDownloads[0] : null;
   const heroPoster = heroMovie
-    ? getPosterForFilename(heroMovie.movieFileName || heroMovie.fileName || heroMovie.title)
+    ? heroMovie.poster || getPosterForFilename(heroMovie.movieFileName || heroMovie.fileName || heroMovie.title)
     : '';
   const heroTitle = heroMovie
     ? heroMovie.title || cleanTitleFromFilename(heroMovie.movieFileName || heroMovie.fileName)
@@ -157,8 +157,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
       {/* Top Header Bar */}
       <View style={styles.topHeader}>
         <View style={styles.logoRow}>
-          <Text style={styles.vLogo}>V</Text>
-          <Text style={styles.appTitle}>Flix</Text>
+          <Text style={styles.vLogo}>VIKI</Text>
+          <Text style={styles.appTitle}>FLEX</Text>
         </View>
 
         <View style={styles.topRightActions}>
@@ -292,9 +292,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
 
               <View style={styles.movieCardsList}>
                 {completedDownloads.map((item) => {
-                  const poster = getPosterForFilename(
-                    item.movieFileName || item.fileName || item.title
-                  );
+                  const poster =
+                    item.poster ||
+                    getPosterForFilename(
+                      item.movieFileName || item.fileName || item.title
+                    );
                   const title =
                     item.title ||
                     cleanTitleFromFilename(item.movieFileName || item.fileName);

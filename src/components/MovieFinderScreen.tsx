@@ -30,6 +30,7 @@ import {
   ArrowLeft,
   Globe,
   Download,
+  DownloadCloud,
   Play,
   Copy,
   ExternalLink,
@@ -50,6 +51,11 @@ import {
   BookmarkCheck,
   PlayCircle,
   Clock,
+  CheckCircle2,
+  Info,
+  Star,
+  User,
+  Calendar,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import {
@@ -64,9 +70,13 @@ import { OfflinePlayerModal } from './OfflinePlayerModal';
 import { DownloadItem } from '../types/downloads';
 import { continueWatchingService, ContinueWatchingItem } from '../services/continueWatchingService';
 import { myListService } from '../services/myListService';
+import { extractInfoHashFromUrl } from '../utils/bencode';
+import { formatBytes, cleanTitleFromFilename, getPosterForFilename } from '../services/downloadService';
+import { fetchMovieDatabaseMetadata, RealMovieMetadata } from '../services/movieDatabaseService';
 
 interface MovieFinderScreenProps {
   onNavigateToTab?: (tab: any) => void;
+  onOpenInBrowserTab?: (url: string) => void;
 }
 
 interface StreamModalData {
@@ -349,11 +359,18 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
 
       {/* Bottom gradient overlay */}
       <LinearGradient
-        colors={['transparent', 'rgba(10,10,14,0.4)', 'rgba(10,10,14,0.95)']}
+        colors={['transparent', 'rgba(10,10,14,0.45)', 'rgba(10,10,14,0.96)']}
         style={styles.pgGradientOverlay}
-        start={{ x: 0, y: 0.3 }}
+        start={{ x: 0, y: 0.2 }}
         end={{ x: 0, y: 1 }}
       >
+        {bestRes ? (
+          <View style={styles.pgCardBadgeRow}>
+            <View style={[styles.pgQualityBadgeInline, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+              <Text style={[styles.pgQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
+            </View>
+          </View>
+        ) : null}
         <Text style={styles.pgTitle} numberOfLines={2}>
           {cleanMovieName}
         </Text>
@@ -389,13 +406,6 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
           fill={isSaved ? Colors.primary : 'transparent'}
         />
       </TouchableOpacity>
-
-      {/* Quality badge — bottom-right */}
-      {bestRes ? (
-        <View style={[styles.pgQualityBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-          <Text style={[styles.pgQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
-        </View>
-      ) : null}
     </TouchableOpacity>
   );
 });
@@ -501,11 +511,18 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
 
       {/* Bottom gradient overlay with Title */}
       <LinearGradient
-        colors={['transparent', 'rgba(10,10,14,0.45)', 'rgba(10,10,14,0.95)']}
+        colors={['transparent', 'rgba(10,10,14,0.45)', 'rgba(10,10,14,0.96)']}
         style={styles.trGradientOverlay}
-        start={{ x: 0, y: 0.3 }}
+        start={{ x: 0, y: 0.2 }}
         end={{ x: 0, y: 1 }}
       >
+        {bestRes ? (
+          <View style={styles.trCardBadgeRow}>
+            <View style={[styles.trQualityBadgeInline, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+              <Text style={[styles.trQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
+            </View>
+          </View>
+        ) : null}
         <Text style={styles.trTitle} numberOfLines={2}>
           {cleanMovieName}
         </Text>
@@ -546,21 +563,361 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
           fill={isSaved ? Colors.primary : 'transparent'}
         />
       </TouchableOpacity>
-
-      {/* Bottom-Right: Quality Badge */}
-      {bestRes ? (
-        <View style={[styles.trQualityBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-          <Text style={[styles.trQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
-        </View>
-      ) : null}
     </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DownloadedMovieCard — horizontal card displaying offline downloaded movies
+// ─────────────────────────────────────────────────────────────────────────────
+interface DownloadedMovieCardProps {
+  item: DownloadItem;
+  onPlay: () => void;
+}
+
+const DownloadedMovieCard = React.memo<DownloadedMovieCardProps>(({ item, onPlay }) => {
+  const cleanTitle = useMemo(() => cleanTitleFromFilename(item.fileName || item.title), [item.fileName, item.title]);
+  const posterUrl = useMemo(() => item.poster || getPosterForFilename(item.fileName || item.title), [item.poster, item.fileName, item.title]);
+  const sizeText = useMemo(() => formatBytes(item.totalBytes || item.downloadedBytes || 0), [item.totalBytes, item.downloadedBytes]);
+
+  return (
+    <TouchableOpacity
+      style={styles.dlCard}
+      onPress={onPlay}
+      activeOpacity={0.82}
+    >
+      {/* Poster Image */}
+      {posterUrl ? (
+        <Image
+          source={{ uri: posterUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+      ) : (
+        <LinearGradient
+          colors={['#181920', '#252834', '#181920']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+        >
+          <Film color="#3A3E4E" size={28} strokeWidth={1.5} />
+        </LinearGradient>
+      )}
+
+      {/* Dark gradient overlay */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.35)', 'transparent', 'rgba(10,10,14,0.6)', 'rgba(10,10,14,0.95)']}
+        style={styles.cwGradientOverlay}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      />
+
+      {/* Top Left: Size badge */}
+      <View style={styles.dlSizeBadge}>
+        <Text style={styles.dlSizeBadgeText}>{sizeText}</Text>
+      </View>
+
+      {/* Top Right: Offline Ready Badge */}
+      <View style={styles.dlOfflineBadge}>
+        <CheckCircle2 color="#30D158" size={10} strokeWidth={2.5} />
+        <Text style={styles.dlOfflineBadgeText}>OFFLINE</Text>
+      </View>
+
+      {/* Center Play Icon Overlay */}
+      <View style={styles.cwCenterPlay} pointerEvents="none">
+        <View style={styles.cwPlayCircle}>
+          <Play color="#FFFFFF" size={16} fill="#FFFFFF" style={{ marginLeft: 2 }} />
+        </View>
+      </View>
+
+      {/* Bottom Info: Title */}
+      <View style={styles.cwBottomInfo} pointerEvents="none">
+        <Text style={styles.cwTitle} numberOfLines={1}>
+          {cleanTitle}
+        </Text>
+        <Text style={{ fontSize: 10, color: '#30D158', fontWeight: '600', marginTop: 2 }}>
+          Downloaded • Ready
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HeroFeaturedMovieCard — large Netflix-style hero movie card for featured release
+// ─────────────────────────────────────────────────────────────────────────────
+interface HeroFeaturedMovieCardProps {
+  movie: TamilMvMovieResult;
+  slideNumber?: number;
+  totalSlides?: number;
+  isSaved?: boolean;
+  onToggleSave?: (posterUrl: string | null) => void;
+  enqueuePosterFetch: (topicUrl: string, cb: (url: string | null) => void) => void;
+  onPress: () => void;
+}
+
+const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
+  movie,
+  slideNumber,
+  totalSlides,
+  isSaved,
+  onToggleSave,
+  enqueuePosterFetch,
+  onPress,
+}) => {
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = screenWidth;
+  const cardHeight = Math.round(screenWidth * 1.25);
+
+  const topicUrl = movie.topicUrl || movie.resolutions?.[0]?.topicUrl || '';
+  const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (!topicUrl) return null;
+    const cached = posterCache.get(topicUrl);
+    return cached !== undefined ? cached : null;
+  });
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+
+  useEffect(() => {
+    if (!topicUrl) return;
+    if (posterCache.has(topicUrl)) {
+      setPosterUrl(posterCache.get(topicUrl) ?? null);
+      setPosterLoading(false);
+      return;
+    }
+    setPosterLoading(true);
+    enqueuePosterFetch(topicUrl, (url) => {
+      setPosterUrl(url);
+      setPosterLoading(false);
+    });
+  }, [topicUrl, enqueuePosterFetch]);
+
+  const bestRes = useMemo(() => {
+    if (!movie.resolutions || movie.resolutions.length === 0) return null;
+    const idx = getInitialResolutionIndex(movie.resolutions);
+    return movie.resolutions[idx] || movie.resolutions[0];
+  }, [movie.resolutions]);
+
+  const badge = getQualityBadgeConfig(bestRes?.resolution || '');
+
+  const cleanMovieName = useMemo(() => {
+    const sanitizedItemTitle = sanitizeMovieTitle(movie.movieTitle);
+    if (sanitizedItemTitle) return sanitizedItemTitle;
+    return 'Featured Release';
+  }, [movie.movieTitle]);
+
+  return (
+    <TouchableOpacity
+      style={[styles.heroCardContainer, { width: cardWidth, height: cardHeight }]}
+      onPress={onPress}
+      activeOpacity={0.88}
+    >
+      {/* Background Poster Image */}
+      {posterUrl ? (
+        <Image
+          source={{ uri: posterUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onError={() => setPosterUrl(null)}
+        />
+      ) : posterLoading ? (
+        <LinearGradient
+          colors={['#181920', '#252834', '#181920']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+        >
+          <Film color="#3A3E4E" size={40} strokeWidth={1.5} />
+        </LinearGradient>
+      ) : (
+        <LinearGradient
+          colors={[Colors.primary, '#660814']}
+          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+        >
+          <Film color="rgba(255,255,255,0.4)" size={40} strokeWidth={1.5} />
+        </LinearGradient>
+      )}
+
+      {/* Dark gradient overlay bottom fade */}
+      <LinearGradient
+        colors={['rgba(10,10,14,0.3)', 'transparent', 'rgba(10,10,14,0.75)', 'rgba(10,10,14,0.98)']}
+        style={styles.heroGradientOverlay}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        {/* Top Header Row */}
+        <View style={styles.heroHeaderRow}>
+          <View style={styles.heroBadge}>
+            <Sparkles color="#FFD700" size={13} strokeWidth={2.5} />
+            <Text style={styles.heroBadgeText}>
+              {totalSlides && totalSlides > 1 ? `FEATURED (${slideNumber}/${totalSlides})` : 'FEATURED RELEASE'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.heroBookmarkBtn}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onToggleSave?.(posterUrl);
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Bookmark
+              color={isSaved ? Colors.primary : '#FFFFFF'}
+              size={16}
+              fill={isSaved ? Colors.primary : 'transparent'}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Bottom Content Area */}
+        <View style={styles.heroBottomContent}>
+          {/* Centered Slideshow Dots Indicator before movie title */}
+          {totalSlides && totalSlides > 1 ? (
+            <View style={styles.heroDotsCenterRow}>
+              {Array.from({ length: totalSlides }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.slideshowDot,
+                    i === (slideNumber ? slideNumber - 1 : 0)
+                      ? styles.slideshowDotActive
+                      : styles.slideshowDotInactive,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {cleanMovieName}
+          </Text>
+
+          {/* Meta badges */}
+          <View style={styles.heroMetaRow}>
+            {movie.year ? (
+              <View style={styles.heroMetaBadge}>
+                <Text style={styles.heroMetaBadgeText}>{movie.year}</Text>
+              </View>
+            ) : null}
+
+            {movie.language ? (
+              <View style={[styles.heroMetaBadge, { backgroundColor: 'rgba(250,36,60,0.2)', borderColor: 'rgba(250,36,60,0.5)' }]}>
+                <Text style={[styles.heroMetaBadgeText, { color: Colors.primary }]}>
+                  {movie.language.toUpperCase()}
+                </Text>
+              </View>
+            ) : null}
+
+            {bestRes ? (
+              <View style={[styles.heroMetaBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                <Text style={[styles.heroMetaBadgeText, { color: badge.text }]}>
+                  {bestRes.resolution}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* CTA Action Button */}
+          <TouchableOpacity
+            style={styles.heroCtaBtn}
+            onPress={onPress}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={[Colors.primary, '#B51527']}
+              style={styles.heroCtaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Play color="#FFFFFF" size={16} fill="#FFFFFF" />
+              <Text style={styles.heroCtaText}>View Movie & Stream</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HeroFeaturedSlideshow — horizontal manual/auto slideshow for top 4 featured movies
+// ─────────────────────────────────────────────────────────────────────────────
+interface HeroFeaturedSlideshowProps {
+  movies: TamilMvMovieResult[];
+  isMovieSaved: (movie: TamilMvMovieResult) => boolean;
+  onToggleSaveMovie: (movie: TamilMvMovieResult, posterUrl?: string | null) => void;
+  enqueuePosterFetch: (topicUrl: string, cb: (url: string | null) => void) => void;
+  onSelectMovie: (movie: TamilMvMovieResult) => void;
+}
+
+const HeroFeaturedSlideshow = React.memo<HeroFeaturedSlideshowProps>(({
+  movies,
+  isMovieSaved,
+  onToggleSaveMovie,
+  enqueuePosterFetch,
+  onSelectMovie,
+}) => {
+  const { width: screenWidth } = useWindowDimensions();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const timerRef = useRef<any>(null);
+
+  // Auto-play slideshow (swipes every 4.5 seconds)
+  useEffect(() => {
+    if (!movies || movies.length <= 1) return;
+
+    timerRef.current = setInterval(() => {
+      setActiveIndex((prev) => {
+        const nextIndex = (prev + 1) % movies.length;
+        scrollRef.current?.scrollTo({ x: nextIndex * screenWidth, animated: true });
+        return nextIndex;
+      });
+    }, 4500);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [movies, screenWidth]);
+
+  const handleScroll = (event: any) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offsetX / screenWidth);
+    if (index >= 0 && index < movies.length && index !== activeIndex) {
+      setActiveIndex(index);
+    }
+  };
+
+  if (!movies || movies.length === 0) return null;
+
+  return (
+    <View style={styles.slideshowWrapper}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        decelerationRate="fast"
+      >
+        {movies.map((movie, index) => (
+          <View key={movie.id || movie.topicUrl || index} style={{ width: screenWidth }}>
+            <HeroFeaturedMovieCard
+              movie={movie}
+              slideNumber={index + 1}
+              totalSlides={movies.length}
+              isSaved={isMovieSaved(movie)}
+              onToggleSave={(posterUrl) => onToggleSaveMovie(movie, posterUrl)}
+              enqueuePosterFetch={enqueuePosterFetch}
+              onPress={() => onSelectMovie(movie)}
+            />
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MovieDetailSheet — full-screen bottom-sheet style Netflix detail modal
 // ─────────────────────────────────────────────────────────────────────────────
-interface MovieDetailSheetProps {
+export interface MovieDetailSheetProps {
   visible: boolean;
   movie: TamilMvMovieResult | null;
   streamingResId: string | null;
@@ -576,7 +933,7 @@ interface MovieDetailSheetProps {
   backendUrl?: string;
 }
 
-const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
+export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
   ({
     visible,
     movie,
@@ -662,6 +1019,9 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
     const badge = getQualityBadgeConfig(selectedRes?.resolution || '');
     const isStreaming = selectedRes ? streamingResId === selectedRes.id : false;
 
+    const [dbMetadata, setDbMetadata] = useState<RealMovieMetadata | null>(null);
+    const [dbLoading, setDbLoading] = useState(false);
+
     const cleanTitle = (() => {
       if (!movie) return 'Tamil Movie';
       const isBad = (name?: string) =>
@@ -684,6 +1044,25 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
       }
       return 'Tamil Movie';
     })();
+
+    useEffect(() => {
+      if (!movie) return;
+      setDbMetadata(null);
+      setDbLoading(true);
+
+      const targetSearchTitle = cleanTitle !== 'Tamil Movie' ? cleanTitle : movie.movieTitle;
+      fetchMovieDatabaseMetadata(targetSearchTitle, movie.year)
+        .then((meta) => {
+          setDbMetadata(meta);
+          setDbLoading(false);
+        })
+        .catch(() => {
+          setDbLoading(false);
+        });
+    }, [cleanTitle, movie]);
+
+    const effectivePoster = dbMetadata?.backdropUrl || dbMetadata?.posterUrl || posterUrl;
+    const displayTitle = dbMetadata?.title || cleanTitle;
 
     const handleQuickOpenBrowser = useCallback(() => {
       const url = topicUrl || movie?.topicUrl || resolutions[selectedResIndex]?.topicUrl;
@@ -741,6 +1120,92 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
       [selectedRes, topicUrl, cleanTitle, handleQuickOpenBrowser]
     );
 
+    const handleQuickCopyStreamUrl = useCallback(
+      async (targetResolution?: MovieResolutionItem) => {
+        const targetRes = targetResolution || selectedRes;
+        let magnet = targetRes?.magnetUrl;
+        const resTopic = targetRes?.topicUrl || topicUrl;
+
+        if (!magnet && resTopic) {
+          setCopyingMagnet(true);
+          try {
+            const extracted = await tamilMvService.extractMagnetFromTopic(
+              resTopic,
+              targetRes?.resolution
+            );
+            if (extracted.magnetUrl) {
+              magnet = extracted.magnetUrl;
+              if (targetRes) targetRes.magnetUrl = extracted.magnetUrl;
+            }
+          } catch {}
+          setCopyingMagnet(false);
+        }
+
+        if (magnet) {
+          const cleanBackend = (backendUrl || 'http://localhost:3002').trim().replace(/\/+$/, '');
+          const playUrl = `${cleanBackend}/api/stream/play?magnet=${magnet}`;
+          try {
+            await Clipboard.setStringAsync(playUrl);
+            Alert.alert(
+              'Stream URL Copied! 🎬',
+              `Video playing URL copied to clipboard:\n\n${playUrl}`
+            );
+          } catch {
+            await Share.share({ message: playUrl, title: `${cleanTitle} Stream URL` });
+          }
+        } else {
+          Alert.alert(
+            'Magnet Not Found',
+            'Could not extract direct magnet link from topic.'
+          );
+        }
+      },
+      [selectedRes, topicUrl, backendUrl, cleanTitle]
+    );
+
+    const handleQuickCopyDownloadUrl = useCallback(
+      async (targetResolution?: MovieResolutionItem) => {
+        const targetRes = targetResolution || selectedRes;
+        let magnet = targetRes?.magnetUrl;
+        const resTopic = targetRes?.topicUrl || topicUrl;
+
+        if (!magnet && resTopic) {
+          setCopyingMagnet(true);
+          try {
+            const extracted = await tamilMvService.extractMagnetFromTopic(
+              resTopic,
+              targetRes?.resolution
+            );
+            if (extracted.magnetUrl) {
+              magnet = extracted.magnetUrl;
+              if (targetRes) targetRes.magnetUrl = extracted.magnetUrl;
+            }
+          } catch {}
+          setCopyingMagnet(false);
+        }
+
+        if (magnet) {
+          const cleanBackend = (backendUrl || 'http://localhost:3002').trim().replace(/\/+$/, '');
+          const downloadUrl = `${cleanBackend}/api/stream/play?magnet=${magnet}&dl=1`;
+          try {
+            await Clipboard.setStringAsync(downloadUrl);
+            Alert.alert(
+              'Download URL Copied! 📥',
+              `Video downloading URL copied to clipboard:\n\n${downloadUrl}`
+            );
+          } catch {
+            await Share.share({ message: downloadUrl, title: `${cleanTitle} Download URL` });
+          }
+        } else {
+          Alert.alert(
+            'Magnet Not Found',
+            'Could not extract direct magnet link from topic.'
+          );
+        }
+      },
+      [selectedRes, topicUrl, backendUrl, cleanTitle]
+    );
+
     const handleStreamInBrowser = useCallback(
       async (res: MovieResolutionItem) => {
         let magnet = res.magnetUrl;
@@ -760,13 +1225,13 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
           // Extract 40-character hex or 32-character base32 infoHash from magnet link
           const hashMatch = magnet.match(/urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i);
           const infoHash = hashMatch ? hashMatch[1].toLowerCase() : null;
-          const baseUrl = (backendUrl || 'http://localhost:3000').replace(/\/+$/, '');
+          const baseUrl = (backendUrl || '').replace(/\/+$/, '');
 
           if (infoHash) {
             // Pre-warm the torrent in backend engine so it immediately connects to peers
             fetch(`${baseUrl}/api/stream/warmup?magnet=${encodeURIComponent(magnet)}`).catch(() => {});
 
-            // Direct stream URL in format: http://localhost:3000/api/stream/<infoHash>
+            // Direct stream URL in format: http://localhost:3002/api/stream/<infoHash>
             const streamUrl = `${baseUrl}/api/stream/${infoHash}`;
             Linking.openURL(streamUrl).catch((err) => {
               Alert.alert('Browser Error', 'Could not open browser for streaming: ' + err.message);
@@ -859,27 +1324,27 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
             showsVerticalScrollIndicator={false}
             bounces={true}
           >
-            {/* ── Hero Section ── */}
-            <View style={[styles.dsHero, { height: HERO_HEIGHT }]}>
+            {/* ── 1. Hero Poster Image View ── */}
+            <View style={[styles.dsHeroHeader, { height: HERO_HEIGHT }]}>
               {/* Background poster */}
-              {posterUrl ? (
+              {effectivePoster ? (
                 <Image
-                  source={{ uri: posterUrl }}
+                  source={{ uri: effectivePoster }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
                   onError={() => setPosterUrl(null)}
                 />
-              ) : posterLoading ? (
+              ) : posterLoading || dbLoading ? (
                 <LinearGradient colors={['#181920', '#252834', '#181920']} style={StyleSheet.absoluteFill} />
               ) : (
                 <LinearGradient colors={[Colors.primary, '#660814']} style={StyleSheet.absoluteFill} />
               )}
 
-              {/* Dark gradient from poster → obsidian black */}
+              {/* Dark gradient fade into background */}
               <LinearGradient
-                colors={['transparent', 'rgba(9,9,12,0.25)', 'rgba(9,9,12,0.85)', '#09090C']}
+                colors={['rgba(9,9,12,0.35)', 'transparent', 'rgba(9,9,12,0.85)', '#09090C']}
                 style={StyleSheet.absoluteFill}
-                start={{ x: 0, y: 0.25 }}
+                start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
               />
 
@@ -896,7 +1361,7 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                 />
               </TouchableOpacity>
 
-              {/* Close button */}
+              {/* Close button in header */}
               <TouchableOpacity
                 style={[styles.dsCloseBtn, { top: insets.top + 10 }]}
                 onPress={onClose}
@@ -904,112 +1369,203 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
               >
                 <X color="#FFFFFF" size={20} strokeWidth={2.5} />
               </TouchableOpacity>
+            </View>
 
-              {/* Hero content */}
-              <View style={styles.dsHeroContent}>
-                {/* Title */}
-                <Text style={styles.dsHeroTitle} numberOfLines={3}>{cleanTitle}</Text>
+            {/* ── 2. All Buttons & Controls Body (AFTER Image View) ── */}
+            <View style={styles.dsHeroContent}>
+              {/* Title */}
+              <Text style={styles.dsHeroTitle} numberOfLines={3}>{displayTitle}</Text>
 
-                {/* Meta badges row */}
-                <View style={styles.dsBadgeRow}>
-                  {movie.year ? (
-                    <View style={styles.dsMetaBadge}>
-                      <Text style={styles.dsMetaBadgeText}>{movie.year}</Text>
-                    </View>
-                  ) : null}
-                  {movie.language ? (
-                    <View style={[styles.dsMetaBadge, { borderColor: 'rgba(250,36,60,0.4)', backgroundColor: 'rgba(250,36,60,0.12)' }]}>
-                      <Text style={[styles.dsMetaBadgeText, { color: Colors.primary }]}>
-                        {movie.language.toUpperCase()}
-                      </Text>
-                    </View>
-                  ) : null}
+              {dbMetadata?.tagline ? (
+                <Text style={styles.dsTaglineText}>"{dbMetadata.tagline}"</Text>
+              ) : null}
+
+              {/* Meta badges row */}
+              <View style={styles.dsBadgeRow}>
+                {dbMetadata ? (
+                  <Text style={styles.dsMatchText}>{dbMetadata.matchScore}% Match</Text>
+                ) : null}
+
+                {dbMetadata?.rating ? (
+                  <View style={styles.dsRatingBadge}>
+                    <Star color="#FFD700" size={11} fill="#FFD700" />
+                    <Text style={styles.dsRatingText}>{dbMetadata.rating.toFixed(1)}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.dsMetaBadge}>
+                  <Text style={styles.dsMetaBadgeText}>{dbMetadata?.year || movie.year}</Text>
+                </View>
+
+                {dbMetadata?.contentRating ? (
                   <View style={styles.dsMetaBadge}>
-                    <Text style={styles.dsMetaBadgeText}>
-                      {resolutions.length} {resolutions.length === 1 ? 'Quality' : 'Qualities'}
+                    <Text style={styles.dsMetaBadgeText}>{dbMetadata.contentRating}</Text>
+                  </View>
+                ) : null}
+
+                {dbMetadata?.runtime ? (
+                  <View style={styles.dsMetaBadge}>
+                    <Text style={styles.dsMetaBadgeText}>{dbMetadata.runtime}</Text>
+                  </View>
+                ) : null}
+
+                {movie.language ? (
+                  <View style={[styles.dsMetaBadge, { borderColor: 'rgba(250,36,60,0.4)', backgroundColor: 'rgba(250,36,60,0.12)' }]}>
+                    <Text style={[styles.dsMetaBadgeText, { color: Colors.primary }]}>
+                      {movie.language.toUpperCase()}
                     </Text>
                   </View>
-                </View>
+                ) : null}
 
-                {/* Primary CTA Buttons — ONLY TWO BUTTONS: Play and Download */}
-                <View style={styles.dsCtaRow}>
-                  {/* Play button */}
-                  <TouchableOpacity
-                    style={styles.dsPlayBtn}
-                    activeOpacity={0.85}
-                    onPress={() => setQualityModalMode('play')}
-                  >
-                    <LinearGradient
-                      colors={[Colors.primary, '#B51527']}
-                      style={styles.dsPlayGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                    >
-                      {streamingResId ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Play color="#FFFFFF" size={19} fill="#FFFFFF" />
-                      )}
-                      <Text style={styles.dsPlayBtnText}>Play</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-
-                  {/* Download button */}
-                  <TouchableOpacity
-                    style={styles.dsDownloadBtn}
-                    activeOpacity={0.85}
-                    onPress={() => setQualityModalMode('download')}
-                  >
-                    <Download color="#FFFFFF" size={19} strokeWidth={2.2} />
-                    <Text style={styles.dsDownloadBtnText}>Download</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Secondary Action: My List toggle */}
-                <TouchableOpacity
-                  style={[styles.dsMyListBtn, isSaved && styles.dsMyListBtnActive]}
-                  activeOpacity={0.8}
-                  onPress={onToggleSave}
-                >
-                  {isSaved ? (
-                    <BookmarkCheck color={Colors.primary} size={17} fill={Colors.primary} />
-                  ) : (
-                    <Bookmark color="#FFFFFF" size={17} />
-                  )}
-                  <Text style={[styles.dsMyListBtnText, isSaved && { color: Colors.primary }]}>
-                    {isSaved ? 'In My List' : 'Add to My List'}
+                <View style={styles.dsMetaBadge}>
+                  <Text style={styles.dsMetaBadgeText}>
+                    {resolutions.length} {resolutions.length === 1 ? 'Quality' : 'Qualities'}
                   </Text>
-                </TouchableOpacity>
+                </View>
+              </View>
 
-                {/* Quick Actions: Copy Magnet URL & Movie Page in Browser */}
-                <View style={styles.dsQuickActionsRow}>
-                  <TouchableOpacity
-                    style={styles.dsQuickActionBtn}
-                    activeOpacity={0.8}
-                    onPress={() => handleQuickCopyMagnet()}
+              {/* Primary CTA Buttons — Play and Download */}
+              <View style={styles.dsCtaRow}>
+                {/* Play button */}
+                <TouchableOpacity
+                  style={styles.dsPlayBtn}
+                  activeOpacity={0.85}
+                  onPress={() => setQualityModalMode('play')}
+                >
+                  <LinearGradient
+                    colors={[Colors.primary, '#B51527']}
+                    style={styles.dsPlayGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
                   >
-                    {copyingMagnet ? (
+                    {streamingResId ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Copy color="#FFFFFF" size={15} />
+                      <Play color="#FFFFFF" size={19} fill="#FFFFFF" />
                     )}
-                    <Text style={styles.dsQuickActionBtnText}>Copy Magnet</Text>
-                  </TouchableOpacity>
+                    <Text style={styles.dsPlayBtnText}>Play</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.dsQuickActionBtn}
-                    activeOpacity={0.8}
-                    onPress={handleQuickOpenBrowser}
-                  >
-                    <Globe color="#FFFFFF" size={15} />
-                    <Text style={styles.dsQuickActionBtnText}>Movie Page</Text>
-                  </TouchableOpacity>
-                </View>
+                {/* Download button */}
+                <TouchableOpacity
+                  style={styles.dsDownloadBtn}
+                  activeOpacity={0.85}
+                  onPress={() => setQualityModalMode('download')}
+                >
+                  <Download color="#FFFFFF" size={19} strokeWidth={2.2} />
+                  <Text style={styles.dsDownloadBtnText}>Download</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Secondary Action: My List toggle */}
+              <TouchableOpacity
+                style={[styles.dsMyListBtn, isSaved && styles.dsMyListBtnActive]}
+                activeOpacity={0.8}
+                onPress={onToggleSave}
+              >
+                {isSaved ? (
+                  <BookmarkCheck color={Colors.primary} size={17} fill={Colors.primary} />
+                ) : (
+                  <Bookmark color="#FFFFFF" size={17} />
+                )}
+                <Text style={[styles.dsMyListBtnText, isSaved && { color: Colors.primary }]}>
+                  {isSaved ? 'In My List' : 'Add to My List'}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Quick Actions: Copy Magnet, Movie Page, Copy Play URL, Copy Download URL */}
+              <View style={styles.dsQuickActionsRow}>
+                <TouchableOpacity
+                  style={styles.dsQuickActionBtn}
+                  activeOpacity={0.8}
+                  onPress={() => handleQuickCopyMagnet()}
+                >
+                  {copyingMagnet ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Copy color="#FFFFFF" size={14} />
+                  )}
+                  <Text style={styles.dsQuickActionBtnText}>Copy Magnet</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dsQuickActionBtn}
+                  activeOpacity={0.8}
+                  onPress={handleQuickOpenBrowser}
+                >
+                  <Globe color="#FFFFFF" size={14} />
+                  <Text style={styles.dsQuickActionBtnText}>Movie Page</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={[styles.dsQuickActionsRow, { marginTop: 8 }]}>
+                <TouchableOpacity
+                  style={styles.dsQuickActionBtn}
+                  activeOpacity={0.8}
+                  onPress={() => handleQuickCopyStreamUrl()}
+                >
+                  <PlayCircle color="#FFFFFF" size={14} />
+                  <Text style={styles.dsQuickActionBtnText}>Copy Play URL</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dsQuickActionBtn}
+                  activeOpacity={0.8}
+                  onPress={() => handleQuickCopyDownloadUrl()}
+                >
+                  <DownloadCloud color="#FFFFFF" size={14} />
+                  <Text style={styles.dsQuickActionBtnText}>Copy Download URL</Text>
+                </TouchableOpacity>
               </View>
             </View>
 
             {/* ── Movie Info Section ── */}
             <View style={styles.dsInfoSection}>
+              {/* Real Movie Database Synopsis / Overview */}
+              {dbMetadata?.synopsis ? (
+                <View style={styles.dsSectionBlock}>
+                  <View style={styles.dsDbHeaderRow}>
+                    <Sparkles color="#FFD700" size={14} strokeWidth={2.5} />
+                    <Text style={styles.dsDbHeaderText}>
+                      Movie Database Overview ({dbMetadata.source.toUpperCase()})
+                    </Text>
+                  </View>
+                  <Text style={styles.dsSynopsisText}>{dbMetadata.synopsis}</Text>
+
+                  {dbMetadata.director || (dbMetadata.cast && dbMetadata.cast.length > 0) ? (
+                    <View style={{ marginTop: 10, gap: 4 }}>
+                      {dbMetadata.director ? (
+                        <Text style={styles.dsMetaLineText}>
+                          <Text style={styles.dsMetaLabel}>Director: </Text>
+                          <Text style={styles.dsMetaValue}>{dbMetadata.director}</Text>
+                        </Text>
+                      ) : null}
+                      {dbMetadata.cast && dbMetadata.cast.length > 0 ? (
+                        <Text style={styles.dsMetaLineText}>
+                          <Text style={styles.dsMetaLabel}>Starring: </Text>
+                          <Text style={styles.dsMetaValue}>{dbMetadata.cast.join(', ')}</Text>
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {dbMetadata.genres && dbMetadata.genres.length > 0 ? (
+                    <View style={styles.dsGenresRow}>
+                      {dbMetadata.genres.map((genre) => (
+                        <View key={genre} style={styles.dsGenreChip}>
+                          <Text style={styles.dsGenreText}>{genre}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : dbLoading ? (
+                <View style={styles.dsSectionBlock}>
+                  <ActivityIndicator size="small" color={Colors.netflixRed} style={{ alignSelf: 'flex-start', marginVertical: 8 }} />
+                </View>
+              ) : null}
+
               {/* Release Rip Title */}
               {selectedRes?.rawTitle ? (
                 <View style={styles.dsSectionBlock}>
@@ -1300,9 +1856,9 @@ const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 );
 
 
-export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigateToTab }) => {
+export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigateToTab, onOpenInBrowserTab }) => {
   const insets = useSafeAreaInsets();
-  const { startDownload, backendUrl, testPing } = useDownloads();
+  const { downloads, isBackendConnected, startDownload, backendUrl, testPing } = useDownloads();
 
   const [query, setQuery] = useState(globalCachedFinderState.query);
   const [loading, setLoading] = useState(false);
@@ -1320,8 +1876,8 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   const isHomeFeed = !searchedQuery || /^recent/i.test(searchedQuery);
 
-  // Multi-Language Filter State (default: ['Tamil'])
-  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Tamil']);
+  // Multi-Language Filter State (default: ['All'])
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['All']);
 
   const handleToggleLanguage = useCallback((lang: string) => {
     if (lang === 'All') {
@@ -1366,17 +1922,30 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     });
   }, [results, selectedLanguages]);
 
+  const completedDownloads = useMemo(() => {
+    return downloads.filter((d) => d.status === 'completed');
+  }, [downloads]);
+
+  const featuredMovies = useMemo(() => {
+    if (!isHomeFeed || filteredResults.length === 0) return [];
+    return filteredResults.slice(0, Math.min(4, filteredResults.length));
+  }, [filteredResults, isHomeFeed]);
+
   const topReleases = useMemo(() => {
     if (!isHomeFeed || filteredResults.length === 0) return [];
-    const count = filteredResults.length > 10 ? 8 : Math.min(filteredResults.length, 5);
-    return filteredResults.slice(0, count);
-  }, [filteredResults, isHomeFeed]);
+    const pool = featuredMovies.length > 0 ? filteredResults.slice(featuredMovies.length) : filteredResults;
+    const count = pool.length > 10 ? 8 : Math.min(pool.length, 5);
+    return pool.slice(0, count);
+  }, [filteredResults, isHomeFeed, featuredMovies]);
 
   const recentlyAdded = useMemo(() => {
     if (!isHomeFeed) return filteredResults;
-    const remaining = filteredResults.slice(topReleases.length);
-    return remaining.length > 0 ? remaining : filteredResults;
-  }, [filteredResults, topReleases, isHomeFeed]);
+    const startIdx = featuredMovies.length > 0 ? featuredMovies.length + topReleases.length : topReleases.length;
+    const remaining = filteredResults.slice(startIdx);
+    return remaining.length > 0
+      ? remaining
+      : (featuredMovies.length > 0 ? filteredResults.slice(featuredMovies.length) : filteredResults);
+  }, [filteredResults, topReleases, featuredMovies, isHomeFeed]);
 
   const visibleRecentlyAdded = useMemo(() => {
     return recentlyAdded.slice(0, displayedCount);
@@ -1869,16 +2438,18 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
       try {
         const title = `${movie.movieTitle} (${resItem.resolution})`;
-        await startDownload(target, title);
-        Alert.alert('Download Started', `"${title}" has been added to your downloads queue!`, [
-          { text: 'OK' },
+        const poster = posterCache.get(movie.topicUrl) || posterCache.get(movie.id) || undefined;
+        await startDownload(target, title, poster);
+
+        Alert.alert('Download Started 📥', `"${title}" has been added to In-App Downloads and is saving to internal storage.`, [
           { text: 'View Downloads', onPress: () => onNavigateToTab?.('downloads') },
+          { text: 'OK', style: 'cancel' },
         ]);
       } catch (err: any) {
         Alert.alert('Download Error', err?.message || 'Failed to start movie download');
       }
     },
-    [startDownload, onNavigateToTab]
+    [startDownload, onNavigateToTab, posterCache]
   );
 
   // 2. Torrent Option (Save / Queue to Torrent Engine)
@@ -1908,8 +2479,9 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
               text: 'Queue in App',
               onPress: async () => {
                 try {
-                  const title = `[Torrent] ${movie.movieTitle} (${resItem.resolution})`;
-                  await startDownload(magnet, title);
+                  const title = `${movie.movieTitle} (${resItem.resolution})`;
+                  const poster = posterCache.get(movie.topicUrl) || posterCache.get(movie.id) || undefined;
+                  await startDownload(magnet, title, poster);
                   Alert.alert('Torrent Queued', 'Torrent download queued in background engine.', [
                     { text: 'OK' },
                     { text: 'View Downloads', onPress: () => onNavigateToTab?.('downloads') },
@@ -2370,16 +2942,16 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         <View style={styles.headerLeft}>
           <View style={styles.headerBrandRow}>
             <LinearGradient
-              colors={[Colors.primary, '#8A0E1C']}
+              colors={['#FF1E27', '#E50914', '#8A030A']}
               style={styles.headerLogoBadge}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Clapperboard color="#FFFFFF" size={17} strokeWidth={2.4} />
+              <Text style={styles.headerEmblemVText}>V</Text>
             </LinearGradient>
             <View style={styles.brandTitleCol}>
               <View style={styles.brandTitleRow}>
-                <Text style={styles.brandTitleV}>V</Text>
+                <Text style={styles.brandTitleV}>VIKI</Text>
                 <Text style={styles.brandTitleFlix}>FLEX</Text>
                 <View style={styles.brandCinemaBadge}>
                   <Text style={styles.brandCinemaBadgeText}>CINEMA</Text>
@@ -2391,25 +2963,17 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
 
         <View style={styles.headerRightActions}>
+
           <TouchableOpacity
             style={styles.mirrorChip}
             onPress={() => setUrlModalVisible(true)}
             activeOpacity={0.75}
           >
             <View style={styles.livePulseDot} />
-            <Text style={styles.mirrorChipText} numberOfLines={1}>
+            <Text style={styles.mirrorChipText} numberOfLines={1} ellipsizeMode="tail">
               {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}
             </Text>
             <ChevronDown color="#9E9EA7" size={12} strokeWidth={2.5} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.refreshHeaderBtn}
-            onPress={handlePullToRefresh}
-            activeOpacity={0.7}
-            disabled={isRefreshing}
-          >
-            <RotateCcw color={isRefreshing ? Colors.primary : "#AEAEB2"} size={14} strokeWidth={2.2} />
           </TouchableOpacity>
         </View>
       </View>
@@ -2502,7 +3066,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.langFilterScroll}
         >
-          {['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English', 'All'].map((lang) => {
+          {['All', 'Tamil', 'English', 'Telugu', 'Hindi', 'Malayalam', 'Kannada'].map((lang) => {
             const active = isLangActive(lang);
             return (
               <TouchableOpacity
@@ -2613,6 +3177,62 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           }
           ListHeaderComponent={
             <View style={styles.listHeaderBox}>
+              {/* Featured Slideshow for the First 4 Movies */}
+              {isHomeFeed && featuredMovies.length > 0 && (
+                <View style={styles.heroSectionWrap}>
+                  <HeroFeaturedSlideshow
+                    movies={featuredMovies}
+                    isMovieSaved={isMovieSaved}
+                    onToggleSaveMovie={handleToggleSaveMovie}
+                    enqueuePosterFetch={enqueuePosterFetch}
+                    onSelectMovie={(movie) => {
+                      setDetailMovie(movie);
+                      setDetailVisible(true);
+                    }}
+                  />
+                </View>
+              )}
+
+              {/* Section: Downloaded Movies (Offline Ready) */}
+              {isHomeFeed && completedDownloads.length > 0 && (
+                <View style={styles.downloadedSectionWrap}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleRow}>
+                      <View style={[styles.sectionIconWrap, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
+                        <DownloadCloud color="#30D158" size={16} strokeWidth={2.4} />
+                      </View>
+                      <Text style={styles.sectionTitle}>Downloaded Movies</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.dlBadge}
+                      onPress={() => onNavigateToTab?.('downloads')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.dlBadgeText}>{completedDownloads.length} Offline • See All</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.dlScroll}
+                  >
+                    {completedDownloads.map((item) => (
+                      <DownloadedMovieCard
+                        key={item.id}
+                        item={item}
+                        onPlay={() => {
+                          setActiveStreamItem(item);
+                          setStreamPlayerInitialPos(0);
+                          setStreamPlayerPosterUrl(item.poster || undefined);
+                          setStreamPlayerVisible(true);
+                        }}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
               {/* Section 0: Continue Watching (Only on default home feed when items exist) */}
               {isHomeFeed && continueWatchingList.length > 0 && (
                 <View style={styles.continueWatchingSectionWrap}>
@@ -3064,12 +3684,13 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   headerLeft: {
-    flex: 1,
+    marginRight: 6,
+    flexShrink: 0,
   },
   headerBrandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   headerLogoBadge: {
     width: 36,
@@ -3083,12 +3704,19 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 4,
   },
+  headerEmblemVText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
   brandTitleCol: {
     justifyContent: 'center',
   },
   brandTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
   },
   brandTitleV: {
     color: Colors.primary,
@@ -3107,9 +3735,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(250, 36, 60, 0.35)',
     borderRadius: 4,
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
     paddingVertical: 1,
-    marginLeft: 6,
+    marginLeft: 4,
+    flexShrink: 0,
   },
   brandCinemaBadgeText: {
     color: Colors.primary,
@@ -3126,18 +3755,22 @@ const styles = StyleSheet.create({
   headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
+    flexShrink: 1,
+    justifyContent: 'flex-end',
   },
   mirrorChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 4,
     backgroundColor: '#16171D',
     borderWidth: 1,
     borderColor: '#262835',
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: 14,
+    maxWidth: 110,
+    flexShrink: 1,
   },
   livePulseDot: {
     width: 6,
@@ -3147,9 +3780,9 @@ const styles = StyleSheet.create({
   },
   mirrorChipText: {
     color: '#E5E5EA',
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '600',
-    maxWidth: 95,
+    maxWidth: 75,
   },
   refreshHeaderBtn: {
     width: 32,
@@ -3652,6 +4285,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
+  pgCardBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  pgQualityBadgeInline: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4.5,
+    paddingVertical: 1,
+    alignSelf: 'flex-start',
+  },
+  trCardBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  trQualityBadgeInline: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4.5,
+    paddingVertical: 1,
+    alignSelf: 'flex-start',
+  },
   pgQualityBadge: {
     position: 'absolute',
     bottom: 8,
@@ -3671,6 +4328,11 @@ const styles = StyleSheet.create({
   dsContainer: {
     flex: 1,
     backgroundColor: '#09090C',
+  },
+  dsHeroHeader: {
+    width: '100%',
+    position: 'relative',
+    overflow: 'hidden',
   },
   dsHero: {
     width: '100%',
@@ -4079,6 +4741,82 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '500',
   },
+  dsMatchText: {
+    color: '#46D369',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  dsRatingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 215, 0, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.4)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    gap: 4,
+  },
+  dsRatingText: {
+    color: '#FFD700',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  dsTaglineText: {
+    color: '#8E8E93',
+    fontSize: 12.5,
+    fontStyle: 'italic',
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  dsDbHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  dsDbHeaderText: {
+    color: '#FFD700',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  dsSynopsisText: {
+    color: '#E5E5EA',
+    fontSize: 13.5,
+    lineHeight: 19,
+  },
+  dsMetaLineText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  dsMetaLabel: {
+    color: '#8E8E93',
+    fontWeight: '600',
+  },
+  dsMetaValue: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  dsGenresRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  dsGenreChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  dsGenreText: {
+    color: '#E5E5EA',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   stateCenter: {
     flex: 1,
     justifyContent: 'center',
@@ -4420,5 +5158,224 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 13,
     fontWeight: '700',
+  },
+  backendStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  backendStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  backendStatusText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  heroSectionWrap: {
+    marginBottom: 20,
+    marginTop: -10,
+    marginHorizontal: -12,
+  },
+  heroCardContainer: {
+    borderRadius: 0,
+    overflow: 'hidden',
+    alignSelf: 'stretch',
+    backgroundColor: '#16171D',
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.25)',
+  },
+  heroGradientOverlay: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  heroHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    gap: 6,
+  },
+  heroBadgeText: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  heroBookmarkBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroBottomContent: {
+    gap: 8,
+    alignItems: 'center',
+  },
+  heroDotsCenterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 28,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginVertical: 2,
+  },
+  heroMetaBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  heroMetaBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  heroCtaBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  heroCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  heroCtaText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  downloadedSectionWrap: {
+    marginBottom: 20,
+  },
+  dlBadge: {
+    backgroundColor: 'rgba(48, 209, 88, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.3)',
+  },
+  dlBadgeText: {
+    color: '#30D158',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dlScroll: {
+    paddingLeft: 16,
+    paddingRight: 16,
+    gap: 12,
+  },
+  dlCard: {
+    width: 140,
+    height: 210,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1C1E24',
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.3)',
+  },
+  dlSizeBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dlSizeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
+  dlOfflineBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.5)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dlOfflineBadgeText: {
+    color: '#30D158',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  slideshowWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  slideshowDotsContainer: {
+    position: 'absolute',
+    bottom: 14,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 15,
+  },
+  slideshowDot: {
+    height: 6,
+    borderRadius: 3,
+  },
+  slideshowDotActive: {
+    width: 22,
+    backgroundColor: Colors.primary,
+  },
+  slideshowDotInactive: {
+    width: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
   },
 });

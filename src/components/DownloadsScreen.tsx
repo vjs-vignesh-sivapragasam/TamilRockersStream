@@ -14,6 +14,7 @@ import {
   Image,
   Linking,
   KeyboardAvoidingView,
+  StatusBar,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,7 +26,6 @@ import {
   Trash2,
   CheckCircle2,
   HardDrive,
-  FileCode,
   Share2,
   Plus,
   X,
@@ -34,13 +34,19 @@ import {
   RotateCcw,
   Folder,
   Radio,
-  Clock,
   Upload,
   FileUp,
   Link2,
   FileCheck,
+  Sparkles,
+  Youtube,
+  Instagram,
+  Camera,
+  Check,
+  Layers,
 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Clipboard from 'expo-clipboard';
 import { Colors } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 import { DownloadItem } from '../types/downloads';
@@ -48,6 +54,11 @@ import {
   formatBytes,
   cleanTitleFromFilename,
   getPosterForFilename,
+  getStorageLocationText,
+  saveToGallery,
+  parseSocialVideoUrl,
+  ParsedMediaResult,
+  ParsedMediaFormat,
 } from '../services/downloadService';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
 
@@ -68,9 +79,15 @@ export const DownloadsScreen: React.FC = () => {
 
   const [refreshing, setRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [addTab, setAddTab] = useState<'file' | 'link'>('file');
+  const [addTab, setAddTab] = useState<'social' | 'link' | 'file'>('social');
+  const [socialUrl, setSocialUrl] = useState('');
+  const [parsingSocial, setParsingSocial] = useState(false);
+  const [parsedMedia, setParsedMedia] = useState<ParsedMediaResult | null>(null);
+  const [selectedFormat, setSelectedFormat] = useState<ParsedMediaFormat | null>(null);
+  const [saveToGalleryToggle, setSaveToGalleryToggle] = useState(true);
   const [manualUrl, setManualUrl] = useState('');
   const [manualTitle, setManualTitle] = useState('');
+  const [manualFilename, setManualFilename] = useState('');
   const [selectedTorrentFile, setSelectedTorrentFile] = useState<{
     uri: string;
     name: string;
@@ -81,6 +98,98 @@ export const DownloadsScreen: React.FC = () => {
 
   const activeQueue = downloads.filter((d) => d.status !== 'completed');
   const completedList = downloads.filter((d) => d.status === 'completed');
+
+  const handlePasteToSocial = async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (text) {
+        setSocialUrl(text.trim());
+      }
+    } catch {}
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (text) {
+        setManualUrl(text.trim());
+      }
+    } catch {}
+  };
+
+  const handleSaveToGalleryItem = async (item: DownloadItem) => {
+    const fileUri = item.fileUri || item.movieFileUri;
+    if (!fileUri) {
+      Alert.alert('Error', 'Movie file path is missing.');
+      return;
+    }
+    const success = await saveToGallery(fileUri);
+    if (success) {
+      Alert.alert(
+        'Saved to Gallery 📸',
+        `"${item.title || item.fileName}" has been exported to your phone's Media Gallery / Camera Roll!`,
+        [{ text: 'OK' }]
+      );
+    } else {
+      Alert.alert('Gallery Save', 'Storage permission denied or file could not be exported to gallery.');
+    }
+  };
+
+  const handleParseSocialVideo = async () => {
+    if (!socialUrl.trim()) {
+      Alert.alert('URL Required', 'Please enter or paste a valid YouTube or Instagram URL.');
+      return;
+    }
+    setParsingSocial(true);
+    try {
+      const result = await parseSocialVideoUrl(socialUrl.trim());
+      setParsedMedia(result);
+      if (result.formats && result.formats.length > 0) {
+        setSelectedFormat(result.formats[0]);
+      }
+    } catch (err: any) {
+      Alert.alert('Parse Failed', 'Could not parse video details. Check URL or internet connection.');
+    } finally {
+      setParsingSocial(false);
+    }
+  };
+
+  const handleStartSocialDownload = async () => {
+    if (!socialUrl.trim()) {
+      Alert.alert('URL Required', 'Please enter a valid video link.');
+      return;
+    }
+
+    const targetTitle = manualTitle.trim() || (parsedMedia ? parsedMedia.title : 'Social Video');
+    const resolution = selectedFormat ? selectedFormat.resolution : '1080p';
+
+    try {
+      await startDownload(socialUrl.trim(), `${targetTitle} [${resolution}]`);
+
+      if (saveToGalleryToggle) {
+        Alert.alert(
+          'Downloading Video 🍿',
+          `"${targetTitle}" (${resolution}) is downloading to VFlix offline storage and will auto-export to your Phone Gallery when complete!`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Downloading Video 🚀',
+          `"${targetTitle}" (${resolution}) is downloading to your VFlix offline library.`,
+          [{ text: 'OK' }]
+        );
+      }
+
+      setSocialUrl('');
+      setParsedMedia(null);
+      setSelectedFormat(null);
+      setManualTitle('');
+      setManualFilename('');
+      setAddModalVisible(false);
+    } catch (err: any) {
+      Alert.alert('Download Error', err?.message || 'Failed to start video download.');
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -96,13 +205,13 @@ export const DownloadsScreen: React.FC = () => {
       const newFound = await rescanStorage();
       if (newFound > 0) {
         Alert.alert(
-          'Movies Detected',
+          'Movies Detected 🍿',
           `Discovered ${newFound} movie${newFound === 1 ? '' : 's'} in your internal storage VFlix folders! They are ready to play offline.`,
           [{ text: 'OK' }]
         );
       } else {
         Alert.alert(
-          'Storage Scan Complete',
+          'Storage Scan Complete 📁',
           'All movies in your VFlix internal storage folders are indexed and ready.\n\nTip: Move downloaded .mp4 or .mkv files into "Internal Storage/VFlix", or tap "Import Video" to pick from storage.',
           [{ text: 'OK' }]
         );
@@ -129,7 +238,7 @@ export const DownloadsScreen: React.FC = () => {
         const file = res.assets[0];
         const imported = await importMovie(file.uri, file.name);
         Alert.alert(
-          'Movie Ready Offline',
+          'Movie Ready Offline 🍿',
           `"${imported.title || file.name}" was successfully added to your VFlix offline library!`,
           [
             { text: 'Done', style: 'cancel' },
@@ -239,11 +348,6 @@ export const DownloadsScreen: React.FC = () => {
       if (!res.canceled && res.assets && res.assets.length > 0) {
         const file = res.assets[0];
 
-        // On Android, ExpoFileSystem (readAsStringAsync / copyAsync) cannot access
-        // the DocumentPicker sandbox path even with copyToCacheDirectory:true.
-        // Solution: read the file immediately via fetch() — which CAN access
-        // file:// URIs returned by DocumentPicker on Android — and convert the
-        // content to a base64 data: URI so downstream code needs no file I/O.
         let torrentDataUri = file.uri;
         try {
           const response = await fetch(file.uri);
@@ -277,10 +381,31 @@ export const DownloadsScreen: React.FC = () => {
     }
   };
 
+  const handleClearAllDownloads = () => {
+    if (downloads.length === 0) return;
+    Alert.alert(
+      'Clear All Downloads',
+      `Are you sure you want to delete all ${downloads.length} items from your downloads list and local storage?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            const copy = [...downloads];
+            for (const item of copy) {
+              await deleteDownload(item.id);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleAddDownload = async () => {
     let targetUrl = '';
     let targetTitle = manualTitle.trim();
+    let customFile = manualFilename.trim();
 
     if (addTab === 'file') {
       if (!selectedTorrentFile) {
@@ -297,13 +422,13 @@ export const DownloadsScreen: React.FC = () => {
       targetUrl = manualUrl.trim();
       if (!targetUrl) {
         Alert.alert(
-          'Magnet / URL Required',
-          'Please enter or paste a valid magnet: link or .torrent URL.'
+          'Download Link Required',
+          'Please enter or paste a valid download link (https://...) or magnet URL.'
         );
         return;
       }
       if (!targetTitle) {
-        targetTitle = 'Torrent Movie';
+        targetTitle = customFile || 'Downloaded Movie';
       }
     }
 
@@ -312,11 +437,13 @@ export const DownloadsScreen: React.FC = () => {
       setSelectedTorrentFile(null);
       setManualUrl('');
       setManualTitle('');
+      setManualFilename('');
       setAddModalVisible(false);
     } catch (err: any) {
       Alert.alert('Download Error', err?.message || 'Failed to start download.');
     }
   };
+
   // Storage calculation
   const totalDisk = storageStats.totalBytes || 1;
   const freeDisk = storageStats.freeBytes || 0;
@@ -326,46 +453,48 @@ export const DownloadsScreen: React.FC = () => {
   const otherPercent = Math.min(100, Math.max(1, ((usedDisk - appDownloads) / totalDisk) * 100));
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
-      {/* Header Bar */}
+    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#0F1015" />
+
+      {/* Modern Top Header */}
       <View style={styles.header}>
         <View style={styles.headerTitleGroup}>
           <Text style={styles.headerTitle}>Downloads</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-            <View style={{ 
-              flexDirection: 'row', alignItems: 'center', gap: 4, 
-              backgroundColor: isBackendConnected ? 'rgba(70,211,105,0.15)' : 'rgba(229,9,20,0.15)',
-              paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8
-            }}>
-              <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: isBackendConnected ? '#46D369' : Colors.netflixRed }} />
-              <Text style={{ fontSize: 9, color: isBackendConnected ? '#46D369' : Colors.netflixRed, fontWeight: '800' }}>
-                {isBackendConnected ? 'SERVER ON' : 'SERVER OFF'}
+          <View style={styles.serverBadgeRow}>
+            <View
+              style={[
+                styles.serverPill,
+                {
+                  backgroundColor: isBackendConnected
+                    ? 'rgba(70, 211, 105, 0.12)'
+                    : 'rgba(250, 36, 60, 0.12)',
+                  borderColor: isBackendConnected
+                    ? 'rgba(70, 211, 105, 0.3)'
+                    : 'rgba(250, 36, 60, 0.3)',
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor: isBackendConnected ? '#46D369' : Colors.netflixRed,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.serverStatusText,
+                  { color: isBackendConnected ? '#46D369' : Colors.netflixRed },
+                ]}
+              >
+                {isBackendConnected ? 'ENGINE ONLINE' : 'ENGINE OFFLINE'}
               </Text>
             </View>
-            <Text style={[styles.headerSubtitle, { marginTop: 0, flex: 1 }]} numberOfLines={1}>
+            <Text style={styles.readyCountText}>
               • {completedList.length} ready offline
             </Text>
           </View>
-        </View>
-
-        <View style={styles.headerRightActions}>
-          <TouchableOpacity
-            style={styles.importHeaderBtn}
-            onPress={handleImportVideo}
-            activeOpacity={0.8}
-          >
-            <Film color="#FFFFFF" size={14} />
-            <Text style={styles.importHeaderBtnText}>Import</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => setAddModalVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Plus color="#FFFFFF" size={15} />
-            <Text style={styles.addBtnText}>Add</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -381,63 +510,146 @@ export const DownloadsScreen: React.FC = () => {
           />
         }
       >
-        {/* Real Device Storage Card */}
-        <View style={styles.storageCard}>
-          <View style={styles.storageHeader}>
-            <HardDrive color={Colors.textSecondary} size={16} />
-            <Text style={styles.storageTitle}>Device Storage</Text>
-            <Text style={styles.storageStats}>
-              {formatBytes(appDownloads)} downloaded • {formatBytes(freeDisk)} free
-            </Text>
-          </View>
-
-          <View style={styles.storageBarTrack}>
-            <View style={[styles.storageBarApp, { width: `${appPercent}%` }]} />
-            <View style={[styles.storageBarOther, { width: `${otherPercent}%` }]} />
-          </View>
-
-          <View style={styles.storageLegend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.netflixRed }]} />
-              <Text style={styles.legendText}>App ({formatBytes(appDownloads)})</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#555555' }]} />
-              <Text style={styles.legendText}>Used ({formatBytes(usedDisk)})</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#222222' }]} />
-              <Text style={styles.legendText}>Free ({formatBytes(freeDisk)})</Text>
-            </View>
-          </View>
-
-          {/* Internal Storage Folder Banner */}
-          <View style={styles.folderRow}>
-            <View style={styles.folderLeft}>
-              <Folder color="#46D369" size={17} />
-              <View style={styles.folderTextWrapper}>
-                <Text style={styles.folderPathText}>Internal Storage / VFlix</Text>
-                <Text style={styles.folderSubText}>
-                  Move external movies here to auto-display in the app
-                </Text>
-              </View>
-            </View>
-            <View style={styles.folderActionsRight}>
+        {/* Downloader Hub Cards - 2x2 Sleek Grid */}
+        <View style={styles.hubSection}>
+          <Text style={styles.hubSectionTitle}>DOWNLOADER TOOLS HUB</Text>
+          
+          <View style={styles.hubGrid}>
+            <View style={styles.hubGridRow}>
+              {/* Card 1: YouTube Video Downloader */}
               <TouchableOpacity
-                style={styles.importQuickBtn}
-                onPress={handleImportVideo}
-                activeOpacity={0.7}
+                style={styles.hubCard}
+                onPress={() => {
+                  setAddTab('social');
+                  setAddModalVisible(true);
+                }}
+                activeOpacity={0.82}
               >
-                <Upload color="#CCCCCC" size={12} />
-                <Text style={styles.importQuickText}>Import</Text>
+                <LinearGradient
+                  colors={['#2A0A0A', '#1C0D0E', '#141416']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.hubCardGradient}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(255, 0, 0, 0.18)', borderColor: 'rgba(255, 0, 0, 0.35)' }]}>
+                    <Youtube color="#FF0000" size={20} />
+                  </View>
+                  <View style={styles.hubCardInfo}>
+                    <View style={styles.hubHeaderRow}>
+                      <Text style={styles.hubCardTitle} numberOfLines={1}>YouTube</Text>
+                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+                        <Text style={[styles.hubBadgeText, { color: '#FF0000' }]}>ACTIVE</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
+                      Shorts, 1080p & MP3
+                    </Text>
+                  </View>
+                </LinearGradient>
               </TouchableOpacity>
+
+              {/* Card 2: Instagram Video Downloader */}
               <TouchableOpacity
-                style={styles.rescanStorageBtn}
-                onPress={handleManualScanStorage}
-                activeOpacity={0.7}
+                style={styles.hubCard}
+                onPress={() => {
+                  setAddTab('social');
+                  setAddModalVisible(true);
+                }}
+                activeOpacity={0.82}
               >
-                <RotateCcw color={Colors.netflixRed} size={12} />
-                <Text style={styles.rescanStorageText}>Scan</Text>
+                <LinearGradient
+                  colors={['#270B1D', '#1A0C18', '#141416']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.hubCardGradient}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(225, 48, 108, 0.18)', borderColor: 'rgba(225, 48, 108, 0.35)' }]}>
+                    <Instagram color="#E1306C" size={20} />
+                  </View>
+                  <View style={styles.hubCardInfo}>
+                    <View style={styles.hubHeaderRow}>
+                      <Text style={styles.hubCardTitle} numberOfLines={1}>Instagram</Text>
+                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(225, 48, 108, 0.15)' }]}>
+                        <Text style={[styles.hubBadgeText, { color: '#E1306C' }]}>ACTIVE</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
+                      Reels & HD Videos
+                    </Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.hubGridRow}>
+              {/* Card 3: Torrent Downloader (Under Construction) */}
+              <TouchableOpacity
+                style={[styles.hubCard, styles.hubCardDisabled]}
+                onPress={() => {
+                  Alert.alert(
+                    'Under Construction 🚧',
+                    'Torrent File Downloader is currently undergoing maintenance. Check back in the next release!',
+                    [{ text: 'OK' }]
+                  );
+                }}
+                activeOpacity={0.82}
+              >
+                <LinearGradient
+                  colors={['#1F1A0A', '#16140D', '#141416']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.hubCardGradient}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(255, 184, 0, 0.18)', borderColor: 'rgba(255, 184, 0, 0.35)' }]}>
+                    <FileUp color="#FFB800" size={20} />
+                  </View>
+                  <View style={styles.hubCardInfo}>
+                    <View style={styles.hubHeaderRow}>
+                      <Text style={styles.hubCardTitle} numberOfLines={1}>Torrent</Text>
+                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(255, 184, 0, 0.18)' }]}>
+                        <Text style={[styles.hubBadgeText, { color: '#FFB800' }]}>SOON 🚧</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
+                      P2P Torrent Engine
+                    </Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Card 4: Magnet Downloader (Under Construction) */}
+              <TouchableOpacity
+                style={[styles.hubCard, styles.hubCardDisabled]}
+                onPress={() => {
+                  Alert.alert(
+                    'Under Construction 🚧',
+                    'Magnet Link Downloader is currently undergoing maintenance. Check back in the next release!',
+                    [{ text: 'OK' }]
+                  );
+                }}
+                activeOpacity={0.82}
+              >
+                <LinearGradient
+                  colors={['#1A1724', '#13111C', '#141416']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.hubCardGradient}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(175, 82, 222, 0.18)', borderColor: 'rgba(175, 82, 222, 0.35)' }]}>
+                    <Link2 color="#AF52DE" size={20} />
+                  </View>
+                  <View style={styles.hubCardInfo}>
+                    <View style={styles.hubHeaderRow}>
+                      <Text style={styles.hubCardTitle} numberOfLines={1}>Magnet</Text>
+                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(175, 82, 222, 0.18)' }]}>
+                        <Text style={[styles.hubBadgeText, { color: '#AF52DE' }]}>SOON 🚧</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
+                      Direct Magnet Links
+                    </Text>
+                  </View>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           </View>
@@ -446,15 +658,26 @@ export const DownloadsScreen: React.FC = () => {
         {/* 1. Active Downloads Queue */}
         {activeQueue.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              Downloading Now ({activeQueue.length})
-            </Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>
+                Downloading Now ({activeQueue.length})
+              </Text>
+              <View style={styles.activePulseBadge}>
+                <Radio color={Colors.netflixRed} size={12} />
+                <Text style={styles.activePulseText}>LIVE</Text>
+              </View>
+            </View>
 
             <View style={styles.queueList}>
               {activeQueue.map((item) => {
                 const percent = Math.min(100, Math.round(item.progress * 100));
                 const isPaused = item.status === 'paused';
-                const posterUri = getPosterForFilename(item.movieFileName || item.fileName);
+                const isError = item.status === 'error';
+                const posterUri =
+                  item.poster ||
+                  getPosterForFilename(
+                    item.movieFileName || item.fileName || item.title
+                  );
 
                 return (
                   <View key={item.id} style={styles.activeCard}>
@@ -469,25 +692,41 @@ export const DownloadsScreen: React.FC = () => {
                           {item.title || item.movieFileName || item.fileName}
                         </Text>
                         <Text style={styles.activeSubmeta}>
-                          {formatBytes(item.downloadedBytes)} of {formatBytes(item.totalBytes || 0)} • {percent}%
+                          {formatBytes(item.downloadedBytes)} of{' '}
+                          {formatBytes(item.totalBytes || 0)} • {percent}%
                         </Text>
                         <View style={styles.speedBadge}>
-                          <Radio color={Colors.netflixRed} size={11} />
-                          <Text style={styles.speedText}>
-                            {isPaused ? 'PAUSED' : `${item.speed || '0 KB/s'} (${item.peersCount || 0} peers)`}
+                          <Radio
+                            color={isError ? '#FF453A' : Colors.netflixRed}
+                            size={11}
+                          />
+                          <Text
+                            style={[styles.speedText, isError && { color: '#FF453A' }]}
+                            numberOfLines={1}
+                          >
+                            {isError
+                              ? `ERROR: ${item.error || 'Connection failed'}`
+                              : isPaused
+                              ? 'PAUSED'
+                              : `${item.speed || '0 KB/s'} (${item.peersCount || 0} peers)`}
                           </Text>
                         </View>
                       </View>
                       <View style={styles.activeActions}>
                         <TouchableOpacity
-                          style={styles.circleActionBtn}
+                          style={[
+                            styles.circleActionBtn,
+                            isError && { backgroundColor: 'rgba(255, 69, 58, 0.2)' },
+                          ]}
                           onPress={() => handleTogglePause(item)}
                           activeOpacity={0.7}
                         >
-                          {isPaused ? (
-                            <Play color="#FFFFFF" size={16} fill="#FFFFFF" />
+                          {isError ? (
+                            <RotateCcw color="#FF453A" size={15} />
+                          ) : isPaused ? (
+                            <Play color="#FFFFFF" size={15} fill="#FFFFFF" />
                           ) : (
-                            <Pause color="#FFFFFF" size={16} fill="#FFFFFF" />
+                            <Pause color="#FFFFFF" size={15} fill="#FFFFFF" />
                           )}
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -495,7 +734,7 @@ export const DownloadsScreen: React.FC = () => {
                           onPress={() => handleDelete(item)}
                           activeOpacity={0.7}
                         >
-                          <Trash2 color="#888888" size={16} />
+                          <Trash2 color="#8E8E93" size={15} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -507,7 +746,11 @@ export const DownloadsScreen: React.FC = () => {
                           styles.activeProgressFill,
                           {
                             width: `${percent}%`,
-                            backgroundColor: isPaused ? '#888888' : Colors.netflixRed,
+                            backgroundColor: isError
+                              ? '#FF453A'
+                              : isPaused
+                              ? '#8E8E93'
+                              : Colors.netflixRed,
                           },
                         ]}
                       />
@@ -519,24 +762,38 @@ export const DownloadsScreen: React.FC = () => {
           </View>
         )}
 
-        {/* 2. Completed Downloads List with Rich Thumbnails & Netflix Views */}
+        {/* 2. Completed Downloads List with Cards */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Downloaded Movies ({completedList.length})
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>
+              Downloaded Movies ({completedList.length})
+            </Text>
+            {downloads.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearAllSectionBtn}
+                onPress={handleClearAllDownloads}
+                activeOpacity={0.78}
+              >
+                <Trash2 color="#FF453A" size={13} />
+                <Text style={styles.clearAllSectionText}>Clear All</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {completedList.length === 0 ? (
             <View style={styles.emptyState}>
-              <Film color="#444444" size={48} />
-              <Text style={styles.emptyTitle}>No Movies Downloaded Yet</Text>
+              <View style={styles.emptyIconCircle}>
+                <Film color={Colors.netflixRed} size={36} />
+              </View>
+              <Text style={styles.emptyTitle}>No Offline Movies Downloaded</Text>
               <Text style={styles.emptySubtitle}>
-                Download movies and torrents from the Browser, or move externally downloaded movies into your phone's "VFlix" internal storage folder to watch offline anytime.
+                Download movies and torrents from the Search or Browser, or move externally downloaded videos into your phone's "VFlix" internal storage folder to watch offline anytime.
               </Text>
               <View style={styles.emptyActionRow}>
                 <TouchableOpacity
                   style={styles.emptyScanBtn}
                   onPress={handleManualScanStorage}
-                  activeOpacity={0.8}
+                  activeOpacity={0.82}
                 >
                   <RotateCcw color="#FFFFFF" size={14} />
                   <Text style={styles.emptyScanBtnText}>Scan VFlix Folder</Text>
@@ -545,7 +802,7 @@ export const DownloadsScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.emptyImportBtn}
                   onPress={handleImportVideo}
-                  activeOpacity={0.8}
+                  activeOpacity={0.82}
                 >
                   <Film color="#FFFFFF" size={14} />
                   <Text style={styles.emptyImportBtnText}>Import Video File</Text>
@@ -555,9 +812,11 @@ export const DownloadsScreen: React.FC = () => {
           ) : (
             <View style={styles.completedList}>
               {completedList.map((item) => {
-                const posterUri = getPosterForFilename(
-                  item.movieFileName || item.fileName || item.title
-                );
+                const posterUri =
+                  item.poster ||
+                  getPosterForFilename(
+                    item.movieFileName || item.fileName || item.title
+                  );
                 const displayTitle =
                   item.title ||
                   cleanTitleFromFilename(item.movieFileName || item.fileName);
@@ -565,7 +824,7 @@ export const DownloadsScreen: React.FC = () => {
 
                 return (
                   <View key={item.id} style={styles.movieCard}>
-                    {/* Poster Thumbnail Container with Netflix Play Touch */}
+                    {/* Poster Thumbnail Container */}
                     <TouchableOpacity
                       style={styles.posterWrapper}
                       activeOpacity={0.85}
@@ -580,7 +839,12 @@ export const DownloadsScreen: React.FC = () => {
                       {/* Play overlay button */}
                       <View style={styles.playOverlay}>
                         <View style={styles.playCircle}>
-                          <Play color="#FFFFFF" size={24} fill="#FFFFFF" style={{ marginLeft: 2 }} />
+                          <Play
+                            color="#FFFFFF"
+                            size={22}
+                            fill="#FFFFFF"
+                            style={{ marginLeft: 2 }}
+                          />
                         </View>
                       </View>
 
@@ -592,7 +856,7 @@ export const DownloadsScreen: React.FC = () => {
                           </Text>
                         </View>
                         <View style={styles.offlineBadge}>
-                          <CheckCircle2 color="#46D369" size={11} />
+                          <CheckCircle2 color="#46D369" size={10} />
                           <Text style={styles.offlineBadgeText}>OFFLINE</Text>
                         </View>
                       </View>
@@ -600,20 +864,27 @@ export const DownloadsScreen: React.FC = () => {
 
                     {/* Information & Action Buttons */}
                     <View style={styles.movieDetails}>
-                      <Text style={styles.movieTitle} numberOfLines={1}>
-                        {displayTitle}
-                      </Text>
-                      <Text style={styles.movieFileName} numberOfLines={1}>
-                        {item.movieFileName || item.fileName}
-                      </Text>
+                      <View style={{ gap: 2 }}>
+                        <Text style={styles.movieTitle} numberOfLines={1}>
+                          {displayTitle}
+                        </Text>
+                        <Text style={styles.movieFileName} numberOfLines={1}>
+                          {item.movieFileName || item.fileName}
+                        </Text>
+                      </View>
 
                       <View style={styles.metaRow}>
                         <Text style={styles.metaSize}>{sizeText}</Text>
                         <Text style={styles.metaDot}>•</Text>
-                        <Text style={styles.metaDate}>Ready to watch</Text>
+                        <View style={styles.storageLocationPill}>
+                          <Folder color="#46D369" size={10} />
+                          <Text style={styles.storageLocationText}>
+                            {getStorageLocationText(item.fileUri || item.movieFileUri)}
+                          </Text>
+                        </View>
                       </View>
 
-                      {/* Netflix Watch & External Player Buttons */}
+                      {/* Watch & External Player Buttons */}
                       <View style={styles.actionButtonsRow}>
                         {/* Netflix In-App Player */}
                         <TouchableOpacity
@@ -621,7 +892,7 @@ export const DownloadsScreen: React.FC = () => {
                           onPress={() => handlePlayInNetflixPlayer(item)}
                           activeOpacity={0.85}
                         >
-                          <Play color="#FFFFFF" size={14} fill="#FFFFFF" />
+                          <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
                           <Text style={styles.playNetflixText}>Watch</Text>
                         </TouchableOpacity>
 
@@ -631,7 +902,7 @@ export const DownloadsScreen: React.FC = () => {
                           onPress={() => handlePlayInExternalPlayer(item)}
                           activeOpacity={0.8}
                         >
-                          <ExternalLink color="#FFFFFF" size={13} />
+                          <ExternalLink color="#E5E5EA" size={12} />
                           <Text style={styles.externalPlayerText}>VLC / MX</Text>
                         </TouchableOpacity>
 
@@ -641,16 +912,25 @@ export const DownloadsScreen: React.FC = () => {
                           onPress={() => handleShareFile(item)}
                           activeOpacity={0.7}
                         >
-                          <Share2 color="#AAAAAA" size={16} />
+                          <Share2 color="#8E8E93" size={15} />
+                        </TouchableOpacity>
+
+                        {/* Save to Gallery */}
+                        <TouchableOpacity
+                          style={styles.galleryIconBtn}
+                          onPress={() => handleSaveToGalleryItem(item)}
+                          activeOpacity={0.7}
+                        >
+                          <Camera color="#30D158" size={14} />
                         </TouchableOpacity>
 
                         {/* Delete */}
                         <TouchableOpacity
-                          style={styles.iconActionBtn}
+                          style={styles.deleteIconBtn}
                           onPress={() => handleDelete(item)}
                           activeOpacity={0.7}
                         >
-                          <Trash2 color="#888888" size={16} />
+                          <Trash2 color="#FF453A" size={14} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -662,7 +942,7 @@ export const DownloadsScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* Modern Add Torrent Modal */}
+      {/* Modern Add Torrent Modal Sheet */}
       <Modal
         visible={addModalVisible}
         transparent
@@ -679,20 +959,30 @@ export const DownloadsScreen: React.FC = () => {
             onPress={() => setAddModalVisible(false)}
           />
 
-          <View style={[styles.modernModalSheet, { paddingBottom: insets.bottom + 20 }]}>
-            {/* Top Sheet Drag Indicator */}
+          <View style={[styles.modernModalSheet, { paddingBottom: insets.bottom + 18 }]}>
+            {/* Top Sheet Drag Handle */}
             <View style={styles.sheetHandle} />
 
-            {/* Modern Header */}
+            {/* Header */}
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderLeft}>
                 <View style={styles.sheetIconCircle}>
                   <Download color={Colors.netflixRed} size={20} />
                 </View>
                 <View>
-                  <Text style={styles.sheetTitle}>Add Torrent</Text>
+                  <Text style={styles.sheetTitle}>
+                    {addTab === 'social'
+                      ? 'Video Downloader'
+                      : addTab === 'link'
+                      ? 'Direct Link / Magnet'
+                      : 'Torrent File Downloader'}
+                  </Text>
                   <Text style={styles.sheetSubtitle}>
-                    Save movies directly to internal storage
+                    {addTab === 'social'
+                      ? 'Download YouTube videos & Instagram Reels HD'
+                      : addTab === 'link'
+                      ? 'Download direct HTTP video links or magnet URLs'
+                      : 'Save torrent files directly to internal storage'}
                   </Text>
                 </View>
               </View>
@@ -706,48 +996,248 @@ export const DownloadsScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Modern Segmented Tab Switcher */}
+            {/* Segmented 3-Tab Switcher */}
             <View style={styles.modernTabSwitcher}>
+              {/* Tab 1: YouTube & Instagram */}
               <TouchableOpacity
-                style={[styles.modernTabItem, addTab === 'file' && styles.modernTabItemActive]}
-                onPress={() => setAddTab('file')}
+                style={[styles.modernTabItem, addTab === 'social' && styles.modernTabItemActive]}
+                onPress={() => setAddTab('social')}
                 activeOpacity={0.8}
               >
-                <FileUp
-                  color={addTab === 'file' ? '#FFFFFF' : '#888888'}
-                  size={16}
-                />
+                <Youtube color={addTab === 'social' ? '#FFFFFF' : '#FF0000'} size={14} />
                 <Text
                   style={[
                     styles.modernTabItemText,
-                    addTab === 'file' && styles.modernTabItemTextActive,
+                    addTab === 'social' && styles.modernTabItemTextActive,
                   ]}
+                  numberOfLines={1}
                 >
-                  Upload .torrent
+                  YouTube / Insta
                 </Text>
               </TouchableOpacity>
 
+              {/* Tab 2: HTTP Direct / Magnet */}
               <TouchableOpacity
                 style={[styles.modernTabItem, addTab === 'link' && styles.modernTabItemActive]}
                 onPress={() => setAddTab('link')}
                 activeOpacity={0.8}
               >
-                <Link2
-                  color={addTab === 'link' ? '#FFFFFF' : '#888888'}
-                  size={16}
-                />
+                <Link2 color={addTab === 'link' ? '#FFFFFF' : '#888888'} size={14} />
                 <Text
                   style={[
                     styles.modernTabItemText,
                     addTab === 'link' && styles.modernTabItemTextActive,
                   ]}
+                  numberOfLines={1}
                 >
-                  Magnet / URL
+                  Direct / Magnet
+                </Text>
+              </TouchableOpacity>
+
+              {/* Tab 3: Upload .torrent */}
+              <TouchableOpacity
+                style={[styles.modernTabItem, addTab === 'file' && styles.modernTabItemActive]}
+                onPress={() => setAddTab('file')}
+                activeOpacity={0.8}
+              >
+                <FileUp color={addTab === 'file' ? '#FFFFFF' : '#888888'} size={14} />
+                <Text
+                  style={[
+                    styles.modernTabItemText,
+                    addTab === 'file' && styles.modernTabItemTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  Torrent File
                 </Text>
               </TouchableOpacity>
             </View>
 
-            {/* TAB 1: FILE UPLOAD */}
+            {/* TAB 1: YOUTUBE & INSTAGRAM DOWNLOADER */}
+            {addTab === 'social' && (
+              <View style={styles.tabContentGroup}>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputLabel}>YOUTUBE OR INSTAGRAM VIDEO LINK</Text>
+                  <View style={styles.inputContainer}>
+                    <Youtube color="#FF0000" size={16} style={styles.inputLeadingIcon} />
+                    <TextInput
+                      style={styles.textInputModern}
+                      placeholder="Paste https://youtube.com/watch... or Instagram Reel"
+                      placeholderTextColor="#555555"
+                      value={socialUrl}
+                      onChangeText={(text) => {
+                        setSocialUrl(text);
+                        if (parsedMedia) setParsedMedia(null);
+                      }}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {socialUrl.length > 0 ? (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSocialUrl('');
+                          setParsedMedia(null);
+                        }}
+                        style={styles.inputClearBtn}
+                      >
+                        <X color="#777777" size={15} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={handlePasteToSocial}
+                        style={styles.pasteInlineBtn}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.pasteInlineText}>Paste</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                {parsedMedia && (
+                  <View style={styles.parsedCard}>
+                    <View style={styles.parsedHeaderRow}>
+                      <Image
+                        source={{ uri: parsedMedia.thumbnail }}
+                        style={styles.parsedThumbnail}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.parsedMeta}>
+                        <View style={styles.platformBadge}>
+                          {parsedMedia.platform === 'youtube' ? (
+                            <>
+                              <Youtube color="#FF0000" size={11} />
+                              <Text style={styles.platformBadgeText}>YOUTUBE VIDEO</Text>
+                            </>
+                          ) : parsedMedia.platform === 'instagram' ? (
+                            <>
+                              <Instagram color="#E1306C" size={11} />
+                              <Text style={[styles.platformBadgeText, { color: '#E1306C' }]}>INSTAGRAM REEL</Text>
+                            </>
+                          ) : (
+                            <>
+                              <Film color="#46D369" size={11} />
+                              <Text style={[styles.platformBadgeText, { color: '#46D369' }]}>DIRECT VIDEO</Text>
+                            </>
+                          )}
+                        </View>
+                        <Text style={styles.parsedTitle} numberOfLines={2}>
+                          {parsedMedia.title}
+                        </Text>
+                        {parsedMedia.author ? (
+                          <Text style={styles.parsedAuthor}>{parsedMedia.author}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <Text style={styles.resolutionHeader}>SELECT VIDEO RESOLUTION / QUALITY</Text>
+                    <View style={styles.resolutionGrid}>
+                      {parsedMedia.formats.map((fmt) => {
+                        const isSelected = selectedFormat?.id === fmt.id || selectedFormat?.resolution === fmt.resolution;
+                        return (
+                          <TouchableOpacity
+                            key={fmt.id}
+                            style={[styles.resChip, isSelected && styles.resChipActive]}
+                            onPress={() => setSelectedFormat(fmt)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.resChipText, isSelected && styles.resChipTextActive]}>
+                              {fmt.label || fmt.resolution}
+                            </Text>
+                            {isSelected && <Check color="#FFFFFF" size={11} strokeWidth={2.5} />}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.galleryToggleRow}
+                      onPress={() => setSaveToGalleryToggle((prev) => !prev)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.checkboxSquare, saveToGalleryToggle && styles.checkboxActive]}>
+                        {saveToGalleryToggle && <Check color="#FFFFFF" size={11} strokeWidth={3} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.galleryToggleTitle}>Save directly to Phone Gallery</Text>
+                        <Text style={styles.galleryToggleSub}>Auto-exports video to Camera Roll / Photos App</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* TAB 2: MAGNET / LINK / DIRECT HTTP */}
+            {addTab === 'link' && (
+              <View style={styles.tabContentGroup}>
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputLabel}>DIRECT HTTP MOVIE LINK / MAGNET URL</Text>
+                  <View style={styles.inputContainer}>
+                    <Link2 color="#777777" size={16} style={styles.inputLeadingIcon} />
+                    <TextInput
+                      style={styles.textInputModern}
+                      placeholder="https://.../movie.mp4 or magnet:?xt=urn:..."
+                      placeholderTextColor="#555555"
+                      value={manualUrl}
+                      onChangeText={setManualUrl}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {manualUrl.length > 0 ? (
+                      <TouchableOpacity
+                        onPress={() => setManualUrl('')}
+                        style={styles.inputClearBtn}
+                      >
+                        <X color="#777777" size={15} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={handlePasteFromClipboard}
+                        style={styles.pasteInlineBtn}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.pasteInlineText}>Paste</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                {/* Title Input */}
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputLabel}>MOVIE TITLE (OPTIONAL)</Text>
+                  <View style={styles.inputContainer}>
+                    <Film color="#777777" size={16} style={styles.inputLeadingIcon} />
+                    <TextInput
+                      style={styles.textInputModern}
+                      placeholder="E.g. Inception (2010) 1080p"
+                      placeholderTextColor="#555555"
+                      value={manualTitle}
+                      onChangeText={setManualTitle}
+                    />
+                  </View>
+                </View>
+
+                {/* Custom File Name Input */}
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.inputLabel}>CUSTOM SAVE FILE NAME (OPTIONAL)</Text>
+                  <View style={styles.inputContainer}>
+                    <Folder color="#777777" size={16} style={styles.inputLeadingIcon} />
+                    <TextInput
+                      style={styles.textInputModern}
+                      placeholder="E.g. Inception_1080p.mp4"
+                      placeholderTextColor="#555555"
+                      value={manualFilename}
+                      onChangeText={setManualFilename}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* TAB 3: FILE UPLOAD */}
             {addTab === 'file' && (
               <View style={styles.tabContentGroup}>
                 <TouchableOpacity
@@ -795,7 +1285,7 @@ export const DownloadsScreen: React.FC = () => {
                   ) : (
                     <View style={styles.emptyUploadContent}>
                       <View style={styles.emptyUploadIcon}>
-                        <Upload color={Colors.netflixRed} size={26} />
+                        <Upload color={Colors.netflixRed} size={24} />
                       </View>
                       <Text style={styles.emptyUploadTitle}>Tap to Browse .torrent File</Text>
                       <Text style={styles.emptyUploadSubtitle}>
@@ -808,7 +1298,7 @@ export const DownloadsScreen: React.FC = () => {
                   )}
                 </TouchableOpacity>
 
-                {/* Optional Title Field */}
+                {/* Title Input */}
                 <View style={styles.inputWrapper}>
                   <Text style={styles.inputLabel}>MOVIE TITLE (OPTIONAL)</Text>
                   <View style={styles.inputContainer}>
@@ -822,54 +1312,27 @@ export const DownloadsScreen: React.FC = () => {
                     />
                   </View>
                 </View>
-              </View>
-            )}
 
-            {/* TAB 2: MAGNET / LINK */}
-            {addTab === 'link' && (
-              <View style={styles.tabContentGroup}>
+                {/* Custom File Name Input */}
                 <View style={styles.inputWrapper}>
-                  <Text style={styles.inputLabel}>TORRENT URL OR MAGNET LINK</Text>
+                  <Text style={styles.inputLabel}>CUSTOM SAVE FILE NAME (OPTIONAL)</Text>
                   <View style={styles.inputContainer}>
-                    <Link2 color="#777777" size={16} style={styles.inputLeadingIcon} />
+                    <Folder color="#777777" size={16} style={styles.inputLeadingIcon} />
                     <TextInput
                       style={styles.textInputModern}
-                      placeholder="Paste magnet:?xt=urn:... or .torrent URL"
+                      placeholder="E.g. Leo_2023_1080p.mkv"
                       placeholderTextColor="#555555"
-                      value={manualUrl}
-                      onChangeText={setManualUrl}
+                      value={manualFilename}
+                      onChangeText={setManualFilename}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
-                    {manualUrl.length > 0 && (
-                      <TouchableOpacity
-                        onPress={() => setManualUrl('')}
-                        style={styles.inputClearBtn}
-                      >
-                        <X color="#777777" size={15} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-
-                {/* Optional Title Field */}
-                <View style={styles.inputWrapper}>
-                  <Text style={styles.inputLabel}>MOVIE TITLE (OPTIONAL)</Text>
-                  <View style={styles.inputContainer}>
-                    <Film color="#777777" size={16} style={styles.inputLeadingIcon} />
-                    <TextInput
-                      style={styles.textInputModern}
-                      placeholder="E.g. Inception 2010 1080p"
-                      placeholderTextColor="#555555"
-                      value={manualTitle}
-                      onChangeText={setManualTitle}
-                    />
                   </View>
                 </View>
               </View>
             )}
 
-            {/* Internal Storage Location Info Pill */}
+            {/* Storage Info Banner */}
             <View style={styles.storageInfoBanner}>
               <Folder color="#46D369" size={15} />
               <Text style={styles.storageInfoText} numberOfLines={1}>
@@ -880,11 +1343,17 @@ export const DownloadsScreen: React.FC = () => {
               </Text>
             </View>
 
-            {/* Gradient Action Button */}
+            {/* Submit Action Button */}
             <TouchableOpacity
               style={styles.submitButtonTouchable}
               onPress={() => {
-                if (addTab === 'file' && !selectedTorrentFile) {
+                if (addTab === 'social') {
+                  if (!parsedMedia) {
+                    handleParseSocialVideo();
+                  } else {
+                    handleStartSocialDownload();
+                  }
+                } else if (addTab === 'file' && !selectedTorrentFile) {
                   handlePickTorrentFile();
                 } else {
                   handleAddDownload();
@@ -893,20 +1362,24 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={[Colors.primary, '#B51527']}
+                colors={addTab === 'social' ? ['#FF0000', '#B51527'] : [Colors.netflixRed, '#B51527']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.submitGradient}
               >
-                <Download color="#FFFFFF" size={18} />
+                <Download color="#FFFFFF" size={18} strokeWidth={2.2} />
                 <Text style={styles.submitButtonText}>
-                  {addTab === 'file'
+                  {addTab === 'social'
+                    ? parsedMedia
+                      ? `Start Downloading Video (${selectedFormat?.resolution || '1080p'})`
+                      : 'Parse Video & Select Resolution'
+                    : addTab === 'file'
                     ? selectedTorrentFile
                       ? 'Start Downloading Movie'
                       : 'Browse & Pick .torrent File'
                     : manualUrl.trim()
                     ? 'Start Downloading Movie'
-                    : 'Paste Magnet Link to Download'}
+                    : 'Paste Magnet Link or Direct HTTP Link'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -914,7 +1387,7 @@ export const DownloadsScreen: React.FC = () => {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Netflix Offline Video Player Modal */}
+      {/* Offline Video Player Modal */}
       <OfflinePlayerModal
         visible={playerModalVisible}
         item={selectedMovie}
@@ -927,16 +1400,19 @@ export const DownloadsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#0F1015',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#262626',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1C24',
+  },
+  headerTitleGroup: {
+    flex: 1,
   },
   headerTitle: {
     color: '#FFFFFF',
@@ -944,68 +1420,147 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
-  headerSubtitle: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  addBtn: {
+  serverBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.netflixRed,
+    marginTop: 4,
+  },
+  serverPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  serverStatusText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  readyCountText: {
+    color: '#8E8E93',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  clearAllSectionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 69, 58, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.35)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  clearAllSectionText: {
+    color: '#FF453A',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  clearAllHeaderBtnText: {
+    color: '#FF453A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  importHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#1E202A',
+    borderWidth: 1,
+    borderColor: '#2D303E',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
   },
-  addBtnText: {
-    color: '#FFFFFF',
+  importHeaderBtnText: {
+    color: '#E5E5EA',
     fontSize: 12,
     fontWeight: '700',
+  },
+  addIconHeaderBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    overflow: 'hidden',
+  },
+  addIconHeaderGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
   },
   storageCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 20,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 22,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#232632',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   storageHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 12,
+  },
+  storageIconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  storageHeaderTitleGroup: {
+    flex: 1,
   },
   storageTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    flex: 1,
   },
-  storageStats: {
-    color: Colors.textSecondary,
+  storageStatsText: {
+    color: '#8E8E93',
     fontSize: 11,
+    marginTop: 1,
   },
   storageBarTrack: {
-    height: 7,
-    backgroundColor: '#2A2A2A',
+    height: 8,
+    backgroundColor: '#1E202B',
     borderRadius: 4,
     flexDirection: 'row',
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   storageBarApp: {
     backgroundColor: Colors.netflixRed,
     height: '100%',
   },
   storageBarOther: {
-    backgroundColor: '#555555',
+    backgroundColor: '#4A4E5D',
     height: '100%',
   },
   storageLegend: {
@@ -1024,40 +1579,78 @@ const styles = StyleSheet.create({
     borderRadius: 3.5,
   },
   legendText: {
-    color: Colors.textSecondary,
+    color: '#8E8E93',
     fontSize: 10,
+    fontWeight: '500',
   },
   folderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#2C2C2C',
+    borderTopColor: '#232632',
     gap: 8,
   },
   folderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     flex: 1,
   },
+  folderIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(70, 211, 105, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  folderTextWrapper: {
+    flex: 1,
+    gap: 1,
+  },
   folderPathText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  folderSubText: {
     color: '#8E8E93',
-    fontSize: 11,
-    fontWeight: '500',
+    fontSize: 10,
+  },
+  folderActionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  importQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#1E202B',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2D303E',
+  },
+  importQuickText: {
+    color: '#DDDDDD',
+    fontSize: 10,
+    fontWeight: '600',
   },
   rescanStorageBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(250, 36, 60, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: 'rgba(250, 36, 60, 0.3)',
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
   },
   rescanStorageText: {
     color: Colors.netflixRed,
@@ -1067,22 +1660,42 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   sectionTitle: {
     color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '700',
-    marginBottom: 12,
     letterSpacing: 0.3,
   },
+  activePulseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  activePulseText: {
+    color: Colors.netflixRed,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   queueList: {
-    gap: 10,
+    gap: 12,
   },
   activeCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
+    backgroundColor: '#181A20',
+    borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#262934',
   },
   activeTopRow: {
     flexDirection: 'row',
@@ -1090,10 +1703,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   activeThumbnail: {
-    width: 50,
-    height: 65,
-    borderRadius: 6,
-    backgroundColor: '#141414',
+    width: 52,
+    height: 68,
+    borderRadius: 8,
+    backgroundColor: '#121318',
   },
   activeMetaGroup: {
     flex: 1,
@@ -1127,13 +1740,13 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#252834',
     justifyContent: 'center',
     alignItems: 'center',
   },
   activeProgressTrack: {
     height: 4,
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#252834',
     borderRadius: 2,
     marginTop: 10,
     overflow: 'hidden',
@@ -1142,42 +1755,92 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   emptyState: {
-    backgroundColor: '#1C1C1C',
-    borderRadius: 10,
-    padding: 30,
+    backgroundColor: '#181A20',
+    borderRadius: 16,
+    padding: 28,
     alignItems: 'center',
     gap: 10,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#262934',
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   emptyTitle: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
   },
   emptySubtitle: {
     color: '#8E8E93',
     fontSize: 12,
     textAlign: 'center',
-    lineHeight: 17,
+    lineHeight: 18,
+    maxWidth: 290,
+  },
+  emptyActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  emptyScanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.netflixRed,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  emptyScanBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyImportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#252834',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#343848',
+  },
+  emptyImportBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   completedList: {
     gap: 14,
   },
   movieCard: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
+    backgroundColor: '#181A20',
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2A2A2A',
-    height: 145,
+    borderColor: '#262934',
+    padding: 10,
+    alignItems: 'center',
   },
   posterWrapper: {
-    width: 105,
-    height: '100%',
+    width: 82,
+    height: 114,
+    borderRadius: 10,
+    overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#141414',
+    backgroundColor: '#121318',
   },
   posterImage: {
     width: '100%',
@@ -1194,10 +1857,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(250, 36, 60, 0.9)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(250, 36, 60, 0.92)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1208,10 +1871,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   resBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   resBadgeText: {
     color: '#FFFFFF',
@@ -1222,10 +1885,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   offlineBadgeText: {
     color: '#46D369',
@@ -1234,92 +1897,129 @@ const styles = StyleSheet.create({
   },
   movieDetails: {
     flex: 1,
-    padding: 12,
+    marginLeft: 12,
     justifyContent: 'space-between',
+    overflow: 'hidden',
+    gap: 6,
   },
   movieTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '700',
   },
   movieFileName: {
     color: '#8E8E93',
-    fontSize: 11,
-    marginTop: -2,
+    fontSize: 10.5,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
+    gap: 5,
   },
   metaSize: {
     color: '#46D369',
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
   },
   metaDot: {
-    color: '#555555',
+    color: '#444444',
   },
-  metaDate: {
-    color: '#AAAAAA',
-    fontSize: 11,
+  storageLocationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    flex: 1,
+  },
+  storageLocationText: {
+    color: '#46D369',
+    fontSize: 9.5,
+    fontWeight: '700',
   },
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginTop: 6,
+    flexWrap: 'wrap',
   },
   playNetflixBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 4,
     backgroundColor: Colors.netflixRed,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 7,
   },
   playNetflixText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: '700',
   },
   externalPlayerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#2A2A2A',
-    borderWidth: 0.5,
-    borderColor: '#444444',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 6,
+    gap: 3,
+    backgroundColor: '#252834',
+    borderWidth: 1,
+    borderColor: '#343848',
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 7,
   },
   externalPlayerText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
   },
   iconActionBtn: {
-    padding: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: '#222530',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 69, 58, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pasteInlineBtn: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+    marginRight: 6,
+  },
+  pasteInlineText: {
+    color: Colors.netflixRed,
+    fontSize: 11,
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    backgroundColor: 'rgba(0, 0, 0, 0.82)',
     justifyContent: 'flex-end',
   },
   modalBackdropDismiss: {
     flex: 1,
   },
   modernModalSheet: {
-    backgroundColor: Colors.surface,
+    backgroundColor: '#181A20',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     paddingHorizontal: 20,
     paddingTop: 12,
     borderWidth: 1,
-    borderColor: '#2C2C2C',
+    borderColor: '#262934',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.5,
@@ -1330,7 +2030,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#3E3E3E',
+    backgroundColor: '#343848',
     alignSelf: 'center',
     marginBottom: 16,
   },
@@ -1349,97 +2049,82 @@ const styles = StyleSheet.create({
   sheetIconCircle: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: 'rgba(250, 36, 60, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.3)',
   },
   sheetTitle: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+    fontSize: 16,
+    fontWeight: '700',
   },
   sheetSubtitle: {
     color: '#8E8E93',
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 1,
   },
   sheetCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: '#383838',
+    padding: 6,
   },
   modernTabSwitcher: {
     flexDirection: 'row',
-    backgroundColor: '#121212',
-    borderRadius: 14,
+    backgroundColor: '#12141A',
+    borderRadius: 12,
     padding: 4,
     marginBottom: 18,
-    borderWidth: 1,
-    borderColor: '#262626',
   },
   modernTabItem: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 9,
-    borderRadius: 10,
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 9,
   },
   modernTabItemActive: {
-    backgroundColor: '#262626',
-    borderWidth: 0.5,
-    borderColor: 'rgba(250, 36, 60, 0.5)',
+    backgroundColor: Colors.netflixRed,
   },
   modernTabItemText: {
-    color: '#888888',
+    color: '#8E8E93',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modernTabItemTextActive: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '700',
   },
   tabContentGroup: {
     gap: 14,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   modernUploadZone: {
-    backgroundColor: '#141414',
-    borderRadius: 16,
+    backgroundColor: '#12141A',
+    borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: '#2E2E2E',
+    borderColor: '#2A2D3A',
     borderStyle: 'dashed',
-    padding: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 16,
   },
   modernUploadZoneSelected: {
     borderColor: '#46D369',
     borderStyle: 'solid',
-    backgroundColor: 'rgba(70, 211, 105, 0.06)',
+    backgroundColor: 'rgba(70, 211, 105, 0.05)',
   },
   emptyUploadContent: {
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    paddingVertical: 12,
   },
   emptyUploadIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(250, 36, 60, 0.12)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   emptyUploadTitle: {
     color: '#FFFFFF',
@@ -1447,19 +2132,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   emptyUploadSubtitle: {
-    color: '#888888',
+    color: '#8E8E93',
     fontSize: 11,
     textAlign: 'center',
-    paddingHorizontal: 20,
   },
   browseActionPill: {
-    marginTop: 8,
-    backgroundColor: 'rgba(250, 36, 60, 0.2)',
+    marginTop: 6,
+    backgroundColor: 'rgba(250, 36, 60, 0.18)',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.4)',
+    borderColor: 'rgba(250, 36, 60, 0.35)',
   },
   browseActionText: {
     color: '#FF6B6B',
@@ -1497,7 +2181,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sizeBadge: {
-    backgroundColor: '#262626',
+    backgroundColor: '#252834',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -1519,7 +2203,7 @@ const styles = StyleSheet.create({
   },
   changeFileBtn: {
     padding: 6,
-    backgroundColor: '#262626',
+    backgroundColor: '#252834',
     borderRadius: 14,
   },
   inputWrapper: {
@@ -1535,10 +2219,10 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#121212',
+    backgroundColor: '#12141A',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#2A2D3A',
     paddingHorizontal: 12,
   },
   inputLeadingIcon: {
@@ -1559,9 +2243,9 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: 'rgba(70, 211, 105, 0.08)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 9,
     borderRadius: 10,
-    borderWidth: 0.5,
+    borderWidth: 1,
     borderColor: 'rgba(70, 211, 105, 0.25)',
     marginBottom: 16,
   },
@@ -1592,95 +2276,216 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.2,
   },
-  headerTitleGroup: {
-    flex: 1,
-  },
-  headerRightActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  importHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#242424',
+  galleryIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
     borderWidth: 1,
-    borderColor: '#383838',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
+    borderColor: 'rgba(48, 209, 88, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  importHeaderBtnText: {
+  parseBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  parseBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  parseBtnText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
-  folderTextWrapper: {
-    flex: 1,
-    gap: 1,
+  parsedCard: {
+    backgroundColor: '#12141A',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#2A2D3A',
+    gap: 12,
   },
-  folderSubText: {
-    color: '#777777',
-    fontSize: 9,
-    fontWeight: '500',
-  },
-  folderActionsRight: {
+  parsedHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 12,
   },
-  importQuickBtn: {
+  parsedThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    backgroundColor: '#1C1F2B',
+  },
+  parsedMeta: {
+    flex: 1,
+    gap: 3,
+  },
+  platformBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#262626',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: '#3A3A3A',
   },
-  importQuickText: {
-    color: '#DDDDDD',
-    fontSize: 10,
-    fontWeight: '600',
+  platformBadgeText: {
+    color: '#FF0000',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  emptyActionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-  },
-  emptyScanBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.netflixRed,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  emptyScanBtnText: {
+  parsedTitle: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
-  emptyImportBtn: {
+  parsedAuthor: {
+    color: '#8E8E93',
+    fontSize: 11,
+  },
+  resolutionHeader: {
+    color: '#8E8E93',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  resolutionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  resChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#282828',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: 4,
+    backgroundColor: '#1C1F2B',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#3A3A3A',
+    borderColor: '#2D303E',
   },
-  emptyImportBtnText: {
+  resChipActive: {
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
+    borderColor: Colors.netflixRed,
+  },
+  resChipText: {
+    color: '#8E8E93',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  resChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  galleryToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(48, 209, 88, 0.08)',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.25)',
+  },
+  checkboxSquare: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#343848',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#181A20',
+  },
+  checkboxActive: {
+    backgroundColor: '#30D158',
+    borderColor: '#30D158',
+  },
+  galleryToggleTitle: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
+  },
+  galleryToggleSub: {
+    color: '#8E8E93',
+    fontSize: 10,
+  },
+  hubSection: {
+    marginBottom: 20,
+  },
+  hubSectionTitle: {
+    color: '#8E8E93',
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    paddingLeft: 2,
+  },
+  hubGrid: {
+    gap: 10,
+  },
+  hubGridRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  hubCard: {
+    flex: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#262934',
+  },
+  hubCardDisabled: {
+    opacity: 0.85,
+  },
+  hubCardGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    gap: 9,
+  },
+  hubIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  hubCardInfo: {
+    flex: 1,
+    gap: 2,
+    overflow: 'hidden',
+  },
+  hubHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+  },
+  hubCardTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
+  },
+  hubBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  hubBadgeText: {
+    fontSize: 7.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  hubCardSubtitle: {
+    color: '#8E8E93',
+    fontSize: 10,
+    lineHeight: 13,
   },
 });

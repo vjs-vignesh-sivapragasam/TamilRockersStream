@@ -356,11 +356,11 @@ export async function resolveTorrentMoviePayload(
   totalBytes: number;
   torrentMetadata?: ParsedTorrentInfo;
 }> {
-  // If it's a magnet link
-  if (torrentUrl.startsWith('magnet:?')) {
-    const magnet = parseMagnetUri(torrentUrl);
+  const infoHash = extractInfoHashFromUrl(torrentUrl);
+  if (torrentUrl.startsWith('magnet:?') || infoHash) {
+    const magnet = torrentUrl.startsWith('magnet:?') ? parseMagnetUri(torrentUrl) : null;
     return {
-      title: suggestedTitle || magnet?.name || 'Torrent Movie',
+      title: suggestedTitle || (magnet?.name && magnet.name !== 'Torrent Download' ? magnet.name : (infoHash ? `Movie (${infoHash.substring(0, 8)})` : 'Torrent Movie')),
       movieFileName: `${magnet?.name || 'Movie'}.mp4`,
       totalBytes: 0,
       torrentMetadata: magnet || undefined,

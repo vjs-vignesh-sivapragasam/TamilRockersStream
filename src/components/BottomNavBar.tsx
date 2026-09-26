@@ -97,6 +97,7 @@ function TabItem({
 
         {/* Label fades in when active */}
         <Animated.Text
+          numberOfLines={1}
           style={[
             styles.tabLabel,
             {
@@ -166,7 +167,7 @@ const styles = StyleSheet.create({
   tabsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 6,
+    paddingHorizontal: 2,
     paddingTop: 6,
     paddingBottom: 4,
   },
@@ -179,9 +180,9 @@ const styles = StyleSheet.create({
   tabInner: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    minWidth: 60,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    width: '100%',
     gap: 3,
   },
 
@@ -233,7 +234,8 @@ const styles = StyleSheet.create({
 
   /* Label */
   tabLabel: {
-    fontSize: 10,
-    letterSpacing: 0.1,
+    fontSize: 9.5,
+    textAlign: 'center',
+    letterSpacing: -0.1,
   },
 });

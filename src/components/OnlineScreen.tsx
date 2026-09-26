@@ -294,7 +294,7 @@ export const OnlineScreen: React.FC = () => {
                 style={styles.backendInput}
                 value={backendInput}
                 onChangeText={setBackendInput}
-                placeholder="http://192.168.1.x:3000"
+                placeholder="http://192.168.1.x:3002"
                 placeholderTextColor={Colors.secondaryText}
                 autoCapitalize="none"
                 autoCorrect={false}

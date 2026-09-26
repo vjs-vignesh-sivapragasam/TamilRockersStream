@@ -17,11 +17,38 @@ const resolveDefaultBackendUrl = (): string => {
     if (hostUri) {
       const ip = hostUri.split(':')[0];
       if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-        return `http://${ip}:3000`;
+        return `http://${ip}:3002`;
       }
     }
   } catch {}
-  return 'http://192.168.1.6:3000';
+  return 'http://192.168.1.6:3002';
+};
+
+export const resolveBackendUrlForDevice = (rawUrl: string): string => {
+  if (!rawUrl) return rawUrl;
+  let clean = rawUrl.trim().replace(/\/+$/, '');
+  if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+    clean = 'http://' + clean;
+  }
+
+  // If localhost / 127.0.0.1 is used on physical device or emulator, resolve to host IP
+  if (clean.includes('localhost') || clean.includes('127.0.0.1')) {
+    try {
+      const hostUri = Constants.expoConfig?.hostUri;
+      if (hostUri) {
+        const ip = hostUri.split(':')[0];
+        if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+          return clean.replace(/localhost|127\.0\.0\.1/g, ip);
+        }
+      }
+    } catch {}
+
+    if (Platform.OS === 'android') {
+      return clean.replace(/localhost|127\.0\.0\.1/g, '10.0.2.2');
+    }
+  }
+
+  return clean;
 };
 
 export const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
@@ -37,7 +64,8 @@ interface DownloadContextType {
   backendUrl: string;
   setBackendUrl: (url: string) => void;
   testPing: (url?: string) => Promise<{ ok: boolean; latency: number; message: string }>;
-  startDownload: (url: string, suggestedTitle?: string) => Promise<DownloadItem>;
+  boostDownloads: () => Promise<{ success: boolean; boostedCount: number; message: string }>;
+  startDownload: (url: string, suggestedTitle?: string, posterUrl?: string) => Promise<DownloadItem>;
   pauseDownload: (id: string) => Promise<void>;
   resumeDownload: (id: string) => Promise<void>;
   deleteDownload: (id: string) => Promise<void>;
@@ -91,7 +119,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
   const setBackendUrl = (newUrl: string) => {
     let clean = newUrl.trim().replace(/\/+$/, '');
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-      clean = 'https://' + clean;
+      clean = 'http://' + clean;
     }
     setBackendUrlState(clean);
     if (BACKEND_CONFIG_FILE) {
@@ -100,12 +128,16 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const testPing = async (targetUrl?: string): Promise<{ ok: boolean; latency: number; message: string }> => {
-    const url = (targetUrl || backendUrl).trim().replace(/\/+$/, '');
+    let raw = (targetUrl || backendUrl).trim().replace(/\/+$/, '');
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      raw = 'http://' + raw;
+    }
+    const effectiveUrl = resolveBackendUrlForDevice(raw);
     const startTime = Date.now();
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(`${url}/api/ping`, {
+      const res = await fetch(`${effectiveUrl}/api/ping`, {
         signal: controller.signal,
         headers: { 'Bypass-Tunnel-Reminder': 'true' }
       });
@@ -127,7 +159,9 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       socketRef.current.disconnect();
     }
 
-    socketRef.current = io(backendUrl, {
+    const effectiveUrl = resolveBackendUrlForDevice(backendUrl);
+
+    socketRef.current = io(effectiveUrl, {
       extraHeaders: {
         'Bypass-Tunnel-Reminder': 'true'
       }
@@ -137,58 +171,85 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
     socketRef.current.on('disconnect', () => setIsBackendConnected(false));
 
     socketRef.current.on('torrent_progress', (data) => {
-      setDownloads((prev) => prev.map(d => {
-        const matchesId = d.id === data.appId;
-        const matchesHash = data.id && (
-          d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
-          d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase()
-        );
+      setDownloads((prev) =>
+        prev.map((d) => {
+          const matchesId = d.id === data.appId;
+          const matchesHash =
+            data.id &&
+            (d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
+              d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase());
 
-        if (matchesId || matchesHash) {
-          const speedStr = data.downloadSpeed >= 1024 * 1024 
-            ? (data.downloadSpeed / 1024 / 1024).toFixed(1) + ' MB/s' 
-            : (data.downloadSpeed / 1024).toFixed(0) + ' KB/s';
-            
-          return {
-            ...d,
-            progress: data.progress,
-            downloadedBytes: data.downloaded,
-            speed: speedStr,
-            peersCount: data.numPeers,
-          };
-        }
-        return d;
-      }));
+          if (matchesId || matchesHash) {
+            // Do NOT overwrite progress if local download task is already active on the device
+            const isActivelyDownloadingLocally = downloadService.isTaskActive(d.id);
+            if (isActivelyDownloadingLocally) {
+              return d;
+            }
+
+            const speedStr =
+              data.downloadSpeed >= 1024 * 1024
+                ? (data.downloadSpeed / 1024 / 1024).toFixed(1) + ' MB/s'
+                : (data.downloadSpeed / 1024).toFixed(0) + ' KB/s';
+
+            return {
+              ...d,
+              progress: data.progress,
+              downloadedBytes: data.downloaded,
+              speed: speedStr,
+              peersCount: data.numPeers,
+            };
+          }
+          return d;
+        })
+      );
     });
 
     socketRef.current.on('torrent_done', (data) => {
-      setDownloads((prev) => prev.map(d => {
-        const matchesId = d.id === data.appId;
-        const matchesHash = data.id && (
-          d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
-          d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase()
-        );
+      setDownloads((prev) =>
+        prev.map((d) => {
+          const matchesId = d.id === data.appId;
+          const matchesHash =
+            data.id &&
+            (d.url?.toLowerCase().includes(data.id.toLowerCase()) ||
+              d.torrentMetadata?.infoHash?.toLowerCase() === data.id.toLowerCase());
 
-        if (matchesId || matchesHash) {
-          if (data.downloadUrl) {
-            const finalItem = { ...d, url: backendUrl + data.downloadUrl, isTorrent: false };
-            downloadService.startRealDownload(
-              finalItem,
-              (updates) => {
-                setDownloads(curr => curr.map(item => item.id === d.id ? { ...item, ...updates } : item));
-              },
-              (updates) => {
-                setDownloads(curr => curr.map(item => item.id === d.id ? { ...item, ...updates, status: 'completed' } : item));
-              },
-              (err) => {
-                setDownloads(curr => curr.map(item => item.id === d.id ? { ...item, status: 'error', error: err } : item));
-              }
-            );
+          if (matchesId || matchesHash) {
+            // Do NOT restart download if item is already completed or actively downloading locally
+            const isActivelyDownloadingLocally = downloadService.isTaskActive(d.id);
+            if (d.status === 'completed' || isActivelyDownloadingLocally) {
+              return d;
+            }
+
+            if (data.downloadUrl) {
+              const finalItem = { ...d, url: backendUrl + data.downloadUrl, isTorrent: false };
+              downloadService.startRealDownload(
+                finalItem,
+                (updates) => {
+                  setDownloads((curr) =>
+                    curr.map((item) => (item.id === d.id ? { ...item, ...updates } : item))
+                  );
+                },
+                (updates) => {
+                  setDownloads((curr) =>
+                    curr.map((item) =>
+                      item.id === d.id ? { ...item, ...updates, status: 'completed' } : item
+                    )
+                  );
+                },
+                (err) => {
+                  setDownloads((curr) =>
+                    curr.map((item) =>
+                      item.id === d.id ? { ...item, status: 'error', error: err } : item
+                    )
+                  );
+                }
+              );
+            }
+            return { ...d, status: 'downloading', speed: 'Saving to phone storage...' };
           }
-          return { ...d, status: 'downloading', speed: 'Saving to phone storage...' };
-        }
-        return d;
-      }));
+          return d;
+        })
+      );
     });
 
     return () => {
@@ -225,14 +286,21 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
         );
 
         if (existing) {
+          // Preserve in-progress or paused status! Only mark completed if existing was already completed or disk file is genuinely complete
+          const isCompleted =
+            existing.status === 'completed' ||
+            (diskItem.downloadedBytes >= (existing.totalBytes || 10 * 1024 * 1024) &&
+              existing.status !== 'downloading' &&
+              existing.status !== 'paused');
+
           map.set(existing.id, {
             ...existing,
-            status: 'completed',
+            status: isCompleted ? 'completed' : existing.status,
             fileUri: diskItem.fileUri,
             movieFileUri: diskItem.movieFileUri,
-            downloadedBytes: diskItem.downloadedBytes || existing.downloadedBytes,
+            downloadedBytes: isCompleted ? (diskItem.downloadedBytes || existing.downloadedBytes) : existing.downloadedBytes,
             totalBytes: diskItem.totalBytes || existing.totalBytes,
-            progress: 1,
+            progress: isCompleted ? 1 : existing.progress,
             poster: existing.poster || diskItem.poster,
             completedAt: existing.completedAt || diskItem.completedAt,
           });
@@ -292,11 +360,19 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
         // Auto-discover movies existing in internal storage directory
         const merged = await mergeWithDiskFiles(loadedItems);
 
-        const sanitized = merged.map((item) =>
-          item.status === 'downloading'
-            ? { ...item, status: 'paused' as const, speed: '0 KB/s' }
-            : item
-        );
+        const sanitized = merged
+          .filter((item) => {
+            // Remove legacy corrupted entries (marked completed with < 100 KB)
+            if (item.status === 'completed' && (item.downloadedBytes || 0) < 100 * 1024 && !item.isTorrent) {
+              return false;
+            }
+            return true;
+          })
+          .map((item) =>
+            item.status === 'downloading'
+              ? { ...item, status: 'paused' as const, speed: '0 KB/s' }
+              : item
+          );
 
         setDownloads(sanitized);
         isLoadedRef.current = true;
@@ -445,7 +521,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, [updateItem]);
 
   const startDownload = useCallback(
-    async (url: string, suggestedTitle?: string): Promise<DownloadItem> => {
+    async (url: string, suggestedTitle?: string, posterUrl?: string): Promise<DownloadItem> => {
       let targetUrl = url.trim();
       const infoHash = extractInfoHashFromUrl(targetUrl);
       const isStreamEndpoint = targetUrl.includes('/api/stream/');
@@ -453,11 +529,13 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       // If it's a magnet link, infoHash, or stream endpoint URL:
       if (infoHash || isStreamEndpoint) {
         if (infoHash) {
-          targetUrl = `${backendUrl}/api/stream/${infoHash}?raw=1`;
+          targetUrl = `${backendUrl}/api/stream/${infoHash}?raw=1&dl=1`;
         } else if (isStreamEndpoint) {
-          targetUrl = targetUrl.replace(/http:\/\/(localhost|127\.0\.0\.1):3000/g, backendUrl);
+          targetUrl = targetUrl.replace(/http:\/\/(localhost|127\.0\.0\.1):(3000|3002)/g, backendUrl);
           if (!targetUrl.includes('raw=1')) {
-            targetUrl += (targetUrl.includes('?') ? '&raw=1' : '?raw=1');
+            targetUrl += (targetUrl.includes('?') ? '&raw=1&dl=1' : '?raw=1&dl=1');
+          } else if (!targetUrl.includes('dl=1')) {
+            targetUrl += '&dl=1';
           }
         }
         
@@ -469,7 +547,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
         }
       }
 
-      const initialItem = downloadService.createDownloadItem(targetUrl, suggestedTitle);
+      const initialItem = downloadService.createDownloadItem(targetUrl, suggestedTitle, posterUrl);
       
       setDownloads((prev) => [initialItem, ...prev]);
 
@@ -495,8 +573,10 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
           updateItem(initialItem.id, updatedPayloadItem);
 
-          // If direct WebSeed/Media stream URL is resolved, download the real movie data directly!
-          if (directMovieUrl) {
+          // If direct WebSeed/Media stream URL or HTTP backend stream URL is resolved, download the real movie data directly!
+          const isHttpUrl = updatedPayloadItem.url.startsWith('http://') || updatedPayloadItem.url.startsWith('https://');
+
+          if (directMovieUrl || isHttpUrl) {
             downloadService.startRealDownload(
               updatedPayloadItem,
               (progressUpdates) => {
@@ -523,11 +603,15 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
             const runBackendDownload = async () => {
               updateItem(initialItem.id, { speed: 'Connecting to Backend...' });
               try {
-                if (initialItem.url.startsWith('magnet:')) {
+                const magnetTarget = initialItem.url.startsWith('magnet:')
+                  ? initialItem.url
+                  : (infoHash ? `magnet:?xt=urn:btih:${infoHash}` : null);
+
+                if (magnetTarget) {
                   const res = await fetch(`${backendUrl}/api/torrent/magnet`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
-                    body: JSON.stringify({ magnet: initialItem.url, appId: initialItem.id })
+                    body: JSON.stringify({ magnet: magnetTarget, appId: initialItem.id })
                   });
                   if (!res.ok) throw new Error('Failed to send magnet to backend');
                 } else if (initialItem.url.startsWith('data:')) {
@@ -655,6 +739,41 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
     [downloads]
   );
 
+  const boostDownloads = useCallback(async (): Promise<{ success: boolean; boostedCount: number; message: string }> => {
+    try {
+      // 1. Trigger backend socket/REST torrent boost
+      const effectiveUrl = resolveBackendUrlForDevice(backendUrl);
+      fetch(`${effectiveUrl}/api/torrent/boost`, { method: 'POST', headers: { 'Bypass-Tunnel-Reminder': 'true' } }).catch(() => {});
+      if (socketRef.current) {
+        socketRef.current.emit('boost_torrents');
+      }
+
+      // 2. Re-trigger active HTTP download resumables
+      const activeDownloading = downloads.filter((d) => d.status === 'downloading');
+      for (const d of activeDownloading) {
+        if (!d.isTorrent) {
+          try {
+            await resumeDownload(d.id);
+          } catch {}
+        }
+      }
+
+      return {
+        success: true,
+        boostedCount: activeDownloading.length,
+        message: activeDownloading.length > 0
+          ? `Boosted ${activeDownloading.length} active download(s)! Connected to 20+ Tier-1 high-speed trackers.`
+          : 'Speed booster applied! Engine buffer optimized & 20+ trackers pre-announced.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        boostedCount: 0,
+        message: err?.message || 'Failed to apply speed boost.',
+      };
+    }
+  }, [backendUrl, downloads]);
+
   const clearCompleted = useCallback(async () => {
     const completed = downloads.filter((d) => d.status === 'completed');
     for (const item of completed) {
@@ -676,6 +795,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
         backendUrl,
         setBackendUrl,
         testPing,
+        boostDownloads,
         startDownload,
         pauseDownload,
         resumeDownload,

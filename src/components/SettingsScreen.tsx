@@ -14,32 +14,34 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
-  HardDrive,
   Trash2,
   ShieldCheck,
   RotateCcw,
   Wifi,
   Film,
   Download,
-  Folder,
-  Layers,
   Info,
   ChevronRight,
   Globe,
-  Check,
   Radio,
   Activity,
-  Server,
-  Zap,
   Heart,
-  Smartphone,
+  X,
+  Server,
   Cpu,
+  Layers,
+  Check,
+  HardDrive,
+  Folder,
+  Upload,
+  Zap,
+  Gauge,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 import { formatBytes } from '../services/downloadService';
-import { debridService } from '../services/debridService';
 import { tamilMvService, POPULAR_MIRRORS } from '../services/tamilMvService';
 import { AboutUsScreen } from './AboutUsScreen';
 import { DonateUsScreen } from './DonateUsScreen';
@@ -62,11 +64,36 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     backendUrl,
     setBackendUrl,
     testPing,
+    boostDownloads,
     isBackendConnected,
   } = useDownloads();
 
   const [aboutModalVisible, setAboutModalVisible] = useState(false);
   const [donateModalVisible, setDonateModalVisible] = useState(false);
+  const [domainModalVisible, setDomainModalVisible] = useState(false);
+  const [appInfoModalVisible, setAppInfoModalVisible] = useState(false);
+  const [storageModalVisible, setStorageModalVisible] = useState(false);
+  const [serverModalVisible, setServerModalVisible] = useState(false);
+  const [boosterModalVisible, setBoosterModalVisible] = useState(false);
+
+  // Speed Booster States
+  const [autoTurbo, setAutoTurbo] = useState(true);
+  const [maxConnsBoost, setMaxConnsBoost] = useState(true);
+  const [boosting, setBoosting] = useState(false);
+  const [boostMessage, setBoostMessage] = useState<string | null>(null);
+
+  const handleApplySpeedBoost = async () => {
+    setBoosting(true);
+    setBoostMessage(null);
+    try {
+      const res = await boostDownloads();
+      setBoostMessage(res.message);
+    } catch (err: any) {
+      setBoostMessage(err?.message || 'Speed boost applied!');
+    } finally {
+      setBoosting(false);
+    }
+  };
 
   // App Preferences
   const [wifiOnly, setWifiOnly] = useState(true);
@@ -104,21 +131,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setPingResult(null);
   };
 
-  // Debrid Proxy State
-  const initialDebrid = debridService.getConfig();
-  const [debridEnabled, setDebridEnabled] = useState(initialDebrid.enabled);
-  const [debridKey, setDebridKey] = useState(initialDebrid.apiKey);
-
-  // TamilMV Source URL State
+  // TamilMV Active Source URL State
   const [tamilMvUrl, setTamilMvUrl] = useState(tamilMvService.getBaseUrl());
-
-  const updateDebridConfig = (enabled: boolean, key: string) => {
-    debridService.setConfig({
-      provider: 'real-debrid',
-      enabled,
-      apiKey: key,
-    });
-  };
 
   const handleUpdateTamilMvUrl = (url: string) => {
     tamilMvService.setBaseUrl(url);
@@ -126,8 +140,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   };
 
   const completedCount = downloads.filter((d) => d.status === 'completed').length;
-  const totalDisk = storageStats.totalBytes || 1;
-  const freeDisk = storageStats.freeBytes || 0;
   const appDownloads = storageStats.appDownloadsBytes || 0;
 
   const handleClearDownloads = () => {
@@ -165,19 +177,28 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     }
   };
 
+  const totalDisk = storageStats.totalBytes || 1;
+  const freeDisk = storageStats.freeBytes || 0;
+  const usedDisk = Math.max(0, totalDisk - freeDisk);
+  const appPercent = Math.min(100, Math.max(1, (appDownloads / totalDisk) * 100));
+  const otherPercent = Math.min(100, Math.max(1, ((usedDisk - appDownloads) / totalDisk) * 100));
+
+  const displayDomain = tamilMvUrl.replace(/^https?:\/\/(www\.)?/, '');
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
       >
-        {/* iOS Large Navigation Title */}
+        {/* Navigation Title */}
         <View style={styles.largeTitleContainer}>
           <Text style={styles.largeTitle}>Settings</Text>
         </View>
 
-        {/* ── Apple ID / Developer Profile Card ── */}
+        {/* ── 1. About Us & Creator Card (Top of Settings) ── */}
         <View style={styles.iosSection}>
+          <Text style={styles.iosSectionHeader}>ABOUT US & CREATOR</Text>
           <View style={styles.iosCard}>
             <TouchableOpacity
               style={styles.profileRow}
@@ -194,306 +215,130 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 />
               </View>
               <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>Vignesh S</Text>
-                <Text style={styles.profileSubtitle}>Lead Engineer • VFlix Engine</Text>
-                <Text style={styles.profileEmail}>vigneshmake28@gmail.com</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <Text style={styles.profileName}>Vignesh S</Text>
+                  <View style={styles.aboutVersionBadge}>
+                    <Text style={styles.aboutVersionText}>v2.4.0</Text>
+                  </View>
+                </View>
+                <Text style={styles.profileSubtitle}>Lead Architect & Full-Stack Engineer</Text>
+                <Text style={styles.profileEmail}>Tap to view About Us & App Capabilities</Text>
               </View>
               <ChevronRight color="#48484A" size={20} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Section: Torrent & Stream Server ── */}
+        {/* ── 2. Device Storage Section (Menu Row -> Opens Storage Popup Modal) ── */}
+        <View style={styles.iosSection}>
+          <Text style={styles.iosSectionHeader}>DEVICE STORAGE & DIRECTORY</Text>
+          <View style={styles.iosCard}>
+            <TouchableOpacity
+              style={styles.iosRow}
+              activeOpacity={0.7}
+              onPress={() => setStorageModalVisible(true)}
+            >
+              <View style={[styles.iosIconBox, { backgroundColor: Colors.primary }]}>
+                <HardDrive color="#FFFFFF" size={16} strokeWidth={2.2} />
+              </View>
+              <View style={styles.iosTitleGroup}>
+                <Text style={styles.iosTitle}>Device Storage & Directory</Text>
+                <Text style={styles.iosSubtitle}>
+                  {formatBytes(appDownloads)} downloaded • {formatBytes(freeDisk)} free
+                </Text>
+              </View>
+              <Text style={styles.iosValueText}>{formatBytes(freeDisk)} Free</Text>
+              <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── 3. Streaming & Backend Server Section (Menu Row -> Opens Server Popup Modal) ── */}
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>STREAMING & BACKEND SERVER</Text>
           <View style={styles.iosCard}>
-            {/* Server Status Row */}
-            <View style={styles.iosRow}>
+            <TouchableOpacity
+              style={styles.iosRow}
+              activeOpacity={0.7}
+              onPress={() => setServerModalVisible(true)}
+            >
               <View style={[styles.iosIconBox, { backgroundColor: '#0A84FF' }]}>
                 <Radio color="#FFFFFF" size={16} strokeWidth={2.2} />
               </View>
               <View style={styles.iosTitleGroup}>
-                <Text style={styles.iosTitle}>Backend Engine</Text>
-                <Text style={styles.iosSubtitle}>HTTP Range & Peer Seeding</Text>
+                <Text style={styles.iosTitle}>Streaming & Backend Server</Text>
+                <Text style={styles.iosSubtitle}>HTTP Range & WebTorrent Seeding</Text>
               </View>
-              <View
+              <Text
                 style={[
-                  styles.statusBadge,
-                  { backgroundColor: isBackendConnected ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)' },
+                  styles.iosValueText,
+                  { color: isBackendConnected ? '#30D158' : '#FF453A', fontWeight: '600' },
                 ]}
               >
-                <View
-                  style={[
-                    styles.statusDot,
-                    { backgroundColor: isBackendConnected ? '#30D158' : '#FF453A' },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: isBackendConnected ? '#30D158' : '#FF453A' },
-                  ]}
-                >
-                  {isBackendConnected ? 'Connected' : 'Offline'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* Server URL Input */}
-            <View style={styles.iosInputCardRow}>
-              <Text style={styles.iosInputLabel}>SERVER URL</Text>
-              <TextInput
-                style={styles.iosTextInput}
-                placeholder="https://vflix-torrent-stream.loca.lt"
-                placeholderTextColor="#636366"
-                value={customServerUrl}
-                onChangeText={handleApplyServerUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* Ping Test Row */}
-            <View style={styles.iosActionRow}>
-              <TouchableOpacity
-                style={styles.iosPillActionBtn}
-                onPress={handleTestPing}
-                disabled={pingLoading}
-                activeOpacity={0.7}
-              >
-                {pingLoading ? (
-                  <ActivityIndicator size="small" color="#0A84FF" />
-                ) : (
-                  <Activity color="#0A84FF" size={15} strokeWidth={2.2} />
-                )}
-                <Text style={styles.iosPillActionText}>
-                  {pingLoading ? 'Testing...' : 'Test Server Ping'}
-                </Text>
-              </TouchableOpacity>
-
-              {pingResult && (
-                <View
-                  style={[
-                    styles.pingResultPill,
-                    {
-                      backgroundColor: pingResult.ok ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)',
-                      borderColor: pingResult.ok ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 69, 58, 0.3)',
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.pingResultText,
-                      { color: pingResult.ok ? '#30D158' : '#FF453A' },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {pingResult.ok ? `✓ ${pingResult.message}` : `✕ ${pingResult.message}`}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* Server Presets */}
-            <View style={styles.presetsCardWrap}>
-              <Text style={styles.presetsHeaderLabel}>PRESETS</Text>
-              <View style={styles.presetsGrid}>
-                {[
-                  { label: 'Wi-Fi LAN (Fastest)', url: 'http://192.168.1.6:3000' },
-                  { label: 'Cloud Tunnel (Live)', url: 'https://wild-results-help.loca.lt' },
-                  { label: 'Local PC', url: 'http://localhost:3000' },
-                  { label: 'Android Emulator', url: 'http://10.0.2.2:3000' },
-                ].map((item) => {
-                  const isActive = customServerUrl.toLowerCase() === item.url.toLowerCase();
-                  return (
-                    <TouchableOpacity
-                      key={item.url}
-                      onPress={() => handleApplyServerUrl(item.url)}
-                      style={[styles.presetChip, isActive && styles.presetChipActive]}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.presetChipText, isActive && styles.presetChipTextActive]}>
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
+                {isBackendConnected ? 'Connected' : 'Offline'}
+              </Text>
+              <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.iosSectionFooter}>
-            The backend engine handles WebTorrent peer swarms and feeds high-speed HTTP streams into VFlix.
-          </Text>
         </View>
 
-        {/* ── Section: Torrent Proxy (Debrid) ── */}
+        {/* ── 3.5. Download Speed Booster Section (Menu Row -> Opens Speed Booster Modal) ── */}
         <View style={styles.iosSection}>
-          <Text style={styles.iosSectionHeader}>TORRENT PROXY</Text>
+          <Text style={styles.iosSectionHeader}>DOWNLOAD SPEED BOOSTER</Text>
           <View style={styles.iosCard}>
-            <View style={styles.iosRow}>
-              <View style={[styles.iosIconBox, { backgroundColor: '#AF52DE' }]}>
-                <Zap color="#FFFFFF" size={16} strokeWidth={2.2} />
+            <TouchableOpacity
+              style={styles.iosRow}
+              activeOpacity={0.7}
+              onPress={() => setBoosterModalVisible(true)}
+            >
+              <View style={[styles.iosIconBox, { backgroundColor: '#FF9500' }]}>
+                <Zap color="#FFFFFF" size={16} strokeWidth={2.4} fill="#FFFFFF" />
               </View>
               <View style={styles.iosTitleGroup}>
-                <Text style={styles.iosTitle}>Real-Debrid Proxy</Text>
-                <Text style={styles.iosSubtitle}>Instant cloud cache downloads</Text>
+                <Text style={styles.iosTitle}>Download Speed Booster</Text>
+                <Text style={styles.iosSubtitle}>Re-announce 20+ trackers & flush sockets</Text>
               </View>
-              <Switch
-                value={debridEnabled}
-                onValueChange={(val) => {
-                  setDebridEnabled(val);
-                  updateDebridConfig(val, debridKey);
-                }}
-                trackColor={{ false: '#39393D', true: '#30D158' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-
-            {debridEnabled && (
-              <>
-                <View style={styles.iosDivider} />
-                <View style={styles.iosInputCardRow}>
-                  <Text style={styles.iosInputLabel}>API KEY</Text>
-                  <TextInput
-                    style={styles.iosTextInput}
-                    placeholder="Enter Real-Debrid API token..."
-                    placeholderTextColor="#636366"
-                    value={debridKey}
-                    onChangeText={(val: string) => {
-                      setDebridKey(val);
-                      updateDebridConfig(debridEnabled, val);
-                    }}
-                    secureTextEntry
-                  />
-                </View>
-              </>
-            )}
+              <Text style={[styles.iosValueText, { color: '#FF9500', fontWeight: '600' }]}>
+                {downloads.filter((d) => d.status === 'downloading').length > 0
+                  ? `${downloads.filter((d) => d.status === 'downloading').length} Active`
+                  : 'Turbo Ready'}
+              </Text>
+              <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.iosSectionFooter}>
-            Converts low-seed torrents into direct high-speed HTTP links via Real-Debrid servers.
-          </Text>
         </View>
 
-        {/* ── Section: Search Mirror & Source ── */}
+        {/* ── Section: Search Mirror ── */}
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>SEARCH MIRROR</Text>
           <View style={styles.iosCard}>
-            <View style={styles.iosRow}>
+            <TouchableOpacity
+              style={styles.iosRow}
+              activeOpacity={0.7}
+              onPress={() => setDomainModalVisible(true)}
+            >
               <View style={[styles.iosIconBox, { backgroundColor: '#30D158' }]}>
                 <Globe color="#FFFFFF" size={16} strokeWidth={2.2} />
               </View>
               <View style={styles.iosTitleGroup}>
                 <Text style={styles.iosTitle}>Active Domain</Text>
-                <Text style={styles.iosSubtitle}>Site used by Movie Finder</Text>
+                <Text style={styles.iosSubtitle}>Movie Finder source mirror</Text>
               </View>
               <Text style={styles.iosValueText} numberOfLines={1}>
-                {tamilMvUrl.replace(/^https?:\/\/(www\.)?/, '')}
+                {displayDomain}
               </Text>
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            <View style={styles.iosInputCardRow}>
-              <Text style={styles.iosInputLabel}>CUSTOM URL</Text>
-              <TextInput
-                style={styles.iosTextInput}
-                placeholder="https://www.1tamilmv.lease"
-                placeholderTextColor="#636366"
-                value={tamilMvUrl}
-                onChangeText={handleUpdateTamilMvUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            <View style={styles.presetsCardWrap}>
-              <Text style={styles.presetsHeaderLabel}>POPULAR MIRRORS</Text>
-              <View style={styles.presetsGrid}>
-                {POPULAR_MIRRORS.slice(0, 4).map((mirror) => {
-                  const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
-                  return (
-                    <TouchableOpacity
-                      key={mirror}
-                      onPress={() => handleUpdateTamilMvUrl(mirror)}
-                      style={[styles.presetChip, isActive && styles.presetChipActive]}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.presetChipText, isActive && styles.presetChipTextActive]}>
-                        {mirror.replace(/^https?:\/\/(www\.)?/, '')}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
+              <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Section: Storage & Downloads ── */}
+        {/* ── Section: Download Preferences ── */}
         <View style={styles.iosSection}>
-          <Text style={styles.iosSectionHeader}>STORAGE & DOWNLOADS</Text>
+          <Text style={styles.iosSectionHeader}>DOWNLOAD PREFERENCES</Text>
           <View style={styles.iosCard}>
-            {/* Storage Path */}
-            <View style={styles.iosRow}>
-              <View style={[styles.iosIconBox, { backgroundColor: '#FF9500' }]}>
-                <Folder color="#FFFFFF" size={16} strokeWidth={2.2} />
-              </View>
-              <View style={styles.iosTitleGroup}>
-                <Text style={styles.iosTitle}>Storage Folder</Text>
-                <Text style={styles.iosSubtitle}>Internal / VFlix_Movies</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.iosSmallPillBtn}
-                onPress={handleRescan}
-                activeOpacity={0.7}
-                disabled={scanning}
-              >
-                <RotateCcw color="#0A84FF" size={13} strokeWidth={2.2} />
-                <Text style={styles.iosSmallPillText}>
-                  {scanning ? 'Scanning...' : 'Rescan'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* App Downloads Stats */}
-            <View style={styles.iosRow}>
-              <View style={[styles.iosIconBox, { backgroundColor: '#0A84FF' }]}>
-                <Film color="#FFFFFF" size={16} strokeWidth={2.2} />
-              </View>
-              <Text style={styles.iosTitle}>Downloaded Movies</Text>
-              <Text style={styles.iosValueText}>
-                {formatBytes(appDownloads)} ({completedCount})
-              </Text>
-            </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* Free Storage */}
-            <View style={styles.iosRow}>
-              <View style={[styles.iosIconBox, { backgroundColor: '#8E8E93' }]}>
-                <HardDrive color="#FFFFFF" size={16} strokeWidth={2.2} />
-              </View>
-              <Text style={styles.iosTitle}>Free Device Space</Text>
-              <Text style={[styles.iosValueText, { color: '#30D158' }]}>
-                {formatBytes(freeDisk)} free
-              </Text>
-            </View>
-
-            <View style={styles.iosDivider} />
-
             {/* Wi-Fi Only */}
             <View style={styles.iosRow}>
-              <View style={[styles.iosIconBox, { backgroundColor: '#0A84FF' }]}>
+              <View style={[styles.iosIconBox, { backgroundColor: '#32D74B' }]}>
                 <Wifi color="#FFFFFF" size={16} strokeWidth={2.2} />
               </View>
               <View style={styles.iosTitleGroup}>
@@ -526,22 +371,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 thumbColor="#FFFFFF"
               />
             </View>
-
-            <View style={styles.iosDivider} />
-
-            {/* Clean Downloaded Movies Button (iOS Destructive Cell) */}
-            <TouchableOpacity
-              style={styles.iosDestructiveRow}
-              onPress={handleClearDownloads}
-              activeOpacity={0.7}
-            >
-              <Trash2 color="#FF453A" size={18} strokeWidth={2} style={{ marginRight: 8 }} />
-              <Text style={styles.iosDestructiveText}>Clean All Downloaded Movies</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Section: Browser Security & Ad Shield ── */}
+        {/* ── Section: Security & Ad Shield ── */}
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>SECURITY & AD SHIELD</Text>
           <View style={styles.iosCard}>
@@ -551,7 +384,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
               <View style={styles.iosTitleGroup}>
                 <Text style={styles.iosTitle}>Ad & Popup Blocker</Text>
-                <Text style={styles.iosSubtitle}>Blocks 70+ ad networks & popups</Text>
+                <Text style={styles.iosSubtitle}>Blocks ad networks & popups</Text>
               </View>
               <Switch
                 value={adBlockEnabled}
@@ -569,7 +402,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
               <View style={styles.iosTitleGroup}>
                 <Text style={styles.iosTitle}>Anti-Redirect Protection</Text>
-                <Text style={styles.iosSubtitle}>Blocks background page hijacks</Text>
+                <Text style={styles.iosSubtitle}>Blocks page hijacks</Text>
               </View>
               <Switch
                 value={strictRedirectBlock}
@@ -581,7 +414,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
         </View>
 
-        {/* ── Section: Video Player Preferences ── */}
+        {/* ── Section: Video Playback ── */}
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>VIDEO PLAYBACK</Text>
           <View style={styles.iosCard}>
@@ -601,12 +434,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               />
             </View>
           </View>
-          <Text style={styles.iosSectionFooter}>
-            When turned on, streams will prompt to open directly in your installed external video player.
-          </Text>
         </View>
 
-        {/* ── Section: Support & Developer ── */}
+        {/* ── Section: Support & Appreciation (Refactored - Duplicate About Dev Removed) ── */}
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>SUPPORT & APPRECIATION</Text>
           <View style={styles.iosCard}>
@@ -621,66 +451,635 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <View style={[styles.iosIconBox, { backgroundColor: '#FF3B30' }]}>
                 <Heart color="#FFFFFF" fill="#FFFFFF" size={15} />
               </View>
-              <Text style={styles.iosTitle}>Donate & Support Us</Text>
+              <View style={styles.iosTitleGroup}>
+                <Text style={styles.iosTitle}>Donate & Support Us</Text>
+                <Text style={styles.iosSubtitle}>Fund high-speed swarms & engine</Text>
+              </View>
               <Text style={[styles.iosValueText, { color: Colors.primary, fontWeight: '600' }]}>
                 Contribute
               </Text>
               <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
             </TouchableOpacity>
+          </View>
+        </View>
 
-            <View style={styles.iosDivider} />
-
+        {/* ── Section: Application Information (Single Row -> Opens Sub-screen Modal) ── */}
+        <View style={styles.iosSection}>
+          <Text style={styles.iosSectionHeader}>APPLICATION INFO</Text>
+          <View style={styles.iosCard}>
             <TouchableOpacity
               style={styles.iosRow}
               activeOpacity={0.7}
-              onPress={() => {
-                if (onOpenAbout) onOpenAbout();
-                else setAboutModalVisible(true);
-              }}
+              onPress={() => setAppInfoModalVisible(true)}
             >
               <View style={[styles.iosIconBox, { backgroundColor: '#5856D6' }]}>
                 <Info color="#FFFFFF" size={16} strokeWidth={2.2} />
               </View>
-              <Text style={styles.iosTitle}>About Developer</Text>
-              <Text style={styles.iosValueText}>Vignesh S</Text>
+              <View style={styles.iosTitleGroup}>
+                <Text style={styles.iosTitle}>Application Info</Text>
+                <Text style={styles.iosSubtitle}>v2.4.0 (Build 57.0)</Text>
+              </View>
+              <Text style={styles.iosValueText}>VFlix Stream</Text>
               <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* ── Section: Application Information ── */}
-        <View style={styles.iosSection}>
-          <Text style={styles.iosSectionHeader}>APPLICATION INFO</Text>
-          <View style={styles.iosCard}>
-            <View style={styles.iosRow}>
-              <Text style={styles.iosTitle}>App Name</Text>
-              <Text style={styles.iosValueText}>VFlix</Text>
-            </View>
-            <View style={styles.iosDivider} />
-
-            <View style={styles.iosRow}>
-              <Text style={styles.iosTitle}>Version</Text>
-              <Text style={[styles.iosValueText, { color: Colors.primary, fontWeight: '600' }]}>
-                v2.4.0 (57.0)
-              </Text>
-            </View>
-            <View style={styles.iosDivider} />
-
-            <View style={styles.iosRow}>
-              <Text style={styles.iosTitle}>Torrent Engine</Text>
-              <Text style={styles.iosValueText}>WebTorrent P2P</Text>
-            </View>
-            <View style={styles.iosDivider} />
-
-            <View style={styles.iosRow}>
-              <Text style={styles.iosTitle}>Platform</Text>
-              <Text style={styles.iosValueText}>{Platform.OS.toUpperCase()}</Text>
-            </View>
-          </View>
-        </View>
       </ScrollView>
 
-      {/* About Us Screen Modal */}
+      {/* ── 1. Active Domain Settings Sub-Screen Modal ── */}
+      <Modal
+        visible={domainModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDomainModalVisible(false)}
+      >
+        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Active Search Domain</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setDomainModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>CURRENT SOURCE DOMAIN</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosInputCardRow}>
+                  <Text style={styles.iosInputLabel}>CUSTOM DOMAIN URL</Text>
+                  <TextInput
+                    style={styles.iosTextInput}
+                    placeholder="https://www.1tamilmv.lease"
+                    placeholderTextColor="#636366"
+                    value={tamilMvUrl}
+                    onChangeText={handleUpdateTamilMvUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              </View>
+              <Text style={styles.iosSectionFooter}>
+                This active domain mirror is used by Movie Finder to fetch releases & magnets.
+              </Text>
+            </View>
+
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>POPULAR MIRRORS</Text>
+              <View style={styles.iosCard}>
+                {POPULAR_MIRRORS.map((mirror, idx) => {
+                  const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
+                  return (
+                    <React.Fragment key={mirror}>
+                      {idx > 0 && <View style={styles.iosDivider} />}
+                      <TouchableOpacity
+                        style={styles.iosRow}
+                        onPress={() => handleUpdateTamilMvUrl(mirror)}
+                        activeOpacity={0.7}
+                      >
+                        <Globe color={isActive ? Colors.primary : '#8E8E93'} size={18} strokeWidth={2} />
+                        <Text style={[styles.iosTitle, isActive && { color: Colors.primary, fontWeight: '700' }]}>
+                          {mirror.replace(/^https?:\/\/(www\.)?/, '')}
+                        </Text>
+                        {isActive && <Check color={Colors.primary} size={18} strokeWidth={2.5} />}
+                      </TouchableOpacity>
+                    </React.Fragment>
+                  );
+                })}
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── 2. Application Information Sub-Screen Modal ── */}
+      <Modal
+        visible={appInfoModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setAppInfoModalVisible(false)}
+      >
+        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Application Info</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setAppInfoModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            {/* App Branding */}
+            <View style={styles.appBrandingCard}>
+              <View style={styles.appLogoBox}>
+                <Film color="#FFFFFF" size={32} strokeWidth={2} />
+              </View>
+              <Text style={styles.appNameTitle}>VFlix Stream</Text>
+              <Text style={styles.appTagline}>Decentralized Movie Engine & P2P Streamer</Text>
+            </View>
+
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>SPECIFICATIONS</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>App Name</Text>
+                  <Text style={styles.iosValueText}>VFlix</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Version</Text>
+                  <Text style={[styles.iosValueText, { color: Colors.primary, fontWeight: '600' }]}>
+                    v2.4.0 (Build 57.0)
+                  </Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Torrent Engine</Text>
+                  <Text style={styles.iosValueText}>WebTorrent P2P</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Platform</Text>
+                  <Text style={styles.iosValueText}>{Platform.OS.toUpperCase()}</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Storage Directory</Text>
+                  <Text style={styles.iosValueText}>VFlix_Movies</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Backend Connection</Text>
+                  <Text style={[styles.iosValueText, { color: isBackendConnected ? '#30D158' : '#FF453A' }]}>
+                    {isBackendConnected ? 'Connected' : 'Offline'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Device Storage & Directory Modal ── */}
+      <Modal
+        visible={storageModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setStorageModalVisible(false)}
+      >
+        <View style={styles.subModalContainer}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Device Storage & Directory</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setStorageModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            {/* Storage Usage Graph */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>STORAGE BREAKDOWN</Text>
+              <View style={styles.storageCard}>
+                <View style={styles.storageHeader}>
+                  <View style={styles.storageIconWrapper}>
+                    <HardDrive color={Colors.netflixRed} size={20} strokeWidth={2} />
+                  </View>
+                  <View style={styles.storageHeaderTitleGroup}>
+                    <Text style={styles.storageTitle}>Internal Storage Usage</Text>
+                    <Text style={styles.storageStatsText}>
+                      {formatBytes(appDownloads)} downloaded by VFlix • {formatBytes(freeDisk)} free
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.storageBarTrack}>
+                  <View style={[styles.storageBarApp, { width: `${appPercent}%` }]} />
+                  <View style={[styles.storageBarOther, { width: `${otherPercent}%` }]} />
+                </View>
+
+                <View style={styles.storageLegend}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: Colors.netflixRed }]} />
+                    <Text style={styles.legendText}>VFlix ({formatBytes(appDownloads)})</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#4A4E5D' }]} />
+                    <Text style={styles.legendText}>Other Files ({formatBytes(Math.max(0, usedDisk - appDownloads))})</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#1E202B', borderWidth: 1, borderColor: '#4A4E5D' }]} />
+                    <Text style={styles.legendText}>Free ({formatBytes(freeDisk)})</Text>
+                  </View>
+                </View>
+
+                <View style={styles.folderRow}>
+                  <View style={styles.folderLeft}>
+                    <View style={styles.folderIconBadge}>
+                      <Folder color="#30D158" size={14} strokeWidth={2} />
+                    </View>
+                    <View style={styles.folderTextWrapper}>
+                      <Text style={styles.folderPathText}>Internal / VFlix_Movies</Text>
+                      <Text style={styles.folderSubText}>App media directory</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.rescanStorageBtn}
+                    onPress={handleRescan}
+                    disabled={scanning}
+                  >
+                    {scanning ? (
+                      <ActivityIndicator size="small" color={Colors.netflixRed} />
+                    ) : (
+                      <>
+                        <RotateCcw color={Colors.netflixRed} size={12} strokeWidth={2.5} />
+                        <Text style={styles.rescanStorageText}>Rescan</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* Actions */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>STORAGE ACTIONS</Text>
+              <View style={styles.iosCard}>
+                <TouchableOpacity style={styles.iosDestructiveRow} onPress={handleClearDownloads}>
+                  <Trash2 color="#FF453A" size={18} strokeWidth={2} style={{ marginRight: 8 }} />
+                  <Text style={styles.iosDestructiveText}>Delete All Downloaded Movies</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.iosSectionFooter}>
+                This will permanently delete all {completedCount} downloaded movie files from your device storage.
+              </Text>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Streaming & Backend Server Modal ── */}
+      <Modal
+        visible={serverModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setServerModalVisible(false)}
+      >
+        <View style={styles.subModalContainer}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Streaming & Backend Server</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setServerModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            {/* Status Section */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>SERVER CONNECTION STATUS</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Status</Text>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: isBackendConnected ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)' },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.statusDot,
+                        { backgroundColor: isBackendConnected ? '#30D158' : '#FF453A' },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.statusText,
+                        { color: isBackendConnected ? '#30D158' : '#FF453A' },
+                      ]}
+                    >
+                      {isBackendConnected ? 'Connected' : 'Offline'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.iosDivider} />
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Active Server IP</Text>
+                  <Text style={styles.iosValueText} numberOfLines={1}>
+                    {backendUrl}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Quick Presets */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>SERVER PRESETS</Text>
+              <View style={{ gap: 10 }}>
+                {/* Dev Server Preset */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    customServerUrl === 'http://192.168.1.6:3002' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => handleApplyServerUrl('http://192.168.1.6:3002')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
+                      <Cpu color="#0A84FF" size={16} strokeWidth={2} />
+                    </View>
+                    <View>
+                      <Text style={styles.presetName}>Dev Server IP</Text>
+                      <Text style={styles.presetUrl}>http://192.168.1.6:3002</Text>
+                    </View>
+                  </View>
+                  {customServerUrl === 'http://192.168.1.6:3002' && (
+                    <Check color="#0A84FF" size={18} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+
+                {/* Production Server Preset */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    customServerUrl === 'http://192.168.1.10:3002' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => handleApplyServerUrl('http://192.168.1.10:3002')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
+                      <Server color="#30D158" size={16} strokeWidth={2} />
+                    </View>
+                    <View>
+                      <Text style={styles.presetName}>Production Server IP</Text>
+                      <Text style={styles.presetUrl}>http://192.168.1.10:3002</Text>
+                    </View>
+                  </View>
+                  {customServerUrl === 'http://192.168.1.10:3002' && (
+                    <Check color="#30D158" size={18} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+
+                {/* Localhost Preset */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    (customServerUrl === 'http://localhost:3002' || customServerUrl === 'http://10.0.2.2:3002') &&
+                      styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => handleApplyServerUrl(Platform.OS === 'android' ? 'http://10.0.2.2:3002' : 'http://localhost:3002')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
+                      <Activity color="#FF9F0A" size={16} strokeWidth={2} />
+                    </View>
+                    <View>
+                      <Text style={styles.presetName}>Localhost Server</Text>
+                      <Text style={styles.presetUrl}>
+                        {Platform.OS === 'android' ? 'http://10.0.2.2:3002' : 'http://localhost:3002'}
+                      </Text>
+                    </View>
+                  </View>
+                  {(customServerUrl === 'http://localhost:3002' || customServerUrl === 'http://10.0.2.2:3002') && (
+                    <Check color="#FF9F0A" size={18} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Custom URL Configuration */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>CUSTOM BACKEND URL</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosInputCardRow}>
+                  <Text style={styles.iosInputLabel}>SERVER URL (HOST:PORT)</Text>
+                  <TextInput
+                    style={styles.iosTextInput}
+                    value={customServerUrl}
+                    onChangeText={setCustomServerUrl}
+                    placeholder="http://192.168.1.6:3002"
+                    placeholderTextColor="#555"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+                <View style={styles.iosDivider} />
+                <View style={styles.iosActionRow}>
+                  <TouchableOpacity
+                    style={styles.iosPillActionBtn}
+                    onPress={handleTestPing}
+                    disabled={pingLoading}
+                  >
+                    {pingLoading ? (
+                      <ActivityIndicator size="small" color="#0A84FF" />
+                    ) : (
+                      <>
+                        <Activity color="#0A84FF" size={14} strokeWidth={2} />
+                        <Text style={styles.iosPillActionText}>Test Ping</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {pingResult && (
+                    <View
+                      style={[
+                        styles.pingResultPill,
+                        {
+                          backgroundColor: pingResult.ok ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)',
+                          borderColor: pingResult.ok ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 69, 58, 0.3)',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pingResultText,
+                          { color: pingResult.ok ? '#30D158' : '#FF453A' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {pingResult.ok ? `${pingResult.latency}ms • OK` : pingResult.message}
+                      </Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.iosPillActionBtn, { backgroundColor: Colors.primary }]}
+                    onPress={() => handleApplyServerUrl(customServerUrl)}
+                  >
+                    <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
+                    <Text style={[styles.iosPillActionText, { color: '#FFFFFF' }]}>Apply</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={styles.iosSectionFooter}>
+                Connect to a local Node.js backend running WebTorrent to enable live video streaming with HTTP byte ranges.
+              </Text>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Download Speed Booster Modal ── */}
+      <Modal
+        visible={boosterModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setBoosterModalVisible(false)}
+      >
+        <View style={styles.subModalContainer}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Download Speed Booster</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setBoosterModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            {/* Speed Meter Banner */}
+            <View style={styles.boosterBannerCard}>
+              <LinearGradient
+                colors={['#FF9500', '#FF3B30']}
+                style={styles.boosterGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.boosterIconWrap}>
+                  <Zap color="#FFFFFF" size={32} strokeWidth={2.5} fill="#FFFFFF" />
+                </View>
+                <Text style={styles.boosterBannerTitle}>Turbo Speed Booster</Text>
+                <Text style={styles.boosterBannerSub}>
+                  Accelerate slow downloads instantly by re-querying 20+ Tier-1 high-speed P2P trackers, optimizing TCP sockets, and maxing out peer connections.
+                </Text>
+              </LinearGradient>
+            </View>
+
+            {/* Action Trigger Button */}
+            <View style={styles.iosSection}>
+              <TouchableOpacity
+                style={styles.boostActionBtn}
+                onPress={handleApplySpeedBoost}
+                disabled={boosting}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['#FF9500', '#FF2D55']}
+                  style={styles.boostActionGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  {boosting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Zap color="#FFFFFF" size={18} fill="#FFFFFF" />
+                      <Text style={styles.boostActionText}>SPEED UP DOWNLOADS NOW</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {boostMessage && (
+                <View style={styles.boostSuccessBox}>
+                  <Check color="#30D158" size={16} strokeWidth={2.5} />
+                  <Text style={styles.boostSuccessText}>{boostMessage}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Turbo Settings */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>TURBO ACCELERATION PREFERENCES</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosRow}>
+                  <View style={[styles.iosIconBox, { backgroundColor: '#FF9500' }]}>
+                    <Gauge color="#FFFFFF" size={16} strokeWidth={2.2} />
+                  </View>
+                  <View style={styles.iosTitleGroup}>
+                    <Text style={styles.iosTitle}>Auto-Turbo Speed Mode</Text>
+                    <Text style={styles.iosSubtitle}>Auto-boost when speed drops below 500 KB/s</Text>
+                  </View>
+                  <Switch
+                    value={autoTurbo}
+                    onValueChange={setAutoTurbo}
+                    trackColor={{ false: '#3A3A3C', true: '#FF9500' }}
+                    thumbColor={autoTurbo ? '#FFFFFF' : '#F4F3F4'}
+                  />
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <View style={[styles.iosIconBox, { backgroundColor: '#30D158' }]}>
+                    <Cpu color="#FFFFFF" size={16} strokeWidth={2.2} />
+                  </View>
+                  <View style={styles.iosTitleGroup}>
+                    <Text style={styles.iosTitle}>Max Peer Connections (350)</Text>
+                    <Text style={styles.iosSubtitle}>Force high-density WebTorrent swarm discovery</Text>
+                  </View>
+                  <Switch
+                    value={maxConnsBoost}
+                    onValueChange={setMaxConnsBoost}
+                    trackColor={{ false: '#3A3A3C', true: '#30D158' }}
+                    thumbColor={maxConnsBoost ? '#FFFFFF' : '#F4F3F4'}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Technical Specs */}
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>BOOSTER SPECIFICATIONS</Text>
+              <View style={styles.iosCard}>
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>Tier-1 Public Trackers</Text>
+                  <Text style={styles.iosValueText}>20 Active Nodes</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>DHT Peer Discovery</Text>
+                  <Text style={styles.iosValueText}>Concurrency (32)</Text>
+                </View>
+
+                <View style={styles.iosDivider} />
+
+                <View style={styles.iosRow}>
+                  <Text style={styles.iosTitle}>HTTP Keep-Alive Range</Text>
+                  <Text style={styles.iosValueText}>Multi-Thread Stream</Text>
+                </View>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── 3. About Us Screen Modal ── */}
       <Modal
         visible={aboutModalVisible}
         animationType="slide"
@@ -696,7 +1095,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         />
       </Modal>
 
-      {/* Donate Us Screen Modal */}
+      {/* ── 4. Donate Us Screen Modal ── */}
       <Modal
         visible={donateModalVisible}
         animationType="slide"
@@ -715,34 +1114,54 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   scrollContent: {
+    paddingHorizontal: 16,
     paddingTop: 8,
   },
   largeTitleContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 14,
+    paddingVertical: 12,
   },
   largeTitle: {
-    fontSize: 34,
-    fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 0.35,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  // Profile Banner (Apple ID style)
+  iosSection: {
+    marginBottom: 24,
+  },
+  iosSectionHeader: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    marginBottom: 8,
+    marginLeft: 6,
+  },
+  iosSectionFooter: {
+    color: '#8E8E93',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 8,
+    marginLeft: 6,
+  },
+  iosCard: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    padding: 14,
   },
   profileAvatarWrapper: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     overflow: 'hidden',
-    backgroundColor: '#2C2C2E',
-    borderWidth: 1,
-    borderColor: '#3A3A3C',
+    marginRight: 14,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
   },
   profileAvatar: {
     width: '100%',
@@ -750,167 +1169,129 @@ const styles = StyleSheet.create({
   },
   profileInfo: {
     flex: 1,
-    marginLeft: 14,
-    justifyContent: 'center',
   },
   profileName: {
-    fontSize: 18,
-    fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: -0.2,
+    fontSize: 17,
+    fontWeight: '700',
     marginBottom: 2,
   },
   profileSubtitle: {
-    fontSize: 13,
     color: '#8E8E93',
-    marginBottom: 1,
+    fontSize: 12,
+    marginBottom: 2,
   },
   profileEmail: {
-    fontSize: 12,
-    color: '#636366',
-  },
-  // iOS Grouped Sections
-  iosSection: {
-    marginBottom: 24,
-  },
-  iosSectionHeader: {
-    fontSize: 12.5,
+    color: Colors.primary,
+    fontSize: 11,
     fontWeight: '500',
-    color: '#8E8E93',
-    marginLeft: 32,
-    marginBottom: 7,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
   },
-  iosSectionFooter: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginLeft: 32,
-    marginRight: 24,
-    marginTop: 7,
-    lineHeight: 16,
+  aboutVersionBadge: {
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
   },
-  iosCard: {
-    backgroundColor: '#1C1C1E',
-    borderRadius: 12,
-    marginHorizontal: 16,
-    overflow: 'hidden',
+  aboutVersionText: {
+    color: Colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
   },
   iosRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     minHeight: 48,
-    paddingVertical: 10,
   },
   iosIconBox: {
-    width: 29,
-    height: 29,
+    width: 30,
+    height: 30,
     borderRadius: 7,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   iosTitleGroup: {
     flex: 1,
-    marginLeft: 12,
-    justifyContent: 'center',
   },
   iosTitle: {
-    fontSize: 16,
     color: '#FFFFFF',
-    fontWeight: '400',
-    flex: 1,
-    marginLeft: 12,
+    fontSize: 15,
+    fontWeight: '500',
   },
   iosSubtitle: {
-    fontSize: 12,
     color: '#8E8E93',
+    fontSize: 11,
     marginTop: 1,
   },
   iosValueText: {
-    fontSize: 15,
     color: '#8E8E93',
-    marginRight: 4,
+    fontSize: 14,
+    marginRight: 6,
   },
   iosDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#38383A',
-    marginLeft: 57,
+    height: 0.5,
+    backgroundColor: '#2C2C2E',
+    marginLeft: 56,
   },
-  // Inputs & Custom Rows
   iosInputCardRow: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: '#1C1C1E',
   },
   iosInputLabel: {
-    fontSize: 10.5,
-    fontWeight: '600',
     color: '#8E8E93',
+    fontSize: 10,
+    fontWeight: '700',
     letterSpacing: 0.5,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   iosTextInput: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 8,
     color: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 13.5,
+    fontSize: 14,
+    paddingVertical: 4,
   },
   iosActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    gap: 10,
   },
   iosPillActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     backgroundColor: 'rgba(10, 132, 255, 0.15)',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    gap: 6,
   },
   iosPillActionText: {
     color: '#0A84FF',
-    fontSize: 12.5,
-    fontWeight: '600',
-  },
-  iosSmallPillBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(10, 132, 255, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  iosSmallPillText: {
-    color: '#0A84FF',
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '600',
   },
   pingResultPill: {
-    flex: 1,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 0.5,
+    borderRadius: 12,
+    borderWidth: 1,
+    maxWidth: '55%',
   },
   pingResultText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '600',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 10,
+    borderRadius: 12,
+    gap: 5,
   },
   statusDot: {
     width: 6,
@@ -921,54 +1302,325 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  presetsCardWrap: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  presetsHeaderLabel: {
-    fontSize: 10.5,
-    fontWeight: '600',
-    color: '#8E8E93',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  presetsGrid: {
+  iosSmallPillBtn: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
+    alignItems: 'center',
+    backgroundColor: 'rgba(10, 132, 255, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+    marginLeft: 6,
   },
-  presetChip: {
-    backgroundColor: '#2C2C2E',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#38383A',
-  },
-  presetChipActive: {
-    backgroundColor: 'rgba(10, 132, 255, 0.2)',
-    borderColor: '#0A84FF',
-  },
-  presetChipText: {
-    color: '#8E8E93',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  presetChipTextActive: {
+  iosSmallPillText: {
     color: '#0A84FF',
+    fontSize: 11,
     fontWeight: '600',
   },
-  // Destructive Action Row
   iosDestructiveRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
-    backgroundColor: '#1C1C1E',
+    paddingVertical: 14,
   },
   iosDestructiveText: {
     color: '#FF453A',
-    fontSize: 15.5,
+    fontSize: 15,
     fontWeight: '600',
+  },
+  storageCard: {
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#232632',
+  },
+  storageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  storageIconWrapper: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  storageHeaderTitleGroup: {
+    flex: 1,
+  },
+  storageTitle: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  storageStatsText: {
+    color: '#8E8E93',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  storageBarTrack: {
+    height: 7,
+    backgroundColor: '#1E202B',
+    borderRadius: 3.5,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  storageBarApp: {
+    backgroundColor: Colors.netflixRed,
+    height: '100%',
+  },
+  storageBarOther: {
+    backgroundColor: '#4A4E5D',
+    height: '100%',
+  },
+  storageLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  legendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  legendText: {
+    color: '#8E8E93',
+    fontSize: 10,
+  },
+  folderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#232632',
+  },
+  folderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  folderIconBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    backgroundColor: 'rgba(70, 211, 105, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  folderTextWrapper: {
+    flex: 1,
+  },
+  folderPathText: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  folderSubText: {
+    color: '#8E8E93',
+    fontSize: 9.5,
+  },
+  rescanStorageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(250, 36, 60, 0.35)',
+  },
+  rescanStorageText: {
+    color: Colors.netflixRed,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  subModalContainer: {
+    flex: 1,
+    backgroundColor: '#1C1C1E',
+  },
+  subModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#2C2C2E',
+  },
+  subModalHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  subModalCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#2C2C2E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  subModalBody: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  appBrandingCard: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    marginBottom: 16,
+  },
+  appLogoBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  appNameTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  appTagline: {
+    color: '#8E8E93',
+    fontSize: 13,
+  },
+  localhostShortcutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: 'rgba(10, 132, 255, 0.12)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    gap: 6,
+  },
+  localhostShortcutText: {
+    color: '#0A84FF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  serverPresetCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#2C2C2E',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#3A3A3C',
+  },
+  serverPresetCardActive: {
+    borderColor: Colors.primary,
+    backgroundColor: 'rgba(250, 36, 60, 0.08)',
+  },
+  presetLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  presetIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  presetName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  presetUrl: {
+    color: '#8E8E93',
+    fontSize: 12,
+    marginTop: 1,
+  },
+  boosterBannerCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  boosterGradient: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  boosterIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  boosterBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 6,
+    letterSpacing: 0.2,
+  },
+  boosterBannerSub: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 12.5,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  boostActionBtn: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#FF9500',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  boostActionGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+    gap: 8,
+  },
+  boostActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  boostSuccessBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
+    borderColor: 'rgba(48, 209, 88, 0.35)',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  boostSuccessText: {
+    color: '#30D158',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
   },
 });

@@ -51,6 +51,7 @@ import { Colors } from '../constants/theme';
 import { DownloadItem } from '../types/downloads';
 import { useDownloads } from '../context/DownloadContext';
 import { continueWatchingService } from '../services/continueWatchingService';
+import { extractInfoHashFromUrl } from '../utils/bencode';
 
 interface OfflinePlayerModalProps {
   visible: boolean;
@@ -168,7 +169,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
-  const { backendUrl } = useDownloads();
+  const { backendUrl, isBackendConnected } = useDownloads();
 
   const lastSavedTimeRef = useRef<number>(0);
 
@@ -291,21 +292,30 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
     const checkFile = async () => {
       const targetUri = item.fileUri || item.movieFileUri;
-      if (targetUri && targetUri.startsWith('file://')) {
-        try {
-          const info = await FileSystem.getInfoAsync(targetUri);
-          setFileExisted(info.exists);
+      if (targetUri) {
+        if (targetUri.startsWith('content://')) {
+          setFileExisted(true);
+          setContentUri(targetUri);
+          return;
+        }
+        if (targetUri.startsWith('file://')) {
+          try {
+            const info = await FileSystem.getInfoAsync(targetUri);
+            setFileExisted(info.exists);
 
-          if (
-            Platform.OS === 'android' &&
-            info.exists &&
-            typeof FileSystem.getContentUriAsync === 'function'
-          ) {
-            const cUri = await FileSystem.getContentUriAsync(targetUri);
-            setContentUri(cUri);
+            if (
+              Platform.OS === 'android' &&
+              info.exists &&
+              typeof FileSystem.getContentUriAsync === 'function'
+            ) {
+              const cUri = await FileSystem.getContentUriAsync(targetUri);
+              if (cUri) {
+                setContentUri(cUri);
+              }
+            }
+          } catch (err) {
+            console.warn('Error checking file in player:', err);
           }
-        } catch (err) {
-          console.warn('Error checking file in player:', err);
         }
       }
     };
@@ -875,21 +885,76 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const localFileUri = item.fileUri || item.movieFileUri || '';
   const rawUrl = item.url || '';
 
-  // Decode magnet URL or infoHash into streamable backend HTTP URL
-  let streamHttpUrl = rawUrl;
-  if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
-    streamHttpUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
-  } else if (/^[a-fA-F0-9]{40}$/.test(rawUrl)) {
-    streamHttpUrl = `${backendUrl}/api/stream/${rawUrl.toLowerCase()}`;
-  }
+  const isDownloadedLocalFile =
+    Boolean(localFileUri) &&
+    (item.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
 
-  // Prioritize physically existing local file, otherwise use decoded backend HTTP stream URL
-  const effectiveVideoSrc = (fileExisted && (contentUri || localFileUri))
-    ? (contentUri || localFileUri)
-    : streamHttpUrl;
+  const fn = item.movieFileName || item.fileName;
+  const hash = item.infoHash || extractInfoHashFromUrl(rawUrl);
+
+  const backendStreamUrl = isBackendConnected
+    ? fn
+      ? `${backendUrl}/downloads/${encodeURIComponent(fn)}`
+      : hash
+      ? `${backendUrl}/api/stream/${hash.toLowerCase()}?raw=1`
+      : ''
+    : '';
+
+  const formatFileUriForHtml = (rawUri: string): string => {
+    if (!rawUri) return '';
+    let clean = rawUri.trim();
+    if (clean.startsWith('content://') || clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean;
+    }
+    if (!clean.startsWith('file://')) {
+      clean = 'file://' + clean;
+    }
+    if (clean.startsWith('file://')) {
+      const pathOnly = clean.substring(7);
+      try {
+        const decodedPath = decodeURIComponent(pathOnly);
+        return 'file://' + encodeURI(decodedPath).replace(/#/g, '%23').replace(/\?/g, '%3F');
+      } catch {
+        return clean;
+      }
+    }
+    return clean;
+  };
+
+  const effectiveVideoSrc = (() => {
+    if (isDownloadedLocalFile) {
+      if (Platform.OS === 'android' && contentUri) {
+        return contentUri;
+      }
+      if (localFileUri) {
+        const formattedLocal = formatFileUriForHtml(localFileUri);
+        if (formattedLocal) return formattedLocal;
+      }
+      if (contentUri) {
+        return contentUri;
+      }
+    }
+    let streamHttpUrl = rawUrl;
+    if (hash) {
+      streamHttpUrl = `${backendUrl}/api/stream/${hash.toLowerCase()}`;
+    } else if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
+      streamHttpUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
+    } else if (fn) {
+      streamHttpUrl = `${backendUrl}/downloads/${encodeURIComponent(fn)}`;
+    } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      streamHttpUrl = rawUrl;
+    }
+
+    if (isBackendConnected && streamHttpUrl) {
+      return streamHttpUrl;
+    }
+    return contentUri || formatFileUriForHtml(localFileUri) || streamHttpUrl || '';
+  })();
 
   const isOnlineStream = Boolean(
     effectiveVideoSrc &&
+    !effectiveVideoSrc.startsWith('file://') &&
+    !effectiveVideoSrc.startsWith('content://') &&
     (effectiveVideoSrc.includes('/api/stream') ||
      rawUrl.startsWith('magnet:') ||
      rawUrl.includes('urn:btih:') ||
@@ -992,14 +1057,13 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
       <div id="subtitle-overlay"></div>
 
-      <div id="fallbackNotice">
-        <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px; color: ${isOnlineStream ? '#FF453A' : '#FFFFFF'};">
-          ${isOnlineStream ? 'Server is not reachable' : 'Format Notice'}
+      ${isOnlineStream ? `
+      <div id="fallbackNotice" style="display: none; position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #333; border-radius: 12px; padding: 24px; text-align: center; color: #fff; max-width: 85%; z-index: 10;">
+        <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px; color: #FF453A;">
+          Server is not reachable
         </div>
         <div style="font-size: 12px; color: #aaa; line-height: 1.4; margin-bottom: 12px;">
-          ${isOnlineStream
-            ? 'The streaming server connection failed or the server is not reachable.<br/>Please ensure your streaming server is running.'
-            : 'This video file format may play best in VLC or MX Player.'}
+          The streaming server connection failed or the server is not reachable.<br/>Please ensure your streaming server is running.
         </div>
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
@@ -1010,6 +1074,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           </a>
         </div>
       </div>
+      ` : ''}
 
       <script>
         var v = document.getElementById('netflix-video');
@@ -1159,7 +1224,36 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         v.addEventListener('waiting', function() { post({ type: 'BUFFERING' }); });
         v.addEventListener('stalled', function() { post({ type: 'BUFFERING' }); });
 
-        v.addEventListener('error', function() {
+        var currentSrc = "${effectiveVideoSrc}";
+        var fallbackContentSrc = "${contentUri}";
+        var fallbackFileSrc = "${formatFileUriForHtml(localFileUri)}";
+        var fallbackHttpSrc = "${backendStreamUrl}";
+        var triedContentFallback = false;
+        var triedFileFallback = false;
+        var triedHttpFallback = false;
+
+        v.addEventListener('error', function(e) {
+          if (!triedContentFallback && fallbackContentSrc && currentSrc !== fallbackContentSrc) {
+            triedContentFallback = true;
+            v.src = fallbackContentSrc;
+            v.load();
+            v.play().catch(function() {});
+            return;
+          }
+          if (!triedFileFallback && fallbackFileSrc && currentSrc !== fallbackFileSrc) {
+            triedFileFallback = true;
+            v.src = fallbackFileSrc;
+            v.load();
+            v.play().catch(function() {});
+            return;
+          }
+          if (!triedHttpFallback && fallbackHttpSrc && currentSrc !== fallbackHttpSrc) {
+            triedHttpFallback = true;
+            v.src = fallbackHttpSrc;
+            v.load();
+            v.play().catch(function() {});
+            return;
+          }
           if (notice) notice.style.display = 'block';
           post({ type: 'VIDEO_ERROR' });
         }, true);
@@ -1184,9 +1278,10 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         {/* WebView Video Element with gesture listener */}
         <View style={styles.playerContainer} {...screenPanResponder.panHandlers}>
           <WebView
+            key={effectiveVideoSrc}
             ref={webViewRef}
             originWhitelist={['*']}
-            source={{ html: playerHtml, baseUrl: '' }}
+            source={{ html: playerHtml, baseUrl: 'file:///' }}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -1196,6 +1291,8 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             allowFileAccessFromFileURLs
             allowUniversalAccessFromFileURLs
             mixedContentMode="always"
+            androidLayerType="hardware"
+            cacheEnabled={true}
             onMessage={(event) => {
               try {
                 const data = JSON.parse(event.nativeEvent.data);

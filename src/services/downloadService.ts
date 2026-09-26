@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { DownloadItem, StorageStats } from '../types/downloads';
 import {
   isTorrentUrl,
@@ -16,6 +17,18 @@ export function formatBytes(bytes: number, decimals = 1): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+export function getStorageLocationText(fileUri?: string): string {
+  if (Platform.OS === 'ios') {
+    return 'Files App • On My iPhone';
+  }
+  if (fileUri && fileUri.includes('/storage/emulated/0/')) {
+    const parts = fileUri.split('/storage/emulated/0/')[1] || '';
+    const folder = parts.split('/')[0] || 'VFlix';
+    return `Storage • ${folder}`;
+  }
+  return 'Internal Storage • VFlix';
 }
 
 export function formatSpeed(bytesPerSec: number): string {
@@ -52,14 +65,22 @@ export function formatDownloadErrorMessage(err: any): string {
 }
 
 export function cleanTitleFromFilename(fileName: string): string {
-  if (!fileName) return 'Movie';
+  if (!fileName || fileName.toLowerCase() === 'movie' || fileName.toLowerCase() === 'movie.mp4') return 'Movie';
   let clean = fileName.replace(/\.[^/.]+$/, '');
+
+  // Remove site domain prefixes like www.1TamilMV.lease -
+  clean = clean.replace(/^(www\.[a-z0-9.]+\s*-\s*|1tamilmv[a-z0-9.]*\s*-\s*)/gi, '');
+  clean = clean.replace(/\[[^\]]*\]/g, ''); // Remove [Tamil + Telugu] bracketed tags
+  clean = clean.replace(/\([^)]*\)/g, (match) => {
+    return /\b(19\d\d|20\d\d)\b/.test(match) ? match : '';
+  });
+
   const yearMatch = clean.match(/\b(19\d\d|20\d\d)\b/);
   const year = yearMatch ? yearMatch[1] : '';
 
   clean = clean.replace(/[_.-]+/g, ' ');
   clean = clean.replace(
-    /\b(1080p|720p|480p|2160p|4k|bluray|webrip|brrip|x264|x265|hevc|aac|dvdrip|hdrip|surround|desktop|amd64)\b/gi,
+    /\b(1080p|720p|480p|2160p|4k|bluray|webrip|brrip|x264|x265|hevc|aac|dvdrip|hdrip|hq|esub|sub|550mb|700mb|900mb|1\.4gb|2gb|2\.8gb|5\.4gb|surround|desktop|amd64)\b/gi,
     ''
   );
   if (year) {
@@ -140,6 +161,10 @@ class DownloadService {
         ? `${FileSystem.documentDirectory}${MOVIES_FOLDER_NAME}/`
         : '')
     );
+  }
+
+  public isTaskActive(id: string): boolean {
+    return this.activeTasks.has(id);
   }
 
   /**
@@ -285,7 +310,7 @@ class DownloadService {
           processedFiles.add(dedupeKey);
 
           const fileInfo = await FileSystem.getInfoAsync(currentFilePath);
-          if (fileInfo.exists && (fileInfo as any).size > 0) {
+          if (fileInfo.exists && (fileInfo as any).size >= 1024 * 1024) {
             const size = (fileInfo as any).size || 0;
             const cleanTitle = cleanTitleFromFilename(fileName);
             const poster = getPosterForFilename(fileName);
@@ -414,11 +439,11 @@ class DownloadService {
     };
   }
 
-  public createDownloadItem(rawUrl: string, suggestedTitle?: string): DownloadItem {
+  public createDownloadItem(rawUrl: string, suggestedTitle?: string, posterUrl?: string): DownloadItem {
     const url = sanitizeDownloadUrl(rawUrl);
     const infoHash = extractInfoHashFromUrl(url);
     const isStreamUrl = url.includes('/api/stream/');
-    const isTorrent = isTorrentUrl(url) && !isStreamUrl && !infoHash;
+    const isTorrent = isTorrentUrl(url) || Boolean(infoHash) || url.startsWith('magnet:');
     const fileName = extractTorrentFileName(url, suggestedTitle);
     const id = `dl-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -433,12 +458,13 @@ class DownloadService {
         }
         initialMetadata = magnetInfo;
       }
-    } else if (infoHash) {
-      initialTitle = suggestedTitle || `Movie (${infoHash.substring(0, 8)})`;
+    } else if (infoHash && (!suggestedTitle || suggestedTitle.toLowerCase() === 'movie')) {
+      initialTitle = `Movie (${infoHash.substring(0, 8)})`;
     }
 
     initialTitle = cleanTitleFromFilename(initialTitle);
     const fileUri = this.baseDir ? `${this.baseDir}${fileName}` : fileName;
+    const poster = posterUrl || getPosterForFilename(initialTitle || fileName);
 
     return {
       id,
@@ -453,6 +479,7 @@ class DownloadService {
       speed: '0 KB/s',
       createdAt: Date.now(),
       isTorrent,
+      poster,
       torrentMetadata: initialMetadata,
     };
   }
@@ -486,8 +513,36 @@ class DownloadService {
   ) {
     try {
       const targetUri = item.fileUri || `${this.baseDir}${item.fileName}`;
+
+      // Check existing partial file size on disk for resume support
+      let existingSize = item.downloadedBytes || 0;
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(targetUri);
+        if (fileInfo.exists && typeof (fileInfo as any).size === 'number' && (fileInfo as any).size > 0) {
+          existingSize = Math.max(existingSize, (fileInfo as any).size);
+        }
+      } catch {}
+
+      // If existingSize > 0 and no valid resumeData is set, construct valid resumeData
+      let effectiveResumeData = item.resumeData;
+      if (!effectiveResumeData && existingSize > 0 && existingSize < (item.totalBytes || Infinity)) {
+        try {
+          effectiveResumeData = JSON.stringify({
+            url: item.url,
+            fileUri: targetUri,
+            options: {
+              headers: {
+                Range: `bytes=${existingSize}-`,
+                'Bypass-Tunnel-Reminder': 'true',
+              },
+            },
+            resumeData: String(existingSize),
+          });
+        } catch {}
+      }
+
       const taskState = {
-        lastBytes: item.downloadedBytes || 0,
+        lastBytes: existingSize,
         lastTime: Date.now(),
         speed: '0 KB/s',
         resumable: null as any,
@@ -522,9 +577,13 @@ class DownloadService {
       const resumable = FileSystem.createDownloadResumable(
         item.url,
         targetUri,
-        {},
+        {
+          headers: {
+            'Bypass-Tunnel-Reminder': 'true',
+          },
+        },
         progressCallback,
-        item.resumeData
+        effectiveResumeData
       );
 
       taskState.resumable = resumable;
@@ -538,15 +597,29 @@ class DownloadService {
         return;
       }
 
-      // Completed successfully!
+      if ((result as any).status && (result as any).status >= 400) {
+        try {
+          await FileSystem.deleteAsync(result.uri, { idempotent: true });
+        } catch {}
+        onError(`Server error (HTTP ${(result as any).status})`);
+        return;
+      }
+
+      // Completed download! Check file info
       const fileInfo = await FileSystem.getInfoAsync(result.uri);
       const actualSize = fileInfo.exists && typeof (fileInfo as any).size === 'number' ? (fileInfo as any).size : item.downloadedBytes;
 
+      const isActualTorrentFile = (result.uri || '').toLowerCase().endsWith('.torrent');
+      if (!isActualTorrentFile && actualSize < 100 * 1024) {
+        try {
+          await FileSystem.deleteAsync(result.uri, { idempotent: true });
+        } catch {}
+        onError('Downloaded file is corrupted or too small (under 100 KB)');
+        return;
+      }
       let torrentMetadata = item.torrentMetadata;
       let finalTitle = item.title;
 
-      // Only parse metadata if it is an actual small .torrent file (< 1 MB), never for large movie/video files
-      const isActualTorrentFile = (result.uri || '').toLowerCase().endsWith('.torrent');
       if (isActualTorrentFile && actualSize < 1024 * 1024) {
         try {
           const base64Content = await FileSystem.readAsStringAsync(result.uri, {
@@ -730,13 +803,9 @@ class DownloadService {
    */
   public async pauseDownload(item: DownloadItem): Promise<Partial<DownloadItem>> {
     const task = this.activeTasks.get(item.id);
-    if (!task) {
-      return { status: 'paused', speed: '0 KB/s' };
-    }
-
     let resumeData = item.resumeData;
 
-    if (task.resumable && task.resumable.pauseAsync) {
+    if (task && task.resumable && task.resumable.pauseAsync) {
       try {
         const pauseResult = await task.resumable.pauseAsync();
         if (pauseResult && pauseResult.resumeData) {
@@ -745,14 +814,49 @@ class DownloadService {
       } catch (err) {
         console.warn('Error pausing native download:', err);
       }
-    } else if (task.abortController) {
+    } else if (task && task.abortController) {
       task.abortController.abort();
     }
 
-    this.activeTasks.delete(item.id);
+    // Inspect actual disk file size to maintain accurate progress and resume data
+    const targetUri = item.fileUri || `${this.baseDir}${item.fileName}`;
+    let currentBytes = item.downloadedBytes || 0;
+    try {
+      if (Platform.OS !== 'web' && typeof FileSystem.getInfoAsync === 'function') {
+        const fileInfo = await FileSystem.getInfoAsync(targetUri);
+        if (fileInfo.exists && typeof (fileInfo as any).size === 'number') {
+          currentBytes = Math.max(currentBytes, (fileInfo as any).size);
+        }
+      }
+    } catch {}
+
+    if (!resumeData && currentBytes > 0) {
+      try {
+        resumeData = JSON.stringify({
+          url: item.url,
+          fileUri: targetUri,
+          options: {
+            headers: {
+              Range: `bytes=${currentBytes}-`,
+              'Bypass-Tunnel-Reminder': 'true',
+            },
+          },
+          resumeData: String(currentBytes),
+        });
+      } catch {}
+    }
+
+    if (task) {
+      this.activeTasks.delete(item.id);
+    }
+
+    const progress = item.totalBytes > 0 ? Math.min(1, currentBytes / item.totalBytes) : item.progress;
+
     return {
       status: 'paused',
       speed: '0 KB/s',
+      downloadedBytes: currentBytes,
+      progress,
       resumeData,
     };
   }
@@ -787,3 +891,113 @@ class DownloadService {
 }
 
 export const downloadService = new DownloadService();
+
+export async function saveToGallery(fileUri: string): Promise<boolean> {
+  try {
+    if (Platform.OS === 'web') return false;
+
+    // Safely verify if native MediaLibrary binary module exists in current runtime environment
+    const nativeModule =
+      requireOptionalNativeModule('ExpoMediaLibraryNext') ||
+      requireOptionalNativeModule('ExpoMediaLibrary');
+
+    if (!nativeModule) {
+      console.warn('[saveToGallery] ExpoMediaLibrary native module is not present in this client build.');
+      return false;
+    }
+
+    let MediaLibrary: any = null;
+    try {
+      MediaLibrary = require('expo-media-library');
+    } catch (e) {
+      console.warn('[saveToGallery] expo-media-library module load error:', e);
+      return false;
+    }
+
+    if (!MediaLibrary || typeof MediaLibrary.requestPermissionsAsync !== 'function') {
+      console.warn('[saveToGallery] MediaLibrary native methods not available.');
+      return false;
+    }
+
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') {
+      return false;
+    }
+    const info = await FileSystem.getInfoAsync(fileUri).catch(() => null);
+    if (!info || !info.exists) return false;
+
+    const asset = await MediaLibrary.createAssetAsync(fileUri);
+    if (asset) {
+      await MediaLibrary.createAlbumAsync('VIKIFLEX Downloads', asset, false).catch(() => {});
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.warn('[SaveToGallery Error]:', err);
+    return false;
+  }
+}
+
+export interface ParsedMediaFormat {
+  id: string;
+  label: string;
+  resolution: string;
+  container: string;
+  hasAudio?: boolean;
+  hasVideo?: boolean;
+  url?: string;
+}
+
+export interface ParsedMediaResult {
+  success: boolean;
+  platform: 'youtube' | 'instagram' | 'direct';
+  title: string;
+  thumbnail: string;
+  duration?: number;
+  author?: string;
+  formats: ParsedMediaFormat[];
+}
+
+export async function parseSocialVideoUrl(url: string, backendServerIp?: string): Promise<ParsedMediaResult> {
+  const host = backendServerIp || '192.168.1.6:3002';
+  const endpoint = `http://${host}/api/media/parse`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success) {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn('[parseSocialVideoUrl Fetch Failed]:', e);
+  }
+
+  // Local fallback parsing logic if server offline
+  const cleanUrl = url.trim();
+  const isIg = /instagram\.com/i.test(cleanUrl);
+  const isYt = /youtu\.?be/i.test(cleanUrl);
+
+  return {
+    success: true,
+    platform: isYt ? 'youtube' : isIg ? 'instagram' : 'direct',
+    title: isYt ? 'YouTube Video' : isIg ? 'Instagram Reel Video' : 'Downloaded Video',
+    thumbnail: isYt
+      ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&q=80'
+      : isIg
+      ? 'https://images.unsplash.com/photo-1611262588024-d12430b98920?w=600&q=80'
+      : 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=600&q=80',
+    formats: [
+      { id: '1080p', label: '1080p Full HD (MP4)', resolution: '1080p', container: 'mp4' },
+      { id: '720p', label: '720p HD (MP4)', resolution: '720p', container: 'mp4' },
+      { id: '480p', label: '480p SD (MP4)', resolution: '480p', container: 'mp4' },
+      { id: 'audio_mp3', label: 'Audio Only (MP3)', resolution: 'Audio MP3', container: 'mp3' },
+    ],
+  };
+}

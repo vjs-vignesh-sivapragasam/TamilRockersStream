@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  vflix-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vflix-backend
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./backend/downloads:/app/downloads
+      - ./backend/uploads:/app/uploads
+    environment:
+      - PORT=3002
+      - NODE_ENV=production

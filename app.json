@@ -6,7 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -33,9 +37,8 @@
         "projectId": "11e42153-6578-4595-a79e-c21c6f6f70ed"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "sdkVersion": "57.0.0",
+    "runtimeVersion": "57.0.0",
     "updates": {
       "url": "https://u.expo.dev/11e42153-6578-4595-a79e-c21c6f6f70ed"
     }

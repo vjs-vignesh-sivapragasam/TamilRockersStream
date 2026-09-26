@@ -451,37 +451,83 @@ export const tamilMvService = {
       if (!response.ok) return {};
       const html = await response.text();
 
-      // Find all magnet links with context
+      // Find all magnet links with surrounding context (500 chars before, 300 chars after, plus dn= param)
       const magnetRegex = /href=["'](magnet:\?[^"']+)["']/gi;
       let mMatch;
-      const allMagnets: { url: string; context: string }[] = [];
+      const allMagnets: { url: string; context: string; dn: string; size: string }[] = [];
 
       while ((mMatch = magnetRegex.exec(html)) !== null) {
         let cleanMagnet = mMatch[1].replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
-        const start = Math.max(0, mMatch.index - 250);
-        const context = html.substring(start, mMatch.index).replace(/<[^>]+>/g, ' ');
+        const start = Math.max(0, mMatch.index - 500);
+        const end = Math.min(html.length, mMatch.index + 300);
+        const context = html.substring(start, end).replace(/<[^>]+>/g, ' ');
         const dnMatch = cleanMagnet.match(/[?&]dn=([^&]+)/i);
         const dn = dnMatch ? decodeURIComponent(dnMatch[1].replace(/\+/g, ' ')) : '';
-        allMagnets.push({ url: cleanMagnet, context: `${context} ${dn}`.toLowerCase() });
+        const fullText = `${context} ${dn}`.toLowerCase();
+
+        const sizeMatch = fullText.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
+        const size = sizeMatch ? sizeMatch[1].toUpperCase().replace(/\s+/, '') : '';
+
+        allMagnets.push({ url: cleanMagnet, context: fullText, dn, size });
       }
 
-      let selectedMagnet = allMagnets.length > 0 ? allMagnets[0].url : undefined;
+      if (allMagnets.length === 0) return {};
+
+      let selectedMagnet = allMagnets[0].url;
 
       if (targetResolution && allMagnets.length > 1) {
         const target = targetResolution.toLowerCase();
-        let keyword = '';
-        if (/4k|2160p/i.test(target)) keyword = '4k';
-        else if (/1080p/i.test(target)) keyword = '1080p';
-        else if (/720p.*hevc|hevc/i.test(target)) keyword = 'hevc';
-        else if (/720p/i.test(target)) keyword = '720p';
-        else if (/480p/i.test(target)) keyword = '480p';
-        else if (/250mb/i.test(target)) keyword = '250mb';
-        else if (/700mb/i.test(target)) keyword = '700mb';
+        const targetSizeMatch = target.match(/\b(\d+(?:\.\d+)?\s*(?:gb|mb))\b/i);
+        const targetSize = targetSizeMatch ? targetSizeMatch[1].toUpperCase().replace(/\s+/, '') : '';
 
-        if (keyword) {
-          const match = allMagnets.find((m) => m.context.includes(keyword));
-          if (match) {
-            selectedMagnet = match.url;
+        // 1. Try exact size match if target has size (e.g. 2.8GB, 250MB)
+        if (targetSize) {
+          const exactSizeMatch = allMagnets.find(
+            (m) => m.size === targetSize || m.context.includes(targetSize.toLowerCase())
+          );
+          if (exactSizeMatch) {
+            selectedMagnet = exactSizeMatch.url;
+          }
+        }
+
+        // 2. Try resolution keyword match
+        if (!targetSize || selectedMagnet === allMagnets[0].url) {
+          let keyword = '';
+          if (/4k|2160p|uhd/i.test(target)) keyword = '4k';
+          else if (/1080p/i.test(target)) keyword = '1080p';
+          else if (/720p/i.test(target)) keyword = '720p';
+          else if (/480p/i.test(target)) keyword = '480p';
+          else if (/250\s*mb/i.test(target)) keyword = '250mb';
+          else if (/400\s*mb/i.test(target)) keyword = '400mb';
+          else if (/700\s*mb/i.test(target)) keyword = '700mb';
+          else if (/900\s*mb|950\s*mb/i.test(target)) keyword = '900mb';
+
+          if (keyword) {
+            const isHevcTarget = /hevc|x265/i.test(target);
+            const matches = allMagnets.filter(
+              (m) => m.context.includes(keyword) || m.context.includes(keyword.replace('mb', ' mb'))
+            );
+
+            if (matches.length > 0) {
+              if (isHevcTarget) {
+                const hevcMatch = matches.find((m) => /hevc|x265/i.test(m.context));
+                if (hevcMatch) {
+                  selectedMagnet = hevcMatch.url;
+                } else {
+                  selectedMagnet = matches[0].url;
+                }
+              } else {
+                selectedMagnet = matches[0].url;
+              }
+            }
+          }
+        }
+
+        // 3. Fallback for 4K / 1080p: avoid defaulting to tiny magnet 0 if magnet 0 is 250MB/sample
+        if (/4k|2160p|1080p/i.test(target) && selectedMagnet === allMagnets[0].url) {
+          const highMatch = allMagnets.find((m) => /4k|2160p|1080p/i.test(m.context));
+          if (highMatch) {
+            selectedMagnet = highMatch.url;
           }
         }
       }
@@ -545,92 +591,126 @@ export const tamilMvService = {
 
       if (magnets.length === 0) return [];
 
-      const results: MovieResolutionItem[] = [];
+      const rawResults: MovieResolutionItem[] = [];
 
       for (let i = 0; i < magnets.length; i++) {
         const { url: magnetUrl, index } = magnets[i];
 
-        // 1. Extract context text preceding this magnet link
-        const startIndex = Math.max(0, index - 300);
-        const precedingSnippet = searchArea.substring(startIndex, index);
-        const cleanPrecedingText = precedingSnippet.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+        // Extract context text (500 chars before, 300 chars after)
+        const startIndex = Math.max(0, index - 500);
+        const endIndex = Math.min(searchArea.length, index + 300);
+        const snippet = searchArea.substring(startIndex, endIndex).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-        // 2. Extract dn= from magnet
+        // Extract dn= from magnet
         const dnMatch = magnetUrl.match(/[?&]dn=([^&]+)/i);
         let dnText = dnMatch ? decodeURIComponent(dnMatch[1].replace(/\+/g, ' ')) : '';
 
-        const fullContext = `${cleanPrecedingText} ${dnText}`;
+        const fullContext = `${snippet} ${dnText}`;
 
-        // 3. Extract Size
+        // Size
         const sizeMatch = fullContext.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
-        let size = sizeMatch ? sizeMatch[1].toUpperCase() : undefined;
+        let size = sizeMatch ? sizeMatch[1].toUpperCase().replace(/\s+/, ' ') : undefined;
 
-        // 4. Extract Resolution
-        let resolution = '1080p Full HD';
-        if (/4k|2160p|uhd/i.test(fullContext)) {
-          resolution = '4K 2160p UHD';
-          if (!size) size = '6.5 GB';
-        } else if (/1080p/i.test(fullContext)) {
-          resolution = '1080p Full HD';
-          if (!size) size = '2.8 GB';
-        } else if (/720p.*hevc|hevc.*720p/i.test(fullContext)) {
-          resolution = '720p HEVC';
-          if (!size) size = '850 MB';
-        } else if (/720p/i.test(fullContext)) {
-          resolution = '720p HD';
-          if (!size) size = '1.4 GB';
-        } else if (/480p/i.test(fullContext)) {
-          resolution = '480p SD';
-          if (!size) size = '450 MB';
-        } else if (/250mb/i.test(fullContext)) {
-          resolution = 'HQ HDRip (250 MB)';
-          size = '250 MB';
-        } else if (/700mb/i.test(fullContext)) {
-          resolution = 'HQ HDRip (700 MB)';
-          size = '700 MB';
-        } else if (/hevc/i.test(fullContext)) {
-          resolution = 'HEVC 10Bit';
-          if (!size) size = '1.0 GB';
-        } else if (/hdrip|web-dl/i.test(fullContext)) {
-          resolution = 'HDRip / WEB-DL';
-          if (!size) size = '1.2 GB';
-        }
-
-        // 5. Codec & Audio
+        // Codec & Audio
         const codecMatch = fullContext.match(/\b(HEVC|AVC|x264|x265|H\.?264|H\.?265|10Bit)\b/i);
         const codec = codecMatch ? codecMatch[1] : undefined;
 
         const audioMatch = fullContext.match(/(DD\+?\s*5\.1|Atmos|AAC|MP3|\d+Kbps)/i);
         const audio = audioMatch ? audioMatch[1] : undefined;
 
-        if (!results.some((r) => r.resolution === resolution && r.size === size)) {
-          results.push({
-            id: `res-topic-${i}-${Math.random().toString(36).substring(2, 7)}`,
-            resolution,
-            rawTitle: dnText || resolution,
-            size: size || '1.4 GB',
-            audio,
-            codec,
-            magnetUrl,
-            topicUrl,
-          });
+        // Resolution label
+        let resolution = '1080p Full HD';
+        if (/4k|2160p|uhd/i.test(fullContext)) {
+          resolution = '4K 2160p UHD';
+          if (!size) size = '5.5 GB';
+        } else if (/1080p/i.test(fullContext)) {
+          resolution = /hevc|x265/i.test(fullContext) ? '1080p HEVC' : '1080p Full HD';
+          if (!size) size = '2.5 GB';
+        } else if (/720p/i.test(fullContext)) {
+          resolution = /hevc|x265/i.test(fullContext) ? '720p HEVC' : '720p HD';
+          if (!size) size = '1.4 GB';
+        } else if (/480p/i.test(fullContext)) {
+          resolution = '480p SD';
+          if (!size) size = '450 MB';
+        } else if (/250\s*mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (250 MB)';
+          size = '250 MB';
+        } else if (/400\s*mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (400 MB)';
+          size = '400 MB';
+        } else if (/700\s*mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (700 MB)';
+          size = '700 MB';
+        } else if (/900\s*mb|950\s*mb/i.test(fullContext)) {
+          resolution = 'HQ HDRip (900 MB)';
+          size = '900 MB';
+        } else if (size && /MB/i.test(size)) {
+          resolution = `HQ Rip (${size})`;
+        } else if (/hdrip|web-dl/i.test(fullContext)) {
+          resolution = 'HDRip / WEB-DL';
+          if (!size) size = '1.2 GB';
+        } else {
+          if (size && /GB/i.test(size)) {
+            const num = parseFloat(size);
+            if (num >= 4.0) resolution = '4K 2160p UHD';
+            else if (num >= 1.8) resolution = '1080p Full HD';
+            else resolution = '720p HD';
+          }
+        }
+
+        rawResults.push({
+          id: `res-topic-${i}-${Math.random().toString(36).substring(2, 7)}`,
+          resolution,
+          rawTitle: dnText || resolution,
+          size: size || 'Standard',
+          audio,
+          codec,
+          magnetUrl,
+          topicUrl,
+        });
+      }
+
+      // Deduplicate and distinguish items sharing the exact same base resolution title
+      const seenRes = new Map<string, MovieResolutionItem[]>();
+      for (const item of rawResults) {
+        const key = item.resolution;
+        if (!seenRes.has(key)) {
+          seenRes.set(key, [item]);
+        } else {
+          seenRes.get(key)!.push(item);
         }
       }
 
-      // Sort resolutions
+      seenRes.forEach((items, baseRes) => {
+        if (items.length > 1) {
+          items.forEach((it) => {
+            if (it.size && it.size !== 'Standard') {
+              it.resolution = `${baseRes} (${it.size})`;
+            } else if (it.codec) {
+              it.resolution = `${baseRes} [${it.codec}]`;
+            }
+          });
+        }
+      });
+
+      // Sort resolutions: 4K -> 1080p -> 720p -> 480p -> MB Rips
       const getResOrder = (res: string): number => {
         if (/4k|2160p/i.test(res)) return 1;
-        if (/1080p/i.test(res)) return 2;
-        if (/720p.*hevc/i.test(res)) return 3;
-        if (/720p/i.test(res)) return 4;
-        if (/480p/i.test(res)) return 5;
-        if (/700mb/i.test(res)) return 6;
-        if (/250mb/i.test(res)) return 7;
-        return 8;
+        if (/1080p.*full|1080p/i.test(res)) return 2;
+        if (/1080p.*hevc/i.test(res)) return 3;
+        if (/720p.*hd|720p/i.test(res)) return 4;
+        if (/720p.*hevc/i.test(res)) return 5;
+        if (/480p/i.test(res)) return 6;
+        if (/900\s*mb|950\s*mb/i.test(res)) return 7;
+        if (/700\s*mb/i.test(res)) return 8;
+        if (/400\s*mb/i.test(res)) return 9;
+        if (/250\s*mb/i.test(res)) return 10;
+        return 11;
       };
-      results.sort((a, b) => getResOrder(a.resolution) - getResOrder(b.resolution));
 
-      return results;
+      rawResults.sort((a, b) => getResOrder(a.resolution) - getResOrder(b.resolution));
+
+      return rawResults;
     } catch (err) {
       console.warn('Failed to extract resolutions from topic:', err);
       return [];

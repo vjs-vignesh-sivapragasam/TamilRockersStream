@@ -9,6 +9,7 @@ import {
   Dimensions,
   Alert,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,13 +23,16 @@ import {
   Download,
   X,
 } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Colors } from '../constants/theme';
 import { myListService, MyListItem } from '../services/myListService';
-import { MovieResolutionItem, TamilMvMovieResult } from '../services/tamilMvService';
+import { MovieResolutionItem, TamilMvMovieResult, tamilMvService, posterCache } from '../services/tamilMvService';
 import { TabKey } from './BottomNavBar';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
+import { MovieDetailSheet } from './MovieFinderScreen';
 import { useDownloads } from '../context/DownloadContext';
 import { DownloadItem } from '../types/downloads';
+import { extractInfoHashFromUrl } from '../utils/bencode';
 
 const getQualityBadgeConfig = (res: string) => {
   if (/4k|2160p/i.test(res)) {
@@ -50,20 +54,31 @@ const { width } = Dimensions.get('window');
 
 interface MyListScreenProps {
   onNavigateToTab?: (tab: TabKey) => void;
+  onOpenInBrowserTab?: (url: string) => void;
+  onSelectMovie?: (movie: TamilMvMovieResult) => void;
 }
 
-export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) => {
+export const MyListScreen: React.FC<MyListScreenProps> = ({
+  onNavigateToTab,
+  onOpenInBrowserTab,
+  onSelectMovie,
+}) => {
   const insets = useSafeAreaInsets();
   const { backendUrl, testPing, startDownload } = useDownloads();
 
   const [items, setItems] = useState<MyListItem[]>([]);
   const [selectedMovie, setSelectedMovie] = useState<TamilMvMovieResult | null>(null);
+  const [selectedPosterUrl, setSelectedPosterUrl] = useState<string | null>(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
   const [qualityModalMode, setQualityModalMode] = useState<'play' | 'download' | null>(null);
+  const [streamingResId, setStreamingResId] = useState<string | null>(null);
 
   // Player state
   const [playerVisible, setPlayerVisible] = useState(false);
   const [streamItem, setStreamItem] = useState<DownloadItem | null>(null);
+  const [streamPlayerPosterUrl, setStreamPlayerPosterUrl] = useState<string | undefined>(undefined);
+  const [streamPlayerInitialPos, setStreamPlayerInitialPos] = useState<number>(0);
 
   useEffect(() => {
     const unsub = myListService.subscribe((saved) => {
@@ -92,67 +107,189 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
     myListService.remove(id);
   };
 
-  const handlePlayMovie = async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
-    const pingResult = await Promise.race([
-      testPing(backendUrl),
-      new Promise<{ ok: boolean; latency: number; message: string }>((resolve) =>
-        setTimeout(() => resolve({ ok: false, latency: 3000, message: 'Server connection timed out' }), 3000)
-      ),
-    ]);
+  const handleStreamResolution = useCallback(
+    async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
+      const title = `${movie.movieTitle} (${resItem.resolution})`;
+      let magnet = resItem.magnetUrl;
+      setStreamingResId(resItem.id);
 
-    if (!pingResult.ok) {
-      Alert.alert(
-        'Server is not reachable',
-        `Unable to connect to the streaming server (${backendUrl}).\n\nPlease check if your streaming server is running.`,
-        [
+      try {
+        const pingResult = await Promise.race([
+          testPing(backendUrl),
+          new Promise<{ ok: boolean; latency: number; message: string }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, latency: 3000, message: 'Server connection timed out' }), 3000)
+          ),
+        ]);
+
+        if (!pingResult.ok) {
+          setStreamingResId(null);
+          Alert.alert(
+            'Server is not reachable',
+            `Unable to connect to the streaming server (${backendUrl}).\n\nPlease check if your streaming server is running.`,
+            [
+              { text: 'OK', style: 'cancel' },
+              { text: 'Server Settings', onPress: () => onNavigateToTab?.('settings') },
+            ]
+          );
+          return;
+        }
+
+        if (!magnet && resItem.topicUrl) {
+          const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
+          if (extracted.magnetUrl) {
+            magnet = extracted.magnetUrl;
+            resItem.magnetUrl = extracted.magnetUrl;
+          }
+        }
+
+        if (magnet) {
+          const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+          const streamDownloadItem: DownloadItem = {
+            id: `stream_${Date.now()}`,
+            title,
+            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+            fileUri: '',
+            url: streamUrl,
+            status: 'completed',
+            progress: 1,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            speed: 'VFLEX Internal Stream',
+            isTorrent: false,
+            createdAt: Date.now(),
+          };
+
+          const poster = selectedPosterUrl || (movie.topicUrl ? posterCache.get(movie.topicUrl) : null) || undefined;
+          setStreamPlayerPosterUrl(poster || undefined);
+          setStreamPlayerInitialPos(0);
+          setStreamItem(streamDownloadItem);
+          setPlayerVisible(true);
+        } else {
+          Alert.alert('Notice', 'Direct magnet stream unavailable for this resolution.');
+        }
+      } catch (err: any) {
+        Alert.alert('Stream Error', err?.message || 'Could not start stream');
+      } finally {
+        setStreamingResId(null);
+      }
+    },
+    [backendUrl, testPing, selectedPosterUrl, onNavigateToTab]
+  );
+
+  const handleDownloadMovie = useCallback(
+    async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
+      let target = resItem.magnetUrl || resItem.torrentFileUrl;
+      if (!target && resItem.topicUrl) {
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
+        if (extracted.magnetUrl) {
+          target = extracted.magnetUrl;
+          resItem.magnetUrl = extracted.magnetUrl;
+        }
+      }
+      if (!target) target = resItem.topicUrl;
+
+      if (!target) {
+        Alert.alert('Notice', 'Download link unavailable for this resolution.');
+        return;
+      }
+      try {
+        const title = `${movie.movieTitle} (${resItem.resolution})`;
+        const poster = selectedPosterUrl || (movie.topicUrl ? posterCache.get(movie.topicUrl) : null) || undefined;
+        await startDownload(target, title, poster || undefined);
+
+        Alert.alert('Download Started 📥', `"${title}" has been added to In-App Downloads and is saving to internal storage.`, [
+          { text: 'View Downloads', onPress: () => onNavigateToTab?.('downloads') },
           { text: 'OK', style: 'cancel' },
-          { text: 'Server Settings', onPress: () => onNavigateToTab?.('settings') },
-        ]
-      );
-      return;
-    }
+        ]);
+      } catch (err: any) {
+        Alert.alert('Download Error', err?.message || 'Failed to start movie download');
+      }
+    },
+    [startDownload, onNavigateToTab, selectedPosterUrl]
+  );
 
-    const magnet = resItem.magnetUrl;
-    if (!magnet) {
-      Alert.alert('Notice', 'Direct magnet stream unavailable for this resolution.');
-      return;
+  const handleCopyMagnet = useCallback(async (resItem: MovieResolutionItem) => {
+    let link = resItem.magnetUrl || resItem.torrentFileUrl;
+    if (!link && resItem.topicUrl) {
+      try {
+        const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
+        if (extracted.magnetUrl) {
+          link = extracted.magnetUrl;
+          resItem.magnetUrl = extracted.magnetUrl;
+        }
+      } catch {}
     }
+    if (link) {
+      try {
+        await Clipboard.setStringAsync(link);
+        Alert.alert('Magnet Copied! 📋', 'Magnet link copied to clipboard.');
+      } catch {
+        Alert.alert('Notice', 'Magnet link unavailable.');
+      }
+    } else {
+      Alert.alert('Notice', 'Direct magnet link available on the topic page.');
+    }
+  }, []);
 
-    const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
-    const streamDownloadItem: DownloadItem = {
-      id: `stream_${Date.now()}`,
-      title: `${movie.movieTitle} (${resItem.resolution})`,
-      fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-      fileUri: '',
-      url: streamUrl,
-      status: 'completed',
-      progress: 1,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      speed: 'VFLEX Internal Stream',
-      isTorrent: false,
-      createdAt: Date.now(),
+  const handleOpenExternalPlayer = useCallback(
+    async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
+      let magnet = resItem.magnetUrl;
+      if (!magnet && resItem.topicUrl) {
+        try {
+          const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
+          if (extracted.magnetUrl) {
+            magnet = extracted.magnetUrl;
+            resItem.magnetUrl = extracted.magnetUrl;
+          }
+        } catch {}
+      }
+      if (magnet) {
+        const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+        Linking.openURL(`vlc://${streamUrl}`).catch(() => {
+          Linking.openURL(streamUrl).catch(() => {
+            Alert.alert('External Player', 'VLC for Android or compatible media player is recommended.');
+          });
+        });
+      } else {
+        Alert.alert('Notice', 'Magnet link unavailable for external playback.');
+      }
+    },
+    [backendUrl]
+  );
+
+  const handleOpenDetail = async (item: MyListItem) => {
+    let resolutions = item.resolutions || [];
+    let posterUrl = item.posterUrl || null;
+
+    const movie: TamilMvMovieResult = {
+      id: item.id,
+      movieTitle: item.movieTitle,
+      topicTitle: item.movieTitle,
+      topicUrl: item.topicUrl,
+      year: item.year,
+      language: item.language,
+      resolutions,
     };
 
-    setStreamItem(streamDownloadItem);
-    setPlayerVisible(true);
-  };
+    setSelectedMovie(movie);
+    setSelectedPosterUrl(posterUrl);
+    setDetailModalVisible(true);
 
-  const handleDownloadMovie = async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
-    const target = resItem.magnetUrl || resItem.torrentFileUrl;
-    if (!target) {
-      Alert.alert('Notice', 'Download link unavailable for this resolution.');
-      return;
+    if (onSelectMovie) {
+      onSelectMovie(movie);
     }
-    try {
-      const title = `${movie.movieTitle} (${resItem.resolution})`;
-      await startDownload(target, title);
-      Alert.alert('Download Started', `"${title}" has been queued for download!`, [
-        { text: 'OK' },
-        { text: 'View Downloads', onPress: () => onNavigateToTab?.('downloads') },
-      ]);
-    } catch (err: any) {
-      Alert.alert('Download Error', err?.message || 'Failed to start download');
+
+    // Dynamic resolution fetch if missing or empty
+    if (resolutions.length === 0 && item.topicUrl) {
+      try {
+        const fetchedRes = await tamilMvService.extractResolutionsFromTopic(item.topicUrl);
+        if (fetchedRes && fetchedRes.length > 0) {
+          const updatedMovie = { ...movie, resolutions: fetchedRes };
+          setSelectedMovie(updatedMovie);
+        }
+      } catch (err) {
+        console.warn('Could not fetch resolutions for topic:', err);
+      }
     }
   };
 
@@ -167,6 +304,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
       resolutions: item.resolutions || [],
     };
     setSelectedMovie(movie);
+    setSelectedPosterUrl(item.posterUrl || null);
     setQualityModalMode(mode);
     setQualityModalVisible(true);
   };
@@ -179,7 +317,11 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
     const badge = getQualityBadgeConfig(bestRes?.resolution || '');
 
     return (
-      <View style={[styles.card, { width: cardWidth, height: cardHeight }]}>
+      <TouchableOpacity
+        style={[styles.card, { width: cardWidth, height: cardHeight }]}
+        onPress={() => handleOpenDetail(item)}
+        activeOpacity={0.88}
+      >
         {/* Poster Image */}
         {item.posterUrl ? (
           <Image source={{ uri: item.posterUrl }} style={styles.cardImage} resizeMode="cover" />
@@ -204,7 +346,10 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
           <View style={styles.cardActionsRow}>
             <TouchableOpacity
               style={styles.cardPlayBtn}
-              onPress={() => handleOpenQuality(item, 'play')}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleOpenQuality(item, 'play');
+              }}
               activeOpacity={0.8}
             >
               <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
@@ -213,7 +358,10 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
 
             <TouchableOpacity
               style={styles.cardDownloadBtn}
-              onPress={() => handleOpenQuality(item, 'download')}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleOpenQuality(item, 'download');
+              }}
               activeOpacity={0.8}
             >
               <Download color="#FFFFFF" size={13} strokeWidth={2.2} />
@@ -224,7 +372,10 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
         {/* Remove Bookmark Button (Top Left) */}
         <TouchableOpacity
           style={styles.removeBookmarkBtn}
-          onPress={() => handleRemoveItem(item.id, item.movieTitle)}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleRemoveItem(item.id, item.movieTitle);
+          }}
           activeOpacity={0.75}
         >
           <Bookmark color={Colors.primary} size={15} fill={Colors.primary} strokeWidth={2} />
@@ -238,7 +389,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
             </Text>
           </View>
         ) : null}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -305,6 +456,30 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
         />
       )}
 
+      {/* Movie Detailed Screen (Exact same as Home - detailed screen) */}
+      <MovieDetailSheet
+        visible={detailModalVisible}
+        movie={selectedMovie}
+        streamingResId={streamingResId}
+        isSaved={selectedMovie ? myListService.isSaved(selectedMovie.id || selectedMovie.topicUrl || selectedMovie.movieTitle) : false}
+        onToggleSave={() => {
+          if (selectedMovie) {
+            myListService.toggle(selectedMovie, selectedPosterUrl);
+          }
+        }}
+        onClose={() => setDetailModalVisible(false)}
+        onMovieDownload={handleDownloadMovie}
+        onTorrentDownload={handleDownloadMovie}
+        onStream={handleStreamResolution}
+        onCopy={handleCopyMagnet}
+        onOpenExternal={handleOpenExternalPlayer}
+        enqueuePosterFetch={(topicUrl, cb) => {
+          const cached = posterCache.get(topicUrl);
+          if (cached !== undefined) cb(cached);
+        }}
+        backendUrl={backendUrl}
+      />
+
       {/* Quality Picker Bottom Sheet Modal */}
       {qualityModalVisible && selectedMovie && (
         <View style={styles.modalOverlay}>
@@ -357,7 +532,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({ onNavigateToTab }) =
                     onPress={() => {
                       setQualityModalVisible(false);
                       if (qualityModalMode === 'play') {
-                        handlePlayMovie(res, selectedMovie);
+                        handleStreamResolution(res, selectedMovie);
                       } else {
                         handleDownloadMovie(res, selectedMovie);
                       }
@@ -741,5 +916,114 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     paddingVertical: 20,
+  },
+  detailBannerWrap: {
+    height: 180,
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 14,
+  },
+  detailBannerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  detailBannerGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 90,
+  },
+  detailCloseBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  detailBodyHeader: {
+    marginBottom: 14,
+  },
+  detailMovieTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  detailMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  detailMatchScore: {
+    color: '#34C759',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  detailMetaTag: {
+    color: '#8E8E93',
+    fontSize: 12,
+  },
+  detailHdBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  detailHdBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  detailPrimaryActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailPrimaryPlayBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  detailPrimaryPlayText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  detailPrimaryDownloadBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#262835',
+    borderWidth: 1,
+    borderColor: '#34384A',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  detailPrimaryDownloadText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  detailSectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 10,
+    marginTop: 4,
   },
 });

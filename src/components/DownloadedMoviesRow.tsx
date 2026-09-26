@@ -7,10 +7,10 @@ import {
   Image,
   TouchableOpacity,
 } from 'react-native';
-import { Play, CheckCircle2, HardDrive, ArrowRight, DownloadCloud } from 'lucide-react-native';
+import { Play, CheckCircle2, HardDrive, ArrowRight, DownloadCloud, Folder } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import { DownloadItem } from '../types/downloads';
-import { formatBytes } from '../services/downloadService';
+import { formatBytes, getStorageLocationText } from '../services/downloadService';
 
 interface DownloadedMoviesRowProps {
   items: DownloadItem[];
@@ -163,9 +163,12 @@ export const DownloadedMoviesRow: React.FC<DownloadedMoviesRowProps> = ({
                 <Text style={styles.itemTitle} numberOfLines={1}>
                   {displayTitle}
                 </Text>
-                <Text style={styles.itemSubtitle}>
-                  Tap to play offline
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 }}>
+                  <Folder color="#46D369" size={10} />
+                  <Text style={styles.itemSubtitle} numberOfLines={1}>
+                    {getStorageLocationText(item.fileUri || item.movieFileUri)}
+                  </Text>
+                </View>
               </View>
             </TouchableOpacity>
           );

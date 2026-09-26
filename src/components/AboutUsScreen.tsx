@@ -97,7 +97,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
   const handleSendEmail = async () => {
     try {
-      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VFlix Feedback & Queries`);
+      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VIKIFLEX Feedback & Queries`);
     } catch {
       handleCopyEmail();
     }
@@ -111,9 +111,9 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
   const handleShareApp = async () => {
     try {
       await Share.share({
-        title: 'VFlix',
+        title: 'VIKIFLEX',
         message:
-          'Experience VFlix - high-speed torrent movie streaming and offline player crafted by Vignesh S!',
+          'Experience VIKIFLEX - high-speed torrent movie streaming and offline player crafted by Vignesh S!',
       });
     } catch {}
   };
@@ -151,7 +151,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
         >
           {/* Hero Developer Profile Card */}
           <LinearGradient
-            colors={['#2A080A', '#1E1215', '#141414']}
+            colors={['#082414', '#0F1C15', '#141414']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.heroCard}
@@ -175,12 +175,12 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
             {/* Developer Details */}
             <Text style={styles.devName}>{DEVELOPER_NAME}</Text>
             <View style={styles.rolePill}>
-              <Laptop color={Colors.netflixRed} size={14} />
+              <Laptop color="#30D158" size={14} />
               <Text style={styles.roleText}>{DEVELOPER_ROLE}</Text>
             </View>
 
             <Text style={styles.devBio}>
-              Architect & Full-Stack Mobile Engineer. Creator of VFlix,
+              Architect & Full-Stack Mobile Engineer. Creator of VIKIFLEX,
               passionate about high-performance media architectures, decentralized P2P systems, and buttery-smooth native user interfaces.
             </Text>
 
@@ -223,14 +223,14 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
           {/* App Version & Specs Showcase */}
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
-              <Flame color={Colors.netflixRed} size={18} />
+              <Flame color="#30D158" size={18} />
               <Text style={styles.sectionTitle}>Application Information</Text>
             </View>
 
             <View style={styles.infoGrid}>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>App Name</Text>
-                <Text style={styles.infoValue}>VFlix</Text>
+                <Text style={styles.infoValue}>VIKIFLEX</Text>
               </View>
 
               <View style={styles.infoItem}>
@@ -286,7 +286,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
               <View style={styles.featureItem}>
                 <View style={styles.featureIconBox}>
-                  <Sparkles color={Colors.primary} size={18} />
+                  <Sparkles color="#30D158" size={18} />
                 </View>
                 <View style={styles.featureTextBox}>
                   <Text style={styles.featureTitle}>Direct Device Storage Access</Text>
@@ -306,7 +306,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={[Colors.primary, '#B51527']}
+                colors={['#30D158', '#1B6A2D']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.donateBannerGradient}
@@ -327,7 +327,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
           {/* Footer Copyright */}
           <Text style={styles.footerNote}>
-            Crafted with ❤️ by Vignesh S • VFlix {APP_VERSION}
+            Crafted with ❤️ by Vignesh S • VIKIFLEX {APP_VERSION}
           </Text>
         </Animated.View>
       </ScrollView>
@@ -380,8 +380,8 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.3)',
-    shadowColor: Colors.primary,
+    borderColor: 'rgba(48, 209, 88, 0.35)',
+    shadowColor: '#30D158',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 16,
@@ -398,14 +398,14 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: 'rgba(250, 36, 60, 0.25)',
+    backgroundColor: 'rgba(48, 209, 88, 0.22)',
   },
   avatarBorder: {
     width: 104,
     height: 104,
     borderRadius: 52,
     borderWidth: 3,
-    borderColor: Colors.netflixRed,
+    borderColor: '#30D158',
     overflow: 'hidden',
     backgroundColor: '#1A1A1A',
   },
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(250, 36, 60, 0.15)',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 14,
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   roleText: {
-    color: Colors.netflixRed,
+    color: '#30D158',
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.3,
@@ -469,10 +469,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: Colors.netflixRed,
+    backgroundColor: '#30D158',
     paddingVertical: 12,
     borderRadius: 12,
-    shadowColor: Colors.netflixRed,
+    shadowColor: '#30D158',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   donateBanner: {
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: Colors.netflixRed,
+    shadowColor: '#30D158',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 10,

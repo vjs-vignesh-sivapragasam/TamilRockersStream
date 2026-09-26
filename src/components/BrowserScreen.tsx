@@ -15,7 +15,7 @@ import { Download, ArrowRight, X, Clock } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import { BrowserTab, HistoryItem } from '../types/browser';
 import { INJECTED_AD_SHIELD_SCRIPT, isAdOrVulnerableUrl } from '../utils/adBlocker';
-import { isTorrentUrl, extractTorrentFileName } from '../utils/bencode';
+import { isTorrentUrl, extractTorrentFileName, extractInfoHashFromUrl } from '../utils/bencode';
 import { useDownloads } from '../context/DownloadContext';
 import { browserHistoryService } from '../services/browserHistoryService';
 import { BrowserOmnibar } from './browser/BrowserOmnibar';
@@ -38,7 +38,7 @@ const INJECTED_TORRENT_INTERCEPTOR = `
       if (el && el.href) {
         var href = el.href;
         var lower = href.toLowerCase();
-        if (lower.indexOf('.torrent') !== -1 || lower.indexOf('magnet:') === 0) {
+        if (lower.indexOf('.torrent') !== -1 || lower.indexOf('magnet:') === 0 || lower.indexOf('/api/stream/') !== -1) {
           e.preventDefault();
           e.stopPropagation();
           if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
@@ -57,12 +57,18 @@ const INJECTED_TORRENT_INTERCEPTOR = `
 
 interface BrowserScreenProps {
   onNavigateToDownloads?: () => void;
+  pendingUrlToOpen?: string | null;
+  onClearPendingUrl?: () => void;
 }
 
-export const BrowserScreen: React.FC<BrowserScreenProps> = ({ onNavigateToDownloads }) => {
+export const BrowserScreen: React.FC<BrowserScreenProps> = ({
+  onNavigateToDownloads,
+  pendingUrlToOpen,
+  onClearPendingUrl,
+}) => {
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
-  const { startDownload } = useDownloads();
+  const { startDownload, backendUrl } = useDownloads();
 
   // Tabs Management State
   const [tabs, setTabs] = useState<BrowserTab[]>([
@@ -88,6 +94,14 @@ export const BrowserScreen: React.FC<BrowserScreenProps> = ({ onNavigateToDownlo
   // Modals
   const [tabSwitcherVisible, setTabSwitcherVisible] = useState(false);
   const [shieldModalVisible, setShieldModalVisible] = useState(false);
+
+  // Listen for pending URL request from Home/Movie finder screen to open in new browser tab
+  React.useEffect(() => {
+    if (pendingUrlToOpen) {
+      handleDownloadTorrent(pendingUrlToOpen);
+      onClearPendingUrl?.();
+    }
+  }, [pendingUrlToOpen]);
 
   // Load history on mount
   React.useEffect(() => {
@@ -125,8 +139,33 @@ export const BrowserScreen: React.FC<BrowserScreenProps> = ({ onNavigateToDownlo
   const handleDownloadTorrent = (url: string, suggestedTitle?: string) => {
     startDownload(url, suggestedTitle);
     const fileName = extractTorrentFileName(url, suggestedTitle);
+    const infoHash = extractInfoHashFromUrl(url);
+
+    // Build the stream endpoint URL (e.g. http://<raspberry-pi-ip>:3000/api/stream/<infoHash>)
+    let streamUrl = url;
+    if (infoHash) {
+      streamUrl = `${backendUrl}/api/stream/${infoHash}`;
+    }
+
+    // Automatically create a new browser tab for this stream download
+    const newTabId = `tab-${Date.now()}`;
+    const tabTitle = suggestedTitle || fileName || (infoHash ? `Stream (${infoHash.substring(0, 8)})` : 'Download Stream');
+    const newTab: BrowserTab = {
+      id: newTabId,
+      url: streamUrl,
+      title: tabTitle,
+      canGoBack: false,
+      canGoForward: false,
+      loading: true,
+      progress: 0,
+    };
+
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTabId);
+    setUrlInput(streamUrl);
+
     setToastInfo({
-      title: suggestedTitle || fileName,
+      title: tabTitle,
     });
     setTimeout(() => {
       setToastInfo(null);
@@ -139,10 +178,10 @@ export const BrowserScreen: React.FC<BrowserScreenProps> = ({ onNavigateToDownlo
 
     setHistoryOverlayVisible(false);
 
-    // Check if input is a direct torrent or magnet link
-    if (isTorrentUrl(target)) {
+    // Check if input is a direct torrent, magnet link, or stream URL
+    const infoHash = extractInfoHashFromUrl(target);
+    if (isTorrentUrl(target) || infoHash || target.includes('/api/stream/')) {
       handleDownloadTorrent(target);
-      setUrlInput('');
       return;
     }
 
@@ -212,8 +251,9 @@ export const BrowserScreen: React.FC<BrowserScreenProps> = ({ onNavigateToDownlo
   const shouldStartLoadWithRequest = (request: any): boolean => {
     const reqUrl = (request.url || '').toLowerCase();
 
-    // 1. Intercept .torrent and magnet: downloads
-    if (isTorrentUrl(reqUrl)) {
+    // 1. Intercept .torrent, magnet:, and /api/stream/ downloads
+    const infoHash = extractInfoHashFromUrl(reqUrl);
+    if (isTorrentUrl(reqUrl) || infoHash || reqUrl.includes('/api/stream/')) {
       handleDownloadTorrent(request.url, request.title);
       return false;
     }

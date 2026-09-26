@@ -14,7 +14,13 @@ import { Colors } from '../src/constants/theme';
 function AppContent() {
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
+  const [pendingBrowserUrl, setPendingBrowserUrl] = useState<string | null>(null);
   const { activeDownloadsCount } = useDownloads();
+
+  const handleOpenInBrowserTab = (url: string) => {
+    setPendingBrowserUrl(url);
+    setActiveTab('browser');
+  };
 
   return (
     <View style={styles.rootContainer}>
@@ -28,7 +34,10 @@ function AppContent() {
         {/* All screens stay mounted; only the active one is shown via display flex/none
             to preserve WebView state (browser keeps its current page) */}
         <View style={[styles.screen, activeTab === 'home' ? styles.screenVisible : styles.screenHidden]}>
-          <MovieFinderScreen onNavigateToTab={setActiveTab} />
+          <MovieFinderScreen 
+            onNavigateToTab={setActiveTab}
+            onOpenInBrowserTab={handleOpenInBrowserTab}
+          />
         </View>
 
         <View style={[styles.screen, activeTab === 'mylist' ? styles.screenVisible : styles.screenHidden]}>
@@ -36,7 +45,11 @@ function AppContent() {
         </View>
 
         <View style={[styles.screen, activeTab === 'browser' ? styles.screenVisible : styles.screenHidden]}>
-          <BrowserScreen onNavigateToDownloads={() => setActiveTab('downloads')} />
+          <BrowserScreen 
+            onNavigateToDownloads={() => setActiveTab('downloads')}
+            pendingUrlToOpen={pendingBrowserUrl}
+            onClearPendingUrl={() => setPendingBrowserUrl(null)}
+          />
         </View>
 
         <View style={[styles.screen, activeTab === 'downloads' ? styles.screenVisible : styles.screenHidden]}>
