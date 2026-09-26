@@ -589,7 +589,17 @@ class DownloadService {
       taskState.resumable = resumable;
       this.activeTasks.set(item.id, taskState);
 
-      const result = await resumable.downloadAsync();
+      let result: FileSystem.FileSystemDownloadResult | undefined;
+      if (effectiveResumeData) {
+        try {
+          result = await resumable.resumeAsync();
+        } catch (resumeErr) {
+          console.warn('[DownloadService] resumeAsync failed, falling back to fresh downloadAsync:', resumeErr);
+          result = await resumable.downloadAsync();
+        }
+      } else {
+        result = await resumable.downloadAsync();
+      }
       this.activeTasks.delete(item.id);
 
       if (!result || !result.uri) {

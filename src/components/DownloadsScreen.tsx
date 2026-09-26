@@ -15,6 +15,7 @@ import {
   Linking,
   KeyboardAvoidingView,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -75,6 +76,7 @@ export const DownloadsScreen: React.FC = () => {
     rescanStorage,
     importMovie,
     isBackendConnected,
+    backendUrl,
   } = useDownloads();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -156,29 +158,60 @@ export const DownloadsScreen: React.FC = () => {
 
   const handleStartSocialDownload = async () => {
     if (!socialUrl.trim()) {
-      Alert.alert('URL Required', 'Please enter a valid video link.');
+      Alert.alert('URL Required', 'Please enter a valid YouTube or Instagram video link.');
       return;
     }
 
     const targetTitle = manualTitle.trim() || (parsedMedia ? parsedMedia.title : 'Social Video');
     const resolution = selectedFormat ? selectedFormat.resolution : '1080p';
+    const formatId = selectedFormat ? selectedFormat.id : undefined;
+
+    setParsingSocial(true);
 
     try {
-      await startDownload(socialUrl.trim(), `${targetTitle} [${resolution}]`);
+      const host = backendUrl || 'http://192.168.1.6:3002';
+      const endpoint = `${host}/api/media/download`;
 
-      if (saveToGalleryToggle) {
-        Alert.alert(
-          'Downloading Video 🍿',
-          `"${targetTitle}" (${resolution}) is downloading to VFlix offline storage and will auto-export to your Phone Gallery when complete!`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Downloading Video 🚀',
-          `"${targetTitle}" (${resolution}) is downloading to your VFlix offline library.`,
-          [{ text: 'OK' }]
-        );
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Bypass-Tunnel-Reminder': 'true',
+        },
+        body: JSON.stringify({
+          url: socialUrl.trim(),
+          resolution,
+          title: targetTitle,
+          formatId,
+          saveToGallery: saveToGalleryToggle,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP ${response.status}`);
       }
+
+      const data = await response.json();
+      if (!data || !data.downloadUrl) {
+        throw new Error(data?.error || 'Failed to generate video download link');
+      }
+
+      const fullDownloadUrl = `${host}${data.downloadUrl}`;
+      const poster = parsedMedia?.thumbnail || 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&q=80';
+
+      const newItem = await startDownload(fullDownloadUrl, `${targetTitle} [${resolution}]`, poster);
+
+      if (saveToGalleryToggle && newItem) {
+        setTimeout(async () => {
+          await handleSaveToGalleryItem(newItem);
+        }, 2000);
+      }
+
+      Alert.alert(
+        'Downloading Video 🍿',
+        `"${targetTitle}" (${resolution}) is downloading to your VFlix offline library and exporting to your Phone Gallery!`,
+        [{ text: 'OK' }]
+      );
 
       setSocialUrl('');
       setParsedMedia(null);
@@ -188,6 +221,8 @@ export const DownloadsScreen: React.FC = () => {
       setAddModalVisible(false);
     } catch (err: any) {
       Alert.alert('Download Error', err?.message || 'Failed to start video download.');
+    } finally {
+      setParsingSocial(false);
     }
   };
 
@@ -510,149 +545,179 @@ export const DownloadsScreen: React.FC = () => {
           />
         }
       >
-        {/* Downloader Hub Cards - 2x2 Sleek Grid */}
-        <View style={styles.hubSection}>
-          <Text style={styles.hubSectionTitle}>DOWNLOADER TOOLS HUB</Text>
-          
-          <View style={styles.hubGrid}>
-            <View style={styles.hubGridRow}>
-              {/* Card 1: YouTube Video Downloader */}
-              <TouchableOpacity
-                style={styles.hubCard}
-                onPress={() => {
-                  setAddTab('social');
-                  setAddModalVisible(true);
-                }}
-                activeOpacity={0.82}
-              >
-                <LinearGradient
-                  colors={['#2A0A0A', '#1C0D0E', '#141416']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hubCardGradient}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(255, 0, 0, 0.18)', borderColor: 'rgba(255, 0, 0, 0.35)' }]}>
-                    <Youtube color="#FF0000" size={20} />
-                  </View>
-                  <View style={styles.hubCardInfo}>
-                    <View style={styles.hubHeaderRow}>
-                      <Text style={styles.hubCardTitle} numberOfLines={1}>YouTube</Text>
-                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                        <Text style={[styles.hubBadgeText, { color: '#FF0000' }]}>ACTIVE</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
-                      Shorts, 1080p & MP3
-                    </Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-
-              {/* Card 2: Instagram Video Downloader */}
-              <TouchableOpacity
-                style={styles.hubCard}
-                onPress={() => {
-                  setAddTab('social');
-                  setAddModalVisible(true);
-                }}
-                activeOpacity={0.82}
-              >
-                <LinearGradient
-                  colors={['#270B1D', '#1A0C18', '#141416']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hubCardGradient}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(225, 48, 108, 0.18)', borderColor: 'rgba(225, 48, 108, 0.35)' }]}>
-                    <Instagram color="#E1306C" size={20} />
-                  </View>
-                  <View style={styles.hubCardInfo}>
-                    <View style={styles.hubHeaderRow}>
-                      <Text style={styles.hubCardTitle} numberOfLines={1}>Instagram</Text>
-                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(225, 48, 108, 0.15)' }]}>
-                        <Text style={[styles.hubBadgeText, { color: '#E1306C' }]}>ACTIVE</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
-                      Reels & HD Videos
-                    </Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
+        {/* High-End YouTube & Instagram Downloader Studio */}
+        <View style={styles.socialStudioCard}>
+          <LinearGradient
+            colors={['#2A0A10', '#1C0D18', '#14141A']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.socialStudioGradient}
+          >
+            {/* Header Title with Platform Badges */}
+            <View style={styles.socialStudioHeader}>
+              <View style={styles.socialIconsRow}>
+                <View style={[styles.platformIconCircle, { backgroundColor: 'rgba(255, 0, 0, 0.2)', borderColor: 'rgba(255, 0, 0, 0.4)' }]}>
+                  <Youtube color="#FF0000" size={18} />
+                </View>
+                <View style={[styles.platformIconCircle, { backgroundColor: 'rgba(225, 48, 108, 0.2)', borderColor: 'rgba(225, 48, 108, 0.4)' }]}>
+                  <Instagram color="#E1306C" size={18} />
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.socialStudioTitle}>YouTube & Instagram Downloader</Text>
+                <Text style={styles.socialStudioSubtitle}>
+                  Save Shorts, Reels, 1080p HD Videos & MP3 Audio to Gallery
+                </Text>
+              </View>
             </View>
 
-            <View style={styles.hubGridRow}>
-              {/* Card 3: Torrent Downloader (Under Construction) */}
-              <TouchableOpacity
-                style={[styles.hubCard, styles.hubCardDisabled]}
-                onPress={() => {
-                  Alert.alert(
-                    'Under Construction 🚧',
-                    'Torrent File Downloader is currently undergoing maintenance. Check back in the next release!',
-                    [{ text: 'OK' }]
-                  );
-                }}
-                activeOpacity={0.82}
-              >
-                <LinearGradient
-                  colors={['#1F1A0A', '#16140D', '#141416']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hubCardGradient}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(255, 184, 0, 0.18)', borderColor: 'rgba(255, 184, 0, 0.35)' }]}>
-                    <FileUp color="#FFB800" size={20} />
-                  </View>
-                  <View style={styles.hubCardInfo}>
-                    <View style={styles.hubHeaderRow}>
-                      <Text style={styles.hubCardTitle} numberOfLines={1}>Torrent</Text>
-                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(255, 184, 0, 0.18)' }]}>
-                        <Text style={[styles.hubBadgeText, { color: '#FFB800' }]}>SOON 🚧</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
-                      P2P Torrent Engine
-                    </Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
+            {/* Smart URL Input Field */}
+            <View style={styles.socialInputContainer}>
+              <View style={styles.socialInputRow}>
+                {socialUrl.toLowerCase().includes('instagram') ? (
+                  <Instagram color="#E1306C" size={16} style={{ marginLeft: 10 }} />
+                ) : (
+                  <Youtube color="#FF0000" size={16} style={{ marginLeft: 10 }} />
+                )}
 
-              {/* Card 4: Magnet Downloader (Under Construction) */}
-              <TouchableOpacity
-                style={[styles.hubCard, styles.hubCardDisabled]}
-                onPress={() => {
-                  Alert.alert(
-                    'Under Construction 🚧',
-                    'Magnet Link Downloader is currently undergoing maintenance. Check back in the next release!',
-                    [{ text: 'OK' }]
-                  );
-                }}
-                activeOpacity={0.82}
-              >
-                <LinearGradient
-                  colors={['#1A1724', '#13111C', '#141416']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hubCardGradient}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: 'rgba(175, 82, 222, 0.18)', borderColor: 'rgba(175, 82, 222, 0.35)' }]}>
-                    <Link2 color="#AF52DE" size={20} />
-                  </View>
-                  <View style={styles.hubCardInfo}>
-                    <View style={styles.hubHeaderRow}>
-                      <Text style={styles.hubCardTitle} numberOfLines={1}>Magnet</Text>
-                      <View style={[styles.hubBadge, { backgroundColor: 'rgba(175, 82, 222, 0.18)' }]}>
-                        <Text style={[styles.hubBadgeText, { color: '#AF52DE' }]}>SOON 🚧</Text>
-                      </View>
+                <TextInput
+                  style={styles.socialTextInput}
+                  placeholder="Paste YouTube or Instagram link here..."
+                  placeholderTextColor="#666677"
+                  value={socialUrl}
+                  onChangeText={(text) => {
+                    setSocialUrl(text);
+                    if (parsedMedia) setParsedMedia(null);
+                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
+                {socialUrl.length > 0 ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSocialUrl('');
+                      setParsedMedia(null);
+                    }}
+                    style={styles.inputClearBtn}
+                  >
+                    <X color="#777777" size={16} />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    onPress={handlePasteToSocial}
+                    style={styles.pasteActionBtn}
+                    activeOpacity={0.8}
+                  >
+                    <Sparkles color="#FFFFFF" size={12} />
+                    <Text style={styles.pasteActionText}>Paste</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Parsed Results Box */}
+            {parsedMedia && (
+              <View style={styles.socialResultBox}>
+                <View style={styles.socialResultHeader}>
+                  <Image
+                    source={{ uri: parsedMedia.thumbnail }}
+                    style={styles.socialResultThumb}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.socialResultMeta}>
+                    <View style={styles.socialPlatformPill}>
+                      {parsedMedia.platform === 'youtube' ? (
+                        <>
+                          <Youtube color="#FF0000" size={10} />
+                          <Text style={styles.socialPlatformText}>YOUTUBE</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Instagram color="#E1306C" size={10} />
+                          <Text style={[styles.socialPlatformText, { color: '#E1306C' }]}>INSTAGRAM</Text>
+                        </>
+                      )}
                     </View>
-                    <Text style={styles.hubCardSubtitle} numberOfLines={1}>
-                      Direct Magnet Links
+                    <Text style={styles.socialResultTitle} numberOfLines={2}>
+                      {parsedMedia.title}
                     </Text>
                   </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
+                </View>
+
+                <Text style={styles.formatSelectLabel}>SELECT RESOLUTION QUALITY</Text>
+                <View style={styles.formatCardGrid}>
+                  {parsedMedia.formats.map((fmt) => {
+                    const isSelected = selectedFormat?.id === fmt.id || selectedFormat?.resolution === fmt.resolution;
+                    return (
+                      <TouchableOpacity
+                        key={fmt.id}
+                        style={[styles.formatCard, isSelected && styles.formatCardSelected]}
+                        onPress={() => setSelectedFormat(fmt)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.formatCardTitle, isSelected && styles.formatCardTitleSelected]}>
+                            {fmt.label || fmt.resolution}
+                          </Text>
+                        </View>
+                        {isSelected && <CheckCircle2 color={Colors.netflixRed} size={16} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Auto Export to Phone Gallery Toggle */}
+                <TouchableOpacity
+                  style={styles.socialGalleryRow}
+                  onPress={() => setSaveToGalleryToggle((prev) => !prev)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.socialCheckbox, saveToGalleryToggle && styles.socialCheckboxChecked]}>
+                    {saveToGalleryToggle && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.socialGalleryTitle}>Export Directly to Phone Gallery</Text>
+                    <Text style={styles.socialGallerySub}>Auto saves video to your Camera Roll / Photos</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Action CTA Button */}
+            <TouchableOpacity
+              style={styles.socialCtaBtn}
+              onPress={() => {
+                if (!parsedMedia) {
+                  handleParseSocialVideo();
+                } else {
+                  handleStartSocialDownload();
+                }
+              }}
+              disabled={parsingSocial}
+              activeOpacity={0.88}
+            >
+              <LinearGradient
+                colors={['#FF0000', '#B51527']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.socialCtaGradient}
+              >
+                {parsingSocial ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Download color="#FFFFFF" size={16} strokeWidth={2.5} />
+                )}
+                <Text style={styles.socialCtaText}>
+                  {parsingSocial
+                    ? 'Fetching Resolutions...'
+                    : parsedMedia
+                    ? `Download Video (${selectedFormat?.resolution || '1080p'})`
+                    : 'Parse Video & Select Resolution'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </LinearGradient>
         </View>
 
         {/* 1. Active Downloads Queue */}
@@ -2487,5 +2552,206 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 10,
     lineHeight: 13,
+  },
+  socialStudioCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#2A2D3A',
+  },
+  socialStudioGradient: {
+    padding: 16,
+    gap: 14,
+  },
+  socialStudioHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  socialIconsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  platformIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  socialStudioTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  socialStudioSubtitle: {
+    color: '#8E8E93',
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  socialInputContainer: {
+    gap: 8,
+  },
+  socialInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#12141C',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2D3042',
+    paddingRight: 6,
+  },
+  socialTextInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 13,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  pasteActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.netflixRed,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  pasteActionText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  socialResultBox: {
+    backgroundColor: '#12141C',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#2D3042',
+    gap: 12,
+  },
+  socialResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  socialResultThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    backgroundColor: '#1C1F2B',
+  },
+  socialResultMeta: {
+    flex: 1,
+    gap: 4,
+  },
+  socialPlatformPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  socialPlatformText: {
+    color: '#FF0000',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  socialResultTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  formatSelectLabel: {
+    color: '#8E8E93',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  formatCardGrid: {
+    gap: 8,
+  },
+  formatCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181B26',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#2A2E3D',
+  },
+  formatCardSelected: {
+    borderColor: Colors.netflixRed,
+    backgroundColor: 'rgba(250, 36, 60, 0.12)',
+  },
+  formatCardTitle: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  formatCardTitleSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  formatCardSub: {
+    color: '#666677',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  socialGalleryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(48, 209, 88, 0.08)',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.25)',
+  },
+  socialCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#343848',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#181A20',
+  },
+  socialCheckboxChecked: {
+    backgroundColor: '#30D158',
+    borderColor: '#30D158',
+  },
+  socialGalleryTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  socialGallerySub: {
+    color: '#8E8E93',
+    fontSize: 10,
+  },
+  socialCtaBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  socialCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+  },
+  socialCtaText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
 });

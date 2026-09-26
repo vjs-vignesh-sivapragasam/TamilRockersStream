@@ -382,7 +382,47 @@ app.post('/api/media/parse', async (req, res) => {
   });
 });
 
-// --- YouTube & Instagram Video Downloader Streamer ---
+// --- YouTube & Instagram Direct Stream Proxy ---
+app.get('/api/media/stream', async (req, res) => {
+  const videoStreamUrl = req.query.url;
+  const fileName = req.query.name || 'video.mp4';
+  if (!videoStreamUrl) return res.status(400).send('Stream URL required');
+
+  try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const response = await axios({
+      method: 'GET',
+      url: videoStreamUrl,
+      responseType: 'stream',
+      headers,
+      timeout: 60000,
+    });
+
+    res.status(response.status);
+    if (response.headers['content-length']) {
+      res.setHeader('Content-Length', response.headers['content-length']);
+    }
+    if (response.headers['content-range']) {
+      res.setHeader('Content-Range', response.headers['content-range']);
+    }
+    res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+
+    response.data.pipe(res);
+  } catch (err) {
+    console.warn('[Media Stream Proxy Error]:', err.message);
+    if (!res.headersSent) res.status(500).send('Stream Proxy Error: ' + err.message);
+  }
+});
+
+// --- YouTube & Instagram Video Downloader Stream Resolver ---
 app.post('/api/media/download', async (req, res) => {
   const { url, resolution, title, formatId, platform, customFilename, saveToGallery } = req.body;
   if (!url) return res.status(400).json({ error: 'Video URL required' });
@@ -390,119 +430,62 @@ app.post('/api/media/download', async (req, res) => {
   const cleanTitle = (customFilename || title || 'Social_Video').replace(/[^a-zA-Z0-9_\-\s]/g, '_').trim();
   const fileExt = formatId === 'audio_mp3' || formatId === 'ig_audio' ? 'mp3' : 'mp4';
   const fileName = `${cleanTitle}_${resolution || '1080p'}_${Date.now()}.${fileExt}`;
-  const targetPath = path.join(DOWNLOAD_DIR, fileName);
 
   console.log(`\n======================================================`);
-  console.log(`[Media Downloader] Starting download:`);
-  console.log(`  Title: ${title || cleanTitle}`);
+  console.log(`[Media Downloader] Resolving stream for: ${title || cleanTitle}`);
   console.log(`  Platform: ${platform || 'web'} | Resolution: ${resolution || '1080p'}`);
-  console.log(`  Target File: ${fileName}`);
   console.log(`======================================================\n`);
 
   if (ytdl.validateURL(url) || /youtu\.?be/i.test(url)) {
     try {
-      const isAudio = formatId === 'audio_mp3';
-      const stream = ytdl(url, {
-        filter: isAudio ? 'audioonly' : 'videoandaudio',
-        quality: isAudio ? 'highestaudio' : (resolution === '1080p' ? 'highestvideo' : 'highest'),
-      });
-
-      const fileWriteStream = fs.createWriteStream(targetPath);
-      let downloadedBytes = 0;
-
-      stream.on('data', (chunk) => {
-        downloadedBytes += chunk.length;
-        io.emit('media_download_progress', {
-          fileName,
-          downloadedBytes,
-          progress: 0.5,
+      const isAudio = formatId === 'audio_mp3' || resolution?.toLowerCase().includes('audio');
+      const info = await ytdl.getInfo(url);
+      
+      let targetFormatUrl = null;
+      if (formatId && !isNaN(parseInt(formatId, 10))) {
+        const found = info.formats.find(f => String(f.itag) === String(formatId));
+        if (found) targetFormatUrl = found.url;
+      }
+      
+      if (!targetFormatUrl) {
+        const selected = ytdl.chooseFormat(info.formats, {
+          filter: isAudio ? 'audioonly' : 'videoandaudio',
+          quality: isAudio ? 'highestaudio' : (resolution === '1080p' ? 'highestvideo' : 'highest'),
         });
-      });
+        if (selected && selected.url) {
+          targetFormatUrl = selected.url;
+        }
+      }
 
-      stream.pipe(fileWriteStream);
+      if (!targetFormatUrl) {
+        const fallback = info.formats.find(f => f.url && (f.hasVideo || f.hasAudio));
+        if (fallback) targetFormatUrl = fallback.url;
+      }
 
-      fileWriteStream.on('finish', () => {
-        console.log(`✅ [Media Download Complete] ${fileName}`);
-        const publicUrl = `/downloads/${encodeURIComponent(fileName)}`;
-        io.emit('media_download_done', {
+      if (targetFormatUrl) {
+        const streamUrl = `/api/media/stream?url=${encodeURIComponent(targetFormatUrl)}&name=${encodeURIComponent(fileName)}`;
+        return res.json({
+          success: true,
           fileName,
-          downloadUrl: publicUrl,
+          downloadUrl: streamUrl,
+          fileUri: streamUrl,
           saveToGallery: Boolean(saveToGallery),
         });
-        if (!res.headersSent) {
-          return res.json({
-            success: true,
-            fileName,
-            downloadUrl: publicUrl,
-            fileUri: publicUrl,
-            saveToGallery: Boolean(saveToGallery),
-          });
-        }
-      });
-
-      stream.on('error', (err) => {
-        console.warn('[YTDL Download Warning]:', err.message);
-        fs.writeFileSync(targetPath, Buffer.from('Offline Video Content'));
-        if (!res.headersSent) {
-          res.json({
-            success: true,
-            fileName,
-            downloadUrl: `/downloads/${encodeURIComponent(fileName)}`,
-            fileUri: `/downloads/${encodeURIComponent(fileName)}`,
-          });
-        }
-      });
-      return;
+      }
     } catch (err) {
-      console.warn('[Media Download Exception]:', err.message);
+      console.warn('[YTDL Resolve Error]:', err.message);
     }
   }
 
-  try {
-    const response = await axios({
-      method: 'GET',
-      url,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      timeout: 30000,
-    });
-
-    const fileWriteStream = fs.createWriteStream(targetPath);
-    response.data.pipe(fileWriteStream);
-
-    fileWriteStream.on('finish', () => {
-      console.log(`✅ [Media Download Complete] ${fileName}`);
-      const publicUrl = `/downloads/${encodeURIComponent(fileName)}`;
-      return res.json({
-        success: true,
-        fileName,
-        downloadUrl: publicUrl,
-        fileUri: publicUrl,
-        saveToGallery: Boolean(saveToGallery),
-      });
-    });
-
-    response.data.on('error', (err) => {
-      console.warn('[Direct Stream Error]:', err.message);
-      fs.writeFileSync(targetPath, Buffer.from('Video Content'));
-      return res.json({
-        success: true,
-        fileName,
-        downloadUrl: `/downloads/${encodeURIComponent(fileName)}`,
-      });
-    });
-  } catch (axiosErr) {
-    console.warn('[Axios Download Error]:', axiosErr.message);
-    fs.writeFileSync(targetPath, Buffer.from('Offline Saved Video'));
-    return res.json({
-      success: true,
-      fileName,
-      downloadUrl: `/downloads/${encodeURIComponent(fileName)}`,
-      fileUri: `/downloads/${encodeURIComponent(fileName)}`,
-    });
-  }
+  // Fallback for Instagram or direct links
+  const directStreamUrl = `/api/media/stream?url=${encodeURIComponent(url)}&name=${encodeURIComponent(fileName)}`;
+  return res.json({
+    success: true,
+    fileName,
+    downloadUrl: directStreamUrl,
+    fileUri: directStreamUrl,
+    saveToGallery: Boolean(saveToGallery),
+  });
 });
 
 app.post('/api/torrent/magnet', (req, res) => {
