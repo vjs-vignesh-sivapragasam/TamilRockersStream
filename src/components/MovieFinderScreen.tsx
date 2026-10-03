@@ -17,6 +17,7 @@ import {
   Image,
   Dimensions,
   useWindowDimensions,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -1959,14 +1960,60 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
     }
   }, [displayedCount, recentlyAdded.length]);
 
+  // Scroll-Hide Animated Header State & Logic
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const isHeaderVisible = useRef(true);
+  const lastOffsetY = useRef(0);
+
   const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
     setShowScrollTop(offsetY > 350);
-  }, []);
+
+    const diff = offsetY - lastOffsetY.current;
+
+    if (offsetY <= 20) {
+      if (!isHeaderVisible.current) {
+        isHeaderVisible.current = true;
+        Animated.timing(headerAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    } else if (diff > 10 && offsetY > 60) {
+      if (isHeaderVisible.current) {
+        isHeaderVisible.current = false;
+        Animated.timing(headerAnim, {
+          toValue: -140,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+      }
+    } else if (diff < -10) {
+      if (!isHeaderVisible.current) {
+        isHeaderVisible.current = true;
+        Animated.timing(headerAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+
+    lastOffsetY.current = offsetY;
+  }, [headerAnim]);
 
   const handleScrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-  }, []);
+    if (!isHeaderVisible.current) {
+      isHeaderVisible.current = true;
+      Animated.timing(headerAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [headerAnim]);
 
   // In-App Video Streaming Player State
   const [streamPlayerVisible, setStreamPlayerVisible] = useState(false);
@@ -2939,8 +2986,16 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   return (
     <View style={styles.container}>
-      {/* 1. Premium VFlix Home Header (Overlaid at Top) */}
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+      {/* 1. Premium VFlix Home Header (Overlaid at Top, Hides on Scroll) */}
+      <Animated.View
+        style={[
+          styles.header,
+          {
+            paddingTop: insets.top + 6,
+            transform: [{ translateY: headerAnim }],
+          },
+        ]}
+      >
         <View style={styles.headerLeft}>
           <View style={styles.headerBrandRow}>
             <LinearGradient
@@ -2985,7 +3040,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             <ChevronDown color="#9E9EA7" size={12} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
 
       {/* 3. Main Body Content */}
       {loading ? (
@@ -3592,7 +3647,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 8,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(15, 15, 18, 0.88)',
   },
   headerLeft: {
     marginRight: 6,

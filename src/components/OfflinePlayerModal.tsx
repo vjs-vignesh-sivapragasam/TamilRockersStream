@@ -892,17 +892,15 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     []
   );
 
-  if (!item) return null;
-
-  const localFileUri = item.fileUri || item.movieFileUri || '';
-  const rawUrl = item.url || '';
+  const localFileUri = item?.fileUri || item?.movieFileUri || '';
+  const rawUrl = item?.url || '';
 
   const isDownloadedLocalFile =
     Boolean(localFileUri) &&
-    (item.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
+    (item?.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
 
-  const fn = item.movieFileName || item.fileName;
-  const hash = item.infoHash || extractInfoHashFromUrl(rawUrl);
+  const fn = item?.movieFileName || item?.fileName;
+  const hash = item?.infoHash || extractInfoHashFromUrl(rawUrl);
 
   const backendStreamUrl = isBackendConnected
     ? fn
@@ -943,18 +941,19 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         if (formattedLocal) return formattedLocal;
       }
     }
+    const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
     let streamHttpUrl = rawUrl;
     if (hash) {
-      streamHttpUrl = `${backendUrl}/api/stream/${hash.toLowerCase()}`;
+      streamHttpUrl = `${cleanBackend}/api/stream/${hash.toLowerCase()}`;
     } else if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
-      streamHttpUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
+      streamHttpUrl = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
     } else if (fn) {
-      streamHttpUrl = `${backendUrl}/downloads/${encodeURIComponent(fn)}`;
+      streamHttpUrl = `${cleanBackend}/downloads/${encodeURIComponent(fn)}`;
     } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
       streamHttpUrl = rawUrl;
     }
 
-    if (isBackendConnected && streamHttpUrl) {
+    if (streamHttpUrl) {
       return streamHttpUrl;
     }
     return contentUri || formatFileUriForHtml(localFileUri) || streamHttpUrl || '';
@@ -967,10 +966,10 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     (effectiveVideoSrc.includes('/api/stream') ||
      rawUrl.startsWith('magnet:') ||
      rawUrl.includes('urn:btih:') ||
-     item.speed?.includes('Stream'))
+     item?.speed?.includes('Stream'))
   );
 
-  const movieTitle = item.title || item.movieFileName || item.fileName || 'Movie';
+  const movieTitle = item?.title || item?.movieFileName || item?.fileName || 'Movie';
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   const playerHtml = `
@@ -1301,14 +1300,13 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   }, [visible, item, playerHtml]);
 
   const webViewSource = useMemo(() => {
-    if (htmlFileUri) {
-      return { uri: htmlFileUri };
-    }
-    return { html: playerHtml, baseUrl: FileSystem.documentDirectory || 'file:///' };
-  }, [htmlFileUri, playerHtml]);
+    return { html: playerHtml, baseUrl: 'file:///' };
+  }, [playerHtml]);
 
   // Darkness overlay for smooth MX Player-style brightness adjustment
   const brightnessDimOpacity = (1 - brightness) * 0.88;
+
+  if (!visible || !item) return null;
 
   return (
     <Modal
@@ -1323,11 +1321,11 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         {/* WebView Video Element with gesture listener */}
         <View style={styles.playerContainer} {...screenPanResponder.panHandlers}>
           <WebView
-            key={`${effectiveVideoSrc}_${htmlFileUri}`}
+            key={effectiveVideoSrc || 'vflix_offline_player'}
             ref={webViewRef}
             originWhitelist={['*']}
             source={webViewSource}
-            allowingReadAccessToURL={FileSystem.documentDirectory || 'file:///'}
+            allowingReadAccessToURL="file:///"
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}

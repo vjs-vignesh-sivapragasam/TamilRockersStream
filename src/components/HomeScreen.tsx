@@ -14,6 +14,7 @@ import {
   Share,
   Alert,
   Modal,
+  Animated,
 } from 'react-native';
 import {
   Download,
@@ -63,6 +64,47 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
   const [donateModalVisible, setDonateModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toastInfo, setToastInfo] = useState<{ title: string } | null>(null);
+
+  // Scroll-Hide Animated Header State & Logic
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const isHeaderVisible = useRef(true);
+  const lastOffsetY = useRef(0);
+
+  const handleScroll = (event: any) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const diff = offsetY - lastOffsetY.current;
+
+    if (offsetY <= 20) {
+      if (!isHeaderVisible.current) {
+        isHeaderVisible.current = true;
+        Animated.timing(headerAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    } else if (diff > 10 && offsetY > 60) {
+      if (isHeaderVisible.current) {
+        isHeaderVisible.current = false;
+        Animated.timing(headerAnim, {
+          toValue: -140,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+      }
+    } else if (diff < -10) {
+      if (!isHeaderVisible.current) {
+        isHeaderVisible.current = true;
+        Animated.timing(headerAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+
+    lastOffsetY.current = offsetY;
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -154,8 +196,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#141414" translucent />
 
-      {/* Top Header Bar */}
-      <View style={styles.topHeader}>
+      {/* Top Header Bar (Hides on Scroll) */}
+      <Animated.View style={[styles.topHeader, { transform: [{ translateY: headerAnim }] }]}>
         <View style={styles.logoRow}>
           <Text style={styles.vLogo}>V</Text>
           <Text style={styles.appTitle}>FLIX</Text>
@@ -192,13 +234,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
             <RotateCcw color="#FFFFFF" size={16} />
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
 
       <ScrollView
         ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -539,6 +583,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   topHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

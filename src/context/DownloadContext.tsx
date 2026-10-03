@@ -21,7 +21,7 @@ const resolveDefaultBackendUrl = (): string => {
       }
     }
   } catch {}
-  return 'http://192.168.1.6:3002';
+  return 'https://vflix-backend.onrender.com';
 };
 
 export const resolveBackendUrlForDevice = (rawUrl: string): string => {

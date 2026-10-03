@@ -422,6 +422,30 @@ app.post('/api/media/parse', async (req, res) => {
   });
 });
 
+// Helper: Cobalt API fallback for YouTube & Instagram videos
+async function getCobaltYouTubeDownload(videoUrl) {
+  try {
+    const response = await axios.post(
+      'https://api.cobalt.tools/',
+      { url: videoUrl, videoQuality: '1080' },
+      {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        timeout: 12000,
+      }
+    );
+    if (response.data && response.data.url) {
+      return response.data.url;
+    }
+  } catch (err) {
+    console.warn('[Cobalt API Warning]:', err?.message || err);
+  }
+  return null;
+}
+
 // --- YouTube & Instagram Direct Stream Proxy ---
 app.get('/api/media/stream', async (req, res) => {
   const videoStreamUrl = req.query.url;
@@ -430,8 +454,14 @@ app.get('/api/media/stream', async (req, res) => {
 
   try {
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
     };
+    if (videoStreamUrl.includes('googlevideo.com') || videoStreamUrl.includes('youtube.com') || videoStreamUrl.includes('youtu.be')) {
+      headers['Referer'] = 'https://www.youtube.com/';
+      headers['Origin'] = 'https://www.youtube.com';
+    }
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
@@ -457,8 +487,14 @@ app.get('/api/media/stream', async (req, res) => {
 
     response.data.pipe(res);
   } catch (err) {
-    console.warn('[Media Stream Proxy Error]:', err.message);
-    if (!res.headersSent) res.status(500).send('Stream Proxy Error: ' + err.message);
+    console.warn('[Media Stream Proxy Warning]:', err.message);
+    if (!res.headersSent) {
+      res.status(200);
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+      // If direct stream proxy fails, redirect directly to the video source URL
+      return res.redirect(videoStreamUrl);
+    }
   }
 });
 
@@ -479,14 +515,20 @@ app.post('/api/media/download', async (req, res) => {
   if (ytdl.validateURL(url) || /youtu\.?be/i.test(url)) {
     try {
       const isAudio = formatId === 'audio_mp3' || resolution?.toLowerCase().includes('audio');
-      const info = await ytdl.getInfo(url);
-      
+      const info = await ytdl.getInfo(url, {
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          },
+        },
+      });
+
       let targetFormatUrl = null;
       if (formatId && !isNaN(parseInt(formatId, 10))) {
         const found = info.formats.find(f => String(f.itag) === String(formatId));
         if (found) targetFormatUrl = found.url;
       }
-      
+
       if (!targetFormatUrl) {
         const selected = ytdl.chooseFormat(info.formats, {
           filter: isAudio ? 'audioonly' : 'videoandaudio',
@@ -513,7 +555,24 @@ app.post('/api/media/download', async (req, res) => {
         });
       }
     } catch (err) {
-      console.warn('[YTDL Resolve Error]:', err.message);
+      console.warn('[YTDL Resolve Warning, trying Cobalt Fallback]:', err.message);
+    }
+
+    // Try Cobalt API fallback for YouTube
+    try {
+      const cobaltUrl = await getCobaltYouTubeDownload(url);
+      if (cobaltUrl) {
+        const streamUrl = `/api/media/stream?url=${encodeURIComponent(cobaltUrl)}&name=${encodeURIComponent(fileName)}`;
+        return res.json({
+          success: true,
+          fileName,
+          downloadUrl: streamUrl,
+          fileUri: streamUrl,
+          saveToGallery: Boolean(saveToGallery),
+        });
+      }
+    } catch (cobaltErr) {
+      console.warn('[Cobalt Fallback Error]:', cobaltErr.message);
     }
   }
 
@@ -768,14 +827,11 @@ function streamVideoFileToResponse(torrent, file, req, res) {
 
   // Chunk cap: 10MB per range request ONLY for HTML5 inline player seeking.
   // For file downloads (dl=1, in-app downloads), stream the full range (start to total - 1).
-  const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
   const requestedEnd = positions[1] ? parseInt(positions[1], 10) : null;
   const end =
     requestedEnd !== null && !isNaN(requestedEnd)
       ? requestedEnd
-      : isDownloadRequest
-      ? total - 1
-      : Math.min(start + MAX_CHUNK_SIZE - 1, total - 1);
+      : total - 1;
   const chunksize = Math.max(0, end - start + 1);
 
   // Immediately prioritize pieces covering this range + next 25 pieces

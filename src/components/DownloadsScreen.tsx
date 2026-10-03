@@ -790,7 +790,7 @@ export const DownloadsScreen: React.FC = () => {
                               ? `ERROR: ${item.error || 'Connection failed'}`
                               : isPaused
                               ? 'PAUSED'
-                              : `${item.speed || '0 KB/s'} (${item.peersCount || 0} peers)`}
+                              : `${item.speed || '0 KB/s'}`}
                           </Text>
                         </View>
                       </View>

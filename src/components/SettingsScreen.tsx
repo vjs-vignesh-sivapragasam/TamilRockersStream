@@ -832,6 +832,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <View style={styles.iosSection}>
               <Text style={styles.iosSectionHeader}>SERVER PRESETS</Text>
               <View style={{ gap: 10 }}>
+                {/* Render Cloud Server Preset */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    customServerUrl === 'https://vflix-backend.onrender.com' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => handleApplyServerUrl('https://vflix-backend.onrender.com')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(250, 36, 60, 0.18)' }]}>
+                      <Globe color={Colors.primary} size={16} strokeWidth={2} />
+                    </View>
+                    <View>
+                      <Text style={styles.presetName}>Render Cloud Server (Online)</Text>
+                      <Text style={styles.presetUrl}>https://vflix-backend.onrender.com</Text>
+                    </View>
+                  </View>
+                  {customServerUrl === 'https://vflix-backend.onrender.com' && (
+                    <Check color={Colors.primary} size={18} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+
                 {/* Dev Server Preset */}
                 <TouchableOpacity
                   style={[
