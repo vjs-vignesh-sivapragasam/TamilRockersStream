@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 import { io, Socket } from 'socket.io-client';
 
 import { DownloadItem, StorageStats } from '../types/downloads';
-import { downloadService } from '../services/downloadService';
+import { downloadService, makeUniqueFileName } from '../services/downloadService';
 import { torrentEngine } from '../services/torrentEngine';
 import { resolveTorrentMoviePayload, extractInfoHashFromUrl } from '../utils/bencode';
 import { debridService } from '../services/debridService';
@@ -461,7 +461,8 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const importMovie = useCallback(
     async (sourceUri: string, fileName: string): Promise<DownloadItem> => {
-      const newItem = await downloadService.importMovieFile(sourceUri, fileName);
+      const existingFileNames = downloads.flatMap((d) => [d.fileName, d.movieFileName].filter(Boolean) as string[]);
+      const newItem = await downloadService.importMovieFile(sourceUri, fileName, existingFileNames);
       setDownloads((prev) => {
         const filtered = prev.filter(
           (d) => d.id !== newItem.id && d.fileName.toLowerCase() !== newItem.fileName.toLowerCase()
@@ -471,7 +472,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       refreshStorageStats();
       return newItem;
     },
-    [refreshStorageStats]
+    [downloads, refreshStorageStats]
   );
 
   const updateItem = useCallback((id: string, updates: Partial<DownloadItem>) => {
@@ -547,113 +548,124 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
         }
       }
 
-      const initialItem = downloadService.createDownloadItem(targetUrl, suggestedTitle, posterUrl);
+      const existingFileNames = downloads.flatMap((d) => [d.fileName, d.movieFileName].filter(Boolean) as string[]);
+      const initialItem = downloadService.createDownloadItem(targetUrl, suggestedTitle, posterUrl, existingFileNames);
       
       setDownloads((prev) => [initialItem, ...prev]);
 
       if (initialItem.isTorrent) {
         // Resolve the real movie video file from the torrent file
         resolveTorrentMoviePayload(initialItem.url, suggestedTitle).then((resolved) => {
-          const movieFileName = resolved.movieFileName;
-          const movieFileUri = `${downloadService.getDownloadsDirectory()}${movieFileName}`;
-          const totalBytes = resolved.totalBytes > 0 ? resolved.totalBytes : initialItem.totalBytes;
-          const directMovieUrl = resolved.movieDownloadUrl;
+          setDownloads((currentDownloads) => {
+            const activeItem = currentDownloads.find((d) => d.id === initialItem.id) || initialItem;
+            const otherFileNames = currentDownloads
+              .filter((d) => d.id !== initialItem.id)
+              .flatMap((d) => [d.fileName, d.movieFileName].filter(Boolean) as string[]);
 
-          const updatedPayloadItem: DownloadItem = {
-            ...initialItem,
-            title: resolved.title || initialItem.title,
-            fileName: movieFileName,
-            movieFileName,
-            fileUri: movieFileUri,
-            movieFileUri,
-            totalBytes,
-            torrentMetadata: resolved.torrentMetadata || initialItem.torrentMetadata,
-            url: directMovieUrl || initialItem.url,
-          };
-
-          updateItem(initialItem.id, updatedPayloadItem);
-
-          // If direct WebSeed/Media stream URL or HTTP backend stream URL is resolved, download the real movie data directly!
-          const isHttpUrl = updatedPayloadItem.url.startsWith('http://') || updatedPayloadItem.url.startsWith('https://');
-
-          if (directMovieUrl || isHttpUrl) {
-            downloadService.startRealDownload(
-              updatedPayloadItem,
-              (progressUpdates) => {
-                updateItem(initialItem.id, progressUpdates);
-              },
-              (completedUpdates) => {
-                updateItem(initialItem.id, {
-                  ...completedUpdates,
-                  title: resolved.title,
-                  movieFileName,
-                  movieFileUri,
-                });
-              },
-              (errorMsg) => {
-                updateItem(initialItem.id, {
-                  status: 'error',
-                  error: errorMsg,
-                  speed: '0 KB/s',
-                });
-              }
+            const uniqueMovieFileName = makeUniqueFileName(
+              resolved.movieFileName || activeItem.movieFileName || activeItem.fileName,
+              otherFileNames
             );
-          } else {
-            // Push to our dedicated backend server
-            const runBackendDownload = async () => {
-              updateItem(initialItem.id, { speed: 'Connecting to Backend...' });
-              try {
-                const magnetTarget = initialItem.url.startsWith('magnet:')
-                  ? initialItem.url
-                  : (infoHash ? `magnet:?xt=urn:btih:${infoHash}` : null);
+            const movieFileUri = `${downloadService.getDownloadsDirectory()}${uniqueMovieFileName}`;
+            const totalBytes = resolved.totalBytes > 0 ? resolved.totalBytes : activeItem.totalBytes;
+            const directMovieUrl = resolved.movieDownloadUrl;
 
-                if (magnetTarget) {
-                  const res = await fetch(`${backendUrl}/api/torrent/magnet`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
-                    body: JSON.stringify({ magnet: magnetTarget, appId: initialItem.id })
-                  });
-                  if (!res.ok) throw new Error('Failed to send magnet to backend');
-                } else if (initialItem.url.startsWith('data:')) {
-                  // It's a base64 encoded data URI!
-                  const res = await fetch(`${backendUrl}/api/torrent/file-base64`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
-                    body: JSON.stringify({ 
-                      appId: initialItem.id, 
-                      base64: initialItem.url,
-                      name: initialItem.fileName || 'movie.torrent'
-                    })
-                  });
-                  if (!res.ok) throw new Error('Failed to upload base64 torrent to backend');
-                } else {
-                  // Upload .torrent file via form data (if it's a file:// uri)
-                  const formData = new FormData();
-                  formData.append('appId', initialItem.id);
-                  formData.append('torrent', {
-                    uri: initialItem.url,
-                    name: initialItem.fileName || 'movie.torrent',
-                    type: 'application/x-bittorrent'
-                  } as any);
-
-                  const res = await fetch(`${backendUrl}/api/torrent/file`, {
-                    method: 'POST',
-                    headers: { 'Bypass-Tunnel-Reminder': 'true' },
-                    body: formData
-                  });
-                  if (!res.ok) throw new Error('Failed to upload torrent to backend');
-                }
-              } catch (err: any) {
-                console.warn('Backend Download Error:', err);
-                updateItem(initialItem.id, {
-                  status: 'error',
-                  error: 'Backend Error: ' + err.message,
-                  speed: '0 KB/s',
-                });
-              }
+            const updatedPayloadItem: DownloadItem = {
+              ...activeItem,
+              title: resolved.title || activeItem.title,
+              fileName: uniqueMovieFileName,
+              movieFileName: uniqueMovieFileName,
+              fileUri: movieFileUri,
+              movieFileUri,
+              totalBytes,
+              torrentMetadata: resolved.torrentMetadata || activeItem.torrentMetadata,
+              url: directMovieUrl || activeItem.url,
             };
-            runBackendDownload();
-          }
+
+            // If direct WebSeed/Media stream URL or HTTP backend stream URL is resolved, download the real movie data directly!
+            const isHttpUrl = updatedPayloadItem.url.startsWith('http://') || updatedPayloadItem.url.startsWith('https://');
+
+            if (directMovieUrl || isHttpUrl) {
+              downloadService.startRealDownload(
+                updatedPayloadItem,
+                (progressUpdates) => {
+                  updateItem(initialItem.id, progressUpdates);
+                },
+                (completedUpdates) => {
+                  updateItem(initialItem.id, {
+                    ...completedUpdates,
+                    title: resolved.title || updatedPayloadItem.title,
+                    movieFileName: uniqueMovieFileName,
+                    movieFileUri,
+                  });
+                },
+                (errorMsg) => {
+                  updateItem(initialItem.id, {
+                    status: 'error',
+                    error: errorMsg,
+                    speed: '0 KB/s',
+                  });
+                }
+              );
+            } else {
+              // Push to our dedicated backend server
+              const runBackendDownload = async () => {
+                updateItem(initialItem.id, { speed: 'Connecting to Backend...' });
+                try {
+                  const magnetTarget = initialItem.url.startsWith('magnet:')
+                    ? initialItem.url
+                    : (infoHash ? `magnet:?xt=urn:btih:${infoHash}` : null);
+
+                  if (magnetTarget) {
+                    const res = await fetch(`${backendUrl}/api/torrent/magnet`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+                      body: JSON.stringify({ magnet: magnetTarget, appId: initialItem.id })
+                    });
+                    if (!res.ok) throw new Error('Failed to send magnet to backend');
+                  } else if (initialItem.url.startsWith('data:')) {
+                    // It's a base64 encoded data URI!
+                    const res = await fetch(`${backendUrl}/api/torrent/file-base64`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+                      body: JSON.stringify({ 
+                        appId: initialItem.id, 
+                        base64: initialItem.url,
+                        name: initialItem.fileName || 'movie.torrent'
+                      })
+                    });
+                    if (!res.ok) throw new Error('Failed to upload base64 torrent to backend');
+                  } else {
+                    // Upload .torrent file via form data (if it's a file:// uri)
+                    const formData = new FormData();
+                    formData.append('appId', initialItem.id);
+                    formData.append('torrent', {
+                      uri: initialItem.url,
+                      name: initialItem.fileName || 'movie.torrent',
+                      type: 'application/x-bittorrent'
+                    } as any);
+
+                    const res = await fetch(`${backendUrl}/api/torrent/file`, {
+                      method: 'POST',
+                      headers: { 'Bypass-Tunnel-Reminder': 'true' },
+                      body: formData
+                    });
+                    if (!res.ok) throw new Error('Failed to upload torrent to backend');
+                  }
+                } catch (err: any) {
+                  console.warn('Backend Download Error:', err);
+                  updateItem(initialItem.id, {
+                    status: 'error',
+                    error: 'Backend Error: ' + err.message,
+                    speed: '0 KB/s',
+                  });
+                }
+              };
+              runBackendDownload();
+            }
+
+            return currentDownloads.map((item) => (item.id === initialItem.id ? updatedPayloadItem : item));
+          });
         });
       } else {
         // Direct HTTP stream or media download (MP4, MKV, /api/stream/...)
@@ -677,7 +689,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       return initialItem;
     },
-    [backendUrl, updateItem]
+    [backendUrl, downloads, updateItem]
   );
 
   const pauseDownload = useCallback(

@@ -157,8 +157,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
       {/* Top Header Bar */}
       <View style={styles.topHeader}>
         <View style={styles.logoRow}>
-          <Text style={styles.vLogo}>VIKI</Text>
-          <Text style={styles.appTitle}>FLEX</Text>
+          <Text style={styles.vLogo}>V</Text>
+          <Text style={styles.appTitle}>FLIX</Text>
         </View>
 
         <View style={styles.topRightActions}>

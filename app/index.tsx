@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { SplashScreen } from '../src/components/SplashScreen';
 import { BottomNavBar, TabKey } from '../src/components/BottomNavBar';
 import { MovieFinderScreen } from '../src/components/MovieFinderScreen';
+import { SearchScreen } from '../src/components/SearchScreen';
 import { MyListScreen } from '../src/components/MyListScreen';
 import { BrowserScreen } from '../src/components/BrowserScreen';
 import { DownloadsScreen } from '../src/components/DownloadsScreen';
@@ -35,6 +36,13 @@ function AppContent() {
             to preserve WebView state (browser keeps its current page) */}
         <View style={[styles.screen, activeTab === 'home' ? styles.screenVisible : styles.screenHidden]}>
           <MovieFinderScreen 
+            onNavigateToTab={setActiveTab}
+            onOpenInBrowserTab={handleOpenInBrowserTab}
+          />
+        </View>
+
+        <View style={[styles.screen, activeTab === 'search' ? styles.screenVisible : styles.screenHidden]}>
+          <SearchScreen 
             onNavigateToTab={setActiveTab}
             onOpenInBrowserTab={handleOpenInBrowserTab}
           />

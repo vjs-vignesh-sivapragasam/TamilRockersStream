@@ -664,8 +664,9 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
   onPress,
 }) => {
   const { width: screenWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const cardWidth = screenWidth;
-  const cardHeight = Math.round(screenWidth * 1.25);
+  const cardHeight = Math.round(screenWidth * 1.30) + Math.round(insets.top * 0.5);
 
   const topicUrl = movie.topicUrl || movie.resolutions?.[0]?.topicUrl || '';
   const [posterUrl, setPosterUrl] = useState<string | null>(() => {
@@ -733,15 +734,16 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
         </LinearGradient>
       )}
 
-      {/* Dark gradient overlay bottom fade */}
+      {/* Dark gradient overlay matching MovieDetailSheet overlay feel */}
       <LinearGradient
-        colors={['rgba(10,10,14,0.3)', 'transparent', 'rgba(10,10,14,0.75)', 'rgba(10,10,14,0.98)']}
+        colors={['rgba(9,9,12,0.88)', 'rgba(9,9,12,0.35)', 'transparent', 'rgba(9,9,12,0.85)', '#09090C']}
+        locations={[0, 0.16, 0.45, 0.8, 1]}
         style={styles.heroGradientOverlay}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       >
-        {/* Top Header Row */}
-        <View style={styles.heroHeaderRow}>
+        {/* Top Header Row (positioned under top overlay header) */}
+        <View style={[styles.heroHeaderRow, { marginTop: insets.top + 46 }]}>
           <View style={styles.heroBadge}>
             <Sparkles color="#FFD700" size={13} strokeWidth={2.5} />
             <Text style={styles.heroBadgeText}>
@@ -1061,7 +1063,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         });
     }, [cleanTitle, movie]);
 
-    const effectivePoster = dbMetadata?.backdropUrl || dbMetadata?.posterUrl || posterUrl;
+    const effectivePoster = posterUrl || dbMetadata?.backdropUrl || dbMetadata?.posterUrl;
     const displayTitle = dbMetadata?.title || cleanTitle;
 
     const handleQuickOpenBrowser = useCallback(() => {
@@ -2936,9 +2938,9 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 6 }]}>
-      {/* 1. Premium VFlix Home Header */}
-      <View style={styles.header}>
+    <View style={styles.container}>
+      {/* 1. Premium VFlix Home Header (Overlaid at Top) */}
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerLeft}>
           <View style={styles.headerBrandRow}>
             <LinearGradient
@@ -2951,8 +2953,8 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
             </LinearGradient>
             <View style={styles.brandTitleCol}>
               <View style={styles.brandTitleRow}>
-                <Text style={styles.brandTitleV}>VIKI</Text>
-                <Text style={styles.brandTitleFlix}>FLEX</Text>
+                <Text style={styles.brandTitleV}>V</Text>
+                <Text style={styles.brandTitleFlix}>FLIX</Text>
                 <View style={styles.brandCinemaBadge}>
                   <Text style={styles.brandCinemaBadgeText}>CINEMA</Text>
                 </View>
@@ -2963,6 +2965,13 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
 
         <View style={styles.headerRightActions}>
+          <TouchableOpacity
+            style={styles.headerSearchBtn}
+            onPress={() => onNavigateToTab?.('search')}
+            activeOpacity={0.75}
+          >
+            <Search color="#FFFFFF" size={18} strokeWidth={2.4} />
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.mirrorChip}
@@ -2978,124 +2987,15 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
       </View>
 
-      {/* 2. Modern Glassmorphic Search Bar */}
-      <View style={styles.searchBarWrapper}>
-        <View style={styles.searchBar}>
-          {!isHomeFeed ? (
-            <TouchableOpacity
-              onPress={handleClearSearch}
-              style={styles.searchBackBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              activeOpacity={0.7}
-              accessibilityLabel="Back to Home feed"
-            >
-              <ArrowLeft color="#FFFFFF" size={17} strokeWidth={2.4} />
-            </TouchableOpacity>
-          ) : (
-            <Search color={Colors.primary} size={16} strokeWidth={2.5} />
-          )}
-          <TextInput
-            style={styles.input}
-            placeholder={!isHomeFeed ? `Showing: "${searchedQuery}" (tap X for Home)` : "Search movie title (e.g. Leo, Amaran)..."}
-            placeholderTextColor="#8E8E93"
-            value={query}
-            onChangeText={setQuery}
-            onSubmitEditing={() => handlePerformSearch()}
-            returnKeyType="search"
-            autoCorrect={false}
-          />
-          {(query.length > 0 || !isHomeFeed) && (
-            <TouchableOpacity
-              onPress={() => {
-                if (!isHomeFeed) {
-                  handleClearSearch();
-                } else {
-                  setQuery('');
-                }
-              }}
-              style={styles.clearBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Clear and return to Home"
-            >
-              <X color="#FFFFFF" size={15} strokeWidth={2.5} />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {!isHomeFeed && !query.trim() ? (
-          <TouchableOpacity
-            onPress={handleClearSearch}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={['#2B1E22', '#1B1416']}
-              style={[styles.searchBtn, styles.homeResetBtn]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <RotateCcw color={Colors.primary} size={13} strokeWidth={2.4} style={{ marginRight: 4 }} />
-              <Text style={styles.homeResetBtnText}>Home</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={() => handlePerformSearch()}
-            disabled={!query.trim() || loading}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={!query.trim() ? ['#221C1E', '#181416'] : [Colors.primary, '#B51527']}
-              style={[styles.searchBtn, !query.trim() && styles.searchBtnDisabled]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.searchBtnText}>Search</Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* 2.5. Multi-Language Filter Chips Bar */}
-      <View style={styles.langFilterContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.langFilterScroll}
-        >
-          {['All', 'Tamil', 'English', 'Telugu', 'Hindi', 'Malayalam', 'Kannada'].map((lang) => {
-            const active = isLangActive(lang);
-            return (
-              <TouchableOpacity
-                key={lang}
-                style={[styles.langChip, active && styles.langChipActive]}
-                onPress={() => handleToggleLanguage(lang)}
-                activeOpacity={0.75}
-              >
-                {active && lang !== 'All' ? (
-                  <Check color="#FFFFFF" size={12} strokeWidth={3} style={{ marginRight: 4 }} />
-                ) : null}
-                <Text style={[styles.langChipText, active && styles.langChipTextActive]}>
-                  {lang}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
       {/* 3. Main Body Content */}
       {loading ? (
-        <View style={styles.stateCenter}>
+        <View style={[styles.stateCenter, { paddingTop: insets.top + 60 }]}>
           <ActivityIndicator size="small" color={Colors.netflixRed} />
           <Text style={styles.loadingText}>Searching {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}...</Text>
         </View>
       ) : hasSearched && results.length === 0 ? (
         /* Clean Not Found State */
-        <View style={styles.stateCenter}>
+        <View style={[styles.stateCenter, { paddingTop: insets.top + 60 }]}>
           <AlertCircle color="#FF453A" size={44} strokeWidth={2.2} />
           <Text style={styles.notFoundTitle}>No Results Found</Text>
           <Text style={styles.notFoundSub}>
@@ -3121,7 +3021,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         </View>
       ) : hasSearched && filteredResults.length === 0 ? (
         /* Filtered Out By Language State */
-        <View style={styles.stateCenter}>
+        <View style={[styles.stateCenter, { paddingTop: insets.top + 60 }]}>
           <Film color="#8E8E93" size={44} strokeWidth={1.8} />
           <Text style={styles.notFoundTitle}>No {selectedLanguages.join(', ')} Movies</Text>
           <Text style={styles.notFoundSub}>
@@ -3155,7 +3055,13 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           renderItem={renderMovieCard}
           numColumns={2}
           columnWrapperStyle={styles.listGridColumnWrapper}
-          contentContainerStyle={[styles.listGridContent, { paddingBottom: insets.bottom + 100 }]}
+          contentContainerStyle={[
+            styles.listGridContent,
+            {
+              paddingTop: isHomeFeed ? 0 : insets.top + 54,
+              paddingBottom: insets.bottom + 100,
+            },
+          ]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
@@ -3676,12 +3582,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 2,
     paddingBottom: 8,
+    backgroundColor: 'transparent',
   },
   headerLeft: {
     marginRight: 6,
@@ -3783,6 +3694,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     maxWidth: 75,
+  },
+  headerSearchBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   refreshHeaderBtn: {
     width: 32,
@@ -5180,17 +5101,16 @@ const styles = StyleSheet.create({
   },
   heroSectionWrap: {
     marginBottom: 20,
-    marginTop: -10,
-    marginHorizontal: -12,
+    marginTop: 0,
+    marginHorizontal: 0,
   },
   heroCardContainer: {
     borderRadius: 0,
     overflow: 'hidden',
     alignSelf: 'stretch',
-    backgroundColor: '#16171D',
+    backgroundColor: '#09090C',
     borderWidth: 0,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.25)',
+    borderBottomWidth: 0,
   },
   heroGradientOverlay: {
     ...StyleSheet.absoluteFill,

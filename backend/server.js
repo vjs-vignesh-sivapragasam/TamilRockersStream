@@ -77,6 +77,43 @@ function ensureTrackersInMagnet(magnetOrHash) {
   return str;
 }
 
+function formatMovieFileName(rawName, fallbackExt = '.mp4') {
+  if (!rawName || typeof rawName !== 'string' || rawName.trim().length === 0) {
+    return `Movie_${Date.now()}${fallbackExt}`;
+  }
+
+  let str = rawName.trim();
+  let ext = fallbackExt;
+  const extMatch = str.match(/\.([a-zA-Z0-9]+)$/);
+  if (extMatch) {
+    const foundExt = extMatch[0].toLowerCase();
+    if (foundExt === '.torrent') ext = '.torrent';
+    else if (foundExt === '.mp3') ext = '.mp3';
+    else ext = '.mp4';
+    str = str.slice(0, -extMatch[0].length);
+  }
+
+  str = str.replace(/^(www\.[a-z0-9.]+\s*-\s*|[a-z0-9.]*1tamilmv[a-z0-9.]*\s*-\s*|[a-z0-9.]*tamilrockers[a-z0-9.]*\s*-\s*|[a-z0-9.]*tamilblasters[a-z0-9.]*\s*-\s*|[a-z0-9.]*isaimini[a-z0-9.]*\s*-\s*)/gi, '');
+  str = str.replace(/\[[^\]]*\]/g, '');
+  str = str.replace(/\([^)]*\)/g, (m) => (/\b(19\d\d|20\d\d)\b/.test(m) ? m : ''));
+  str = str.replace(/\b(19\d\d|20\d\d)\b/g, '');
+  str = str.replace(
+    /\b(1080p|720p|480p|360p|2160p|4k|hdr|hdrip|hq|webrip|web-dl|webdl|brrip|bluray|dvdrip|hdtv|x264|x265|hevc|avc|aac|dd\+?5\.1|dd\+?2\.0|esub|sub|550mb|700mb|900mb|1\.4gb|1\.6gb|2gb|2\.8gb|5\.4gb|true web-dl|true|desktop|amd64|tamil|telugu|hindi|kan|kannada|mal|malayalam|eng|english|uncut|multi)\b/gi,
+    ''
+  );
+  str = str.replace(/['’]/g, '');
+  str = str.replace(/[^a-zA-Z0-9]+/g, '_');
+
+  const parts = str.split('_').filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  let formatted = parts.join('_');
+
+  if (!formatted) {
+    formatted = 'Movie';
+  }
+
+  return `${formatted}${ext}`;
+}
+
 // Prevent uncaught errors (like aborted client streams) from crashing node server
 process.on('uncaughtException', (err) => {
   console.warn('[Server Warning] Caught unhandled exception:', err?.message || err);
@@ -187,11 +224,14 @@ function addTorrentToEngine(torrentId, appId) {
         mainFile = torrent.files.reduce((a, b) => a.length > b.length ? a : b);
       }
 
+      const rawFileName = mainFile ? mainFile.name : torrent.name;
+      const cleanMovieFileName = formatMovieFileName(rawFileName);
+
       io.emit('torrent_done', { 
         appId,
         id: torrent.infoHash, 
         name: torrent.name, 
-        fileName: mainFile ? mainFile.name : torrent.name,
+        fileName: cleanMovieFileName,
         downloadUrl: `/downloads/${mainFile ? encodeURIComponent(mainFile.path) : ''}`
       });
     });

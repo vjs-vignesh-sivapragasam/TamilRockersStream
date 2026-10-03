@@ -20,9 +20,6 @@ export function formatBytes(bytes: number, decimals = 1): string {
 }
 
 export function getStorageLocationText(fileUri?: string): string {
-  if (Platform.OS === 'ios') {
-    return 'Files App • On My iPhone';
-  }
   if (fileUri && fileUri.includes('/storage/emulated/0/')) {
     const parts = fileUri.split('/storage/emulated/0/')[1] || '';
     const folder = parts.split('/')[0] || 'VFlix';
@@ -62,6 +59,88 @@ export function formatDownloadErrorMessage(err: any): string {
     return 'Network request failed. Check internet connection.';
   }
   return msg || 'Download failed';
+}
+
+export function formatMovieFileName(rawName: string, fallbackExt = '.mp4'): string {
+  if (!rawName || typeof rawName !== 'string' || rawName.trim().length === 0) {
+    return `Movie_${Date.now()}${fallbackExt}`;
+  }
+
+  let str = rawName.trim();
+
+  let ext = fallbackExt;
+  const extMatch = str.match(/\.([a-zA-Z0-9]+)$/);
+  if (extMatch) {
+    const foundExt = extMatch[0].toLowerCase();
+    if (foundExt === '.torrent') {
+      ext = '.torrent';
+    } else if (foundExt === '.mp3') {
+      ext = '.mp3';
+    } else {
+      ext = '.mp4';
+    }
+    str = str.slice(0, -extMatch[0].length);
+  }
+
+  // 1. Remove domain prefixes like www.1TamilMV.lease -
+  str = str.replace(/^(www\.[a-z0-9.]+\s*-\s*|[a-z0-9.]*1tamilmv[a-z0-9.]*\s*-\s*|[a-z0-9.]*tamilrockers[a-z0-9.]*\s*-\s*|[a-z0-9.]*tamilblasters[a-z0-9.]*\s*-\s*|[a-z0-9.]*isaimini[a-z0-9.]*\s*-\s*)/gi, '');
+
+  // 2. Remove bracketed info [Tamil + Telugu], [1080p], [ESub], etc.
+  str = str.replace(/\[[^\]]*\]/g, '');
+
+  // 3. Remove parenthetical info (except pure 4-digit years like (2026))
+  str = str.replace(/\([^)]*\)/g, (m) => (/\b(19\d\d|20\d\d)\b/.test(m) ? m : ''));
+
+  // 4. Remove standalone 4-digit years to keep pure movie title
+  str = str.replace(/\b(19\d\d|20\d\d)\b/g, '');
+
+  // 5. Remove video quality, resolution, rip, codec, audio, language, sub keywords
+  str = str.replace(
+    /\b(1080p|720p|480p|360p|2160p|4k|hdr|hdrip|hq|webrip|web-dl|webdl|brrip|bluray|dvdrip|hdtv|x264|x265|hevc|avc|aac|dd\+?5\.1|dd\+?2\.0|esub|sub|550mb|700mb|900mb|1\.4gb|1\.6gb|2gb|2\.8gb|5\.4gb|true web-dl|true|desktop|amd64|tamil|telugu|hindi|kan|kannada|mal|malayalam|eng|english|uncut|multi)\b/gi,
+    ''
+  );
+
+  // 6. Clean characters: strip quotes, replace non-alphanumeric (spaces, dots, hyphens, etc.) with '_'
+  str = str.replace(/['’]/g, '');
+  str = str.replace(/[^a-zA-Z0-9]+/g, '_');
+
+  // 7. Capitalize parts and join with '_'
+  const parts = str.split('_').filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  let formatted = parts.join('_');
+
+  if (!formatted) {
+    formatted = 'Movie';
+  }
+
+  return `${formatted}${ext}`;
+}
+
+export function makeUniqueFileName(desiredName: string, existingNames?: Iterable<string>): string {
+  if (!desiredName || desiredName.trim().length === 0) {
+    desiredName = `Movie_${Date.now()}.mp4`;
+  }
+  let cleanName = formatMovieFileName(desiredName);
+  const extMatch = cleanName.match(/\.([a-zA-Z0-9]+)$/);
+  const ext = extMatch ? extMatch[0] : '.mp4';
+  const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
+
+  if (!existingNames) {
+    return cleanName;
+  }
+
+  const existingSet = new Set(Array.from(existingNames).map((n) => (n || '').toLowerCase()));
+  if (!existingSet.has(cleanName.toLowerCase())) {
+    return cleanName;
+  }
+
+  let counter = 1;
+  while (true) {
+    const candidate = `${baseName}_${counter}${ext}`;
+    if (!existingSet.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+    counter++;
+  }
 }
 
 export function cleanTitleFromFilename(fileName: string): string {
@@ -361,8 +440,13 @@ class DownloadService {
   /**
    * Imports an external movie file picked from device storage directly into the offline library
    */
-  public async importMovieFile(sourceUri: string, originalName: string): Promise<DownloadItem> {
-    const fileName = originalName || `Movie_${Date.now()}.mp4`;
+  public async importMovieFile(
+    sourceUri: string,
+    originalName: string,
+    existingFileNames?: Iterable<string>
+  ): Promise<DownloadItem> {
+    const rawName = originalName || `Movie_${Date.now()}.mp4`;
+    const fileName = makeUniqueFileName(rawName, existingFileNames);
     const targetDir = this.getDownloadsDirectory();
     const destPath = `${targetDir}${fileName}`;
 
@@ -439,12 +523,18 @@ class DownloadService {
     };
   }
 
-  public createDownloadItem(rawUrl: string, suggestedTitle?: string, posterUrl?: string): DownloadItem {
+  public createDownloadItem(
+    rawUrl: string,
+    suggestedTitle?: string,
+    posterUrl?: string,
+    existingFileNames?: Iterable<string>
+  ): DownloadItem {
     const url = sanitizeDownloadUrl(rawUrl);
     const infoHash = extractInfoHashFromUrl(url);
     const isStreamUrl = url.includes('/api/stream/');
     const isTorrent = isTorrentUrl(url) || Boolean(infoHash) || url.startsWith('magnet:');
-    const fileName = extractTorrentFileName(url, suggestedTitle);
+    const rawFileName = extractTorrentFileName(url, suggestedTitle);
+    const fileName = makeUniqueFileName(rawFileName, existingFileNames);
     const id = `dl-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     let initialTitle = suggestedTitle || fileName.replace(/\.(torrent|mp4|mkv)$/i, '');
@@ -938,7 +1028,7 @@ export async function saveToGallery(fileUri: string): Promise<boolean> {
 
     const asset = await MediaLibrary.createAssetAsync(fileUri);
     if (asset) {
-      await MediaLibrary.createAlbumAsync('VIKIFLEX Downloads', asset, false).catch(() => {});
+      await MediaLibrary.createAlbumAsync('VFlix Downloads', asset, false).catch(() => {});
       return true;
     }
     return false;
@@ -969,40 +1059,65 @@ export interface ParsedMediaResult {
 }
 
 export async function parseSocialVideoUrl(url: string, backendServerIp?: string): Promise<ParsedMediaResult> {
-  const host = backendServerIp || '192.168.1.6:3002';
-  const endpoint = `http://${host}/api/media/parse`;
+  const cleanUrl = url.trim();
+  const cleanBackend = (backendServerIp || '').replace(/\/+$/, '');
+  const isYt = /youtu\.?be/i.test(cleanUrl);
+  const isIg = /instagram\.com/i.test(cleanUrl);
 
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
+  // 1. Try local backend server /api/media/parse if available
+  if (cleanBackend) {
+    const endpoint = `${cleanBackend}/api/media/parse`;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cleanUrl }),
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success) {
-        return data;
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          return data;
+        }
       }
+    } catch (e) {
+      console.warn('[parseSocialVideoUrl Backend Fetch Failed]:', e);
     }
-  } catch (e) {
-    console.warn('[parseSocialVideoUrl Fetch Failed]:', e);
   }
 
-  // Local fallback parsing logic if server offline
-  const cleanUrl = url.trim();
-  const isIg = /instagram\.com/i.test(cleanUrl);
-  const isYt = /youtu\.?be/i.test(cleanUrl);
+  // 2. Fetch YouTube oEmbed metadata directly if server unavailable
+  let title = isYt ? 'YouTube Video' : isIg ? 'Instagram Reel Video' : 'Downloaded Video';
+  let thumbnail = isYt
+    ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&q=80'
+    : isIg
+    ? 'https://images.unsplash.com/photo-1611262588024-d12430b98920?w=600&q=80'
+    : 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=600&q=80';
+  let author = '';
+
+  if (isYt) {
+    try {
+      const ytIdMatch = cleanUrl.match(/(?:v=|\/|be\/)([a-zA-Z0-9_-]{11})/);
+      if (ytIdMatch && ytIdMatch[1]) {
+        thumbnail = `https://img.youtube.com/vi/${ytIdMatch[1]}/maxresdefault.jpg`;
+      }
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(cleanUrl)}&format=json`);
+      if (oembedRes.ok) {
+        const oembed = await oembedRes.json();
+        if (oembed.title) title = oembed.title;
+        if (oembed.author_name) author = oembed.author_name;
+        if (oembed.thumbnail_url) thumbnail = oembed.thumbnail_url;
+      }
+    } catch (err) {
+      console.warn('oEmbed fetch error:', err);
+    }
+  }
 
   return {
     success: true,
     platform: isYt ? 'youtube' : isIg ? 'instagram' : 'direct',
-    title: isYt ? 'YouTube Video' : isIg ? 'Instagram Reel Video' : 'Downloaded Video',
-    thumbnail: isYt
-      ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&q=80'
-      : isIg
-      ? 'https://images.unsplash.com/photo-1611262588024-d12430b98920?w=600&q=80'
-      : 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=600&q=80',
+    title,
+    thumbnail,
+    author,
     formats: [
       { id: '1080p', label: '1080p Full HD (MP4)', resolution: '1080p', container: 'mp4' },
       { id: '720p', label: '720p HD (MP4)', resolution: '720p', container: 'mp4' },

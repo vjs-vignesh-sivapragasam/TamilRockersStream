@@ -97,7 +97,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
   const handleSendEmail = async () => {
     try {
-      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VIKIFLEX Feedback & Queries`);
+      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VFlix Feedback & Queries`);
     } catch {
       handleCopyEmail();
     }
@@ -111,9 +111,9 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
   const handleShareApp = async () => {
     try {
       await Share.share({
-        title: 'VIKIFLEX',
+        title: 'VFlix',
         message:
-          'Experience VIKIFLEX - high-speed torrent movie streaming and offline player crafted by Vignesh S!',
+          'Experience VFlix - high-speed torrent movie streaming and offline player crafted by Vignesh S!',
       });
     } catch {}
   };
@@ -180,7 +180,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
             </View>
 
             <Text style={styles.devBio}>
-              Architect & Full-Stack Mobile Engineer. Creator of VIKIFLEX,
+              Architect & Full-Stack Mobile Engineer. Creator of VFlix,
               passionate about high-performance media architectures, decentralized P2P systems, and buttery-smooth native user interfaces.
             </Text>
 
@@ -230,7 +230,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
             <View style={styles.infoGrid}>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>App Name</Text>
-                <Text style={styles.infoValue}>VIKIFLEX</Text>
+                <Text style={styles.infoValue}>VFlix</Text>
               </View>
 
               <View style={styles.infoItem}>
@@ -327,7 +327,7 @@ export const AboutUsScreen: React.FC<AboutUsScreenProps> = ({
 
           {/* Footer Copyright */}
           <Text style={styles.footerNote}>
-            Crafted with ❤️ by Vignesh S • VIKIFLEX {APP_VERSION}
+            Crafted with ❤️ by Vignesh S • VFlix {APP_VERSION}
           </Text>
         </Animated.View>
       </ScrollView>

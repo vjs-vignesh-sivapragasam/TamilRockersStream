@@ -99,7 +99,7 @@ const DONATION_TIERS: TierOption[] = [
     name: 'Gold Patron',
     amountINR: '₹4,000',
     rawAmount: 4000,
-    tagline: 'Hall of Fame backer of VIKIFLEX',
+    tagline: 'Hall of Fame backer of VFlix',
   },
 ];
 
@@ -173,7 +173,7 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
 
   const launchSpecificUpiApp = async (appType: 'gpay' | 'phonepe' | 'whatsapp' | 'default') => {
     const amount = getEffectiveAmount();
-    const cleanParams = `pa=${UPI_ID}&pn=${encodeURIComponent(DEVELOPER_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Support VIKIFLEX (₹${amount})`)}`;
+    const cleanParams = `pa=${UPI_ID}&pn=${encodeURIComponent(DEVELOPER_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Support VFlix (₹${amount})`)}`;
 
     let targetUrl = `upi://pay?${cleanParams}`;
     if (appType === 'gpay') {
@@ -202,14 +202,14 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
     handleCopyUpi();
     Alert.alert(
       'UPI ID Copied 📋',
-      `UPI ID "${UPI_ID}" has been copied to your clipboard.\n\nPlease open your ${appType.toUpperCase()} app and transfer ₹${amount}. Thank you for supporting VIKIFLEX!`,
+      `UPI ID "${UPI_ID}" has been copied to your clipboard.\n\nPlease open your ${appType.toUpperCase()} app and transfer ₹${amount}. Thank you for supporting VFlix!`,
       [{ text: 'OK' }]
     );
   };
 
   const handleContactDev = async () => {
     try {
-      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VIKIFLEX Support & Contribution`);
+      await Linking.openURL(`mailto:${DEVELOPER_EMAIL}?subject=VFlix Support & Contribution`);
     } catch {
       handleCopyUpi();
     }
@@ -229,9 +229,9 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
           style={styles.navBtn}
           onPress={() =>
             Share.share({
-              title: 'Support VIKIFLEX Engine',
+              title: 'Support VFlix Engine',
               message:
-                'Support developer Vignesh S in building VIKIFLEX - 100% free and open high-speed streaming!',
+                'Support developer Vignesh S in building VFlix - 100% free and open high-speed streaming!',
             })
           }
           activeOpacity={0.7}
@@ -266,7 +266,7 @@ export const DonateUsScreen: React.FC<DonateUsScreenProps> = ({ onBack, onClose 
               <Heart color="#FFFFFF" size={32} fill={Colors.primary} />
             </Animated.View>
 
-            <Text style={styles.heroTitle}>Keep VIKIFLEX Free & Fast</Text>
+            <Text style={styles.heroTitle}>Keep VFlix Free & Fast</Text>
             <Text style={styles.heroSubtitle}>
               Handcrafted with passion by <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Vignesh S</Text>.
               Your contribution directly funds high-speed trackers, ad-shield servers, and decentralized streaming updates.

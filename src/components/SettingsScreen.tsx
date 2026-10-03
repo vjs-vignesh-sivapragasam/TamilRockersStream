@@ -12,6 +12,7 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -41,7 +42,7 @@ import {
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
-import { formatBytes } from '../services/downloadService';
+import { formatBytes, downloadService, getStorageLocationText } from '../services/downloadService';
 import { tamilMvService, POPULAR_MIRRORS } from '../services/tamilMvService';
 import { AboutUsScreen } from './AboutUsScreen';
 import { DonateUsScreen } from './DonateUsScreen';
@@ -184,6 +185,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const otherPercent = Math.min(100, Math.max(1, ((usedDisk - appDownloads) / totalDisk) * 100));
 
   const displayDomain = tamilMvUrl.replace(/^https?:\/\/(www\.)?/, '');
+  const currentDownloadsDir = downloadService.getDownloadsDirectory();
+  const locationLabel = getStorageLocationText(currentDownloadsDir);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -243,8 +246,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
               <View style={styles.iosTitleGroup}>
                 <Text style={styles.iosTitle}>Device Storage & Directory</Text>
-                <Text style={styles.iosSubtitle}>
-                  {formatBytes(appDownloads)} downloaded • {formatBytes(freeDisk)} free
+                <Text style={styles.iosSubtitle} numberOfLines={1}>
+                  {locationLabel} • {formatBytes(appDownloads)} downloaded
+                </Text>
+                <Text style={[styles.iosSubtitle, { color: '#8E8E93', fontSize: 11, marginTop: 2 }]} numberOfLines={1}>
+                  {currentDownloadsDir || 'VFlix_Movies/'}
                 </Text>
               </View>
               <Text style={styles.iosValueText}>{formatBytes(freeDisk)} Free</Text>
@@ -695,8 +701,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       <Folder color="#30D158" size={14} strokeWidth={2} />
                     </View>
                     <View style={styles.folderTextWrapper}>
-                      <Text style={styles.folderPathText}>Internal / VFlix_Movies</Text>
-                      <Text style={styles.folderSubText}>App media directory</Text>
+                      <Text style={styles.folderPathText}>{locationLabel}</Text>
+                      <Text style={styles.folderSubText}>Active Movie Storage Location</Text>
                     </View>
                   </View>
                   <TouchableOpacity
@@ -714,6 +720,37 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     )}
                   </TouchableOpacity>
                 </View>
+
+                {/* Absolute File Path Card */}
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#15161E',
+                    padding: 12,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: '#262938',
+                    marginTop: 10,
+                  }}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Share.share({
+                      title: 'VFlix Download Directory Path',
+                      message: currentDownloadsDir,
+                    }).catch(() => {});
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ color: '#8E8E93', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 }}>
+                      FULL FILESYSTEM PATH:
+                    </Text>
+                    <Text style={{ color: Colors.primary, fontSize: 11, fontWeight: '600' }}>
+                      Tap to Copy / Share
+                    </Text>
+                  </View>
+                  <Text style={{ color: '#E5E5EA', fontSize: 12, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }} selectable>
+                    {currentDownloadsDir}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
 

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
-export type TabKey = 'home' | 'mylist' | 'browser' | 'downloads' | 'settings';
+export type TabKey = 'home' | 'search' | 'mylist' | 'browser' | 'downloads' | 'settings';
 
 interface BottomNavBarProps {
   activeTab: TabKey;
@@ -73,7 +73,7 @@ function TabItem({
   const pillBgOpacity = bgAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
   const iconColor     = isActive ? RED : INACTIVE;
   const iconStroke    = isActive ? 2.5 : 1.8;
-  const iconSize      = isActive ? 24 : 22;
+  const iconSize      = isActive ? 22 : 20;
 
   return (
     <TouchableOpacity style={styles.tabItem} onPress={handlePress} activeOpacity={1}>

@@ -82,6 +82,16 @@ class MyListService {
     return [...this.items];
   }
 
+  public getSavedSet(): Set<string> {
+    const set = new Set<string>();
+    this.items.forEach((item) => {
+      if (item.id) set.add(item.id.toLowerCase());
+      if (item.topicUrl) set.add(item.topicUrl.toLowerCase());
+      if (item.movieTitle) set.add(item.movieTitle.toLowerCase());
+    });
+    return set;
+  }
+
   public isSaved(idOrUrl: string): boolean {
     if (!idOrUrl) return false;
     const clean = idOrUrl.trim().toLowerCase();

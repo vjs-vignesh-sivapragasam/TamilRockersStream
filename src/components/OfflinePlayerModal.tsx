@@ -174,6 +174,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const lastSavedTimeRef = useRef<number>(0);
 
   const [contentUri, setContentUri] = useState<string>('');
+  const [htmlFileUri, setHtmlFileUri] = useState<string>('');
   const [fileExisted, setFileExisted] = useState<boolean>(true);
   const [playerError, setPlayerError] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -291,16 +292,22 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     setSubOffset(0);
 
     const checkFile = async () => {
-      const targetUri = item.fileUri || item.movieFileUri;
-      if (targetUri) {
-        if (targetUri.startsWith('content://')) {
+      const rawTargetUri = item.fileUri || item.movieFileUri;
+      if (rawTargetUri) {
+        let cleanUri = rawTargetUri.trim();
+        if (!cleanUri.startsWith('file://') && !cleanUri.startsWith('content://') && !cleanUri.startsWith('http://') && !cleanUri.startsWith('https://')) {
+          cleanUri = 'file://' + cleanUri;
+        }
+
+        if (cleanUri.startsWith('content://')) {
           setFileExisted(true);
-          setContentUri(targetUri);
+          setContentUri(cleanUri);
           return;
         }
-        if (targetUri.startsWith('file://')) {
+
+        if (cleanUri.startsWith('file://')) {
           try {
-            const info = await FileSystem.getInfoAsync(targetUri);
+            const info = await FileSystem.getInfoAsync(cleanUri);
             setFileExisted(info.exists);
 
             if (
@@ -308,13 +315,18 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
               info.exists &&
               typeof FileSystem.getContentUriAsync === 'function'
             ) {
-              const cUri = await FileSystem.getContentUriAsync(targetUri);
+              const cUri = await FileSystem.getContentUriAsync(cleanUri);
               if (cUri) {
                 setContentUri(cUri);
+              } else {
+                setContentUri(cleanUri);
               }
+            } else {
+              setContentUri(cleanUri);
             }
           } catch (err) {
             console.warn('Error checking file in player:', err);
+            setContentUri(cleanUri);
           }
         }
       }
@@ -923,15 +935,12 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
   const effectiveVideoSrc = (() => {
     if (isDownloadedLocalFile) {
-      if (Platform.OS === 'android' && contentUri) {
+      if (contentUri) {
         return contentUri;
       }
       if (localFileUri) {
         const formattedLocal = formatFileUriForHtml(localFileUri);
         if (formattedLocal) return formattedLocal;
-      }
-      if (contentUri) {
-        return contentUri;
       }
     }
     let streamHttpUrl = rawUrl;
@@ -1053,28 +1062,30 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         autoplay
         preload="auto"
         ${effectiveVideoSrc ? `src="${effectiveVideoSrc}"` : ''}
-      ></video>
+      >
+        ${effectiveVideoSrc ? `<source src="${effectiveVideoSrc}" type="video/mp4" />` : ''}
+        ${effectiveVideoSrc ? `<source src="${effectiveVideoSrc}" type="video/quicktime" />` : ''}
+        ${effectiveVideoSrc ? `<source src="${effectiveVideoSrc}" />` : ''}
+      </video>
 
       <div id="subtitle-overlay"></div>
 
-      ${isOnlineStream ? `
       <div id="fallbackNotice" style="display: none; position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #333; border-radius: 12px; padding: 24px; text-align: center; color: #fff; max-width: 85%; z-index: 10;">
         <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px; color: #FF453A;">
-          Server is not reachable
+          ${isOnlineStream ? 'Server is not reachable' : 'Playback Option'}
         </div>
         <div style="font-size: 12px; color: #aaa; line-height: 1.4; margin-bottom: 12px;">
-          The streaming server connection failed or the server is not reachable.<br/>Please ensure your streaming server is running.
+          ${isOnlineStream ? 'The streaming server connection failed or server is not reachable.' : 'The video format (e.g. MKV/AC3) can be played directly in VLC or system player.'}
         </div>
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
-            Open in VLC / MX
+            Open in VLC / External Player
           </a>
           <a class="actionBtn" style="background-color: #333333;" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'CLOSE_PLAYER'}))">
             Go Back
           </a>
         </div>
       </div>
-      ` : ''}
 
       <script>
         var v = document.getElementById('netflix-video');
@@ -1262,6 +1273,40 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     </html>
   `;
 
+  useEffect(() => {
+    if (!visible || !item || !playerHtml) return;
+
+    let isMounted = true;
+    const writeHtmlPlayerFile = async () => {
+      try {
+        if (FileSystem.documentDirectory) {
+          const filePath = `${FileSystem.documentDirectory}vflix_offline_player.html`;
+          await FileSystem.writeAsStringAsync(filePath, playerHtml, {
+            encoding: FileSystem.EncodingType.UTF8,
+          });
+          if (isMounted) {
+            setHtmlFileUri(filePath);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not write player HTML file for iOS WKWebView:', err);
+      }
+    };
+
+    writeHtmlPlayerFile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [visible, item, playerHtml]);
+
+  const webViewSource = useMemo(() => {
+    if (htmlFileUri) {
+      return { uri: htmlFileUri };
+    }
+    return { html: playerHtml, baseUrl: FileSystem.documentDirectory || 'file:///' };
+  }, [htmlFileUri, playerHtml]);
+
   // Darkness overlay for smooth MX Player-style brightness adjustment
   const brightnessDimOpacity = (1 - brightness) * 0.88;
 
@@ -1278,10 +1323,11 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         {/* WebView Video Element with gesture listener */}
         <View style={styles.playerContainer} {...screenPanResponder.panHandlers}>
           <WebView
-            key={effectiveVideoSrc}
+            key={`${effectiveVideoSrc}_${htmlFileUri}`}
             ref={webViewRef}
             originWhitelist={['*']}
-            source={{ html: playerHtml, baseUrl: 'file:///' }}
+            source={webViewSource}
+            allowingReadAccessToURL={FileSystem.documentDirectory || 'file:///'}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -1332,7 +1378,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                   if (isOnlineStream) {
                     Alert.alert(
                       'Server is not reachable',
-                      `Streaming server is not responding (${backendUrl}).\n\nPlease verify that your VFLEX streaming server is running and reachable.`,
+                      `Streaming server is not responding (${backendUrl}).\n\nPlease verify that your VFlix streaming server is running and reachable.`,
                       [
                         { text: 'Go Back', onPress: handleClosePlayer },
                         { text: 'Open in VLC / MX', onPress: handleOpenExternal },

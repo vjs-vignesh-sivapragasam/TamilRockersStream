@@ -25,7 +25,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
   useEffect(() => {
     // Neat & Simple Animation Sequence
     Animated.sequence([
-      // 1. Smooth, elegant fade-in & scale of main VIKIFLEX text
+      // 1. Smooth, elegant fade-in & scale of main VFlix text
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -98,7 +98,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
     <Animated.View style={[styles.container, { opacity: containerOpacity }]}>
       {/* Center Minimal Content */}
       <View style={styles.centerBox}>
-        {/* Main Brand Text: VIKIFLEX */}
+        {/* Main Brand Text: VFlix */}
         <Animated.View
           style={[
             styles.brandTitleRow,
@@ -111,8 +111,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
             },
           ]}
         >
-          <Text style={styles.brandTitleViki}>VIKI</Text>
-          <Text style={styles.brandTitleFlex}>FLEX</Text>
+          <Text style={styles.brandTitleViki}>V</Text>
+          <Text style={styles.brandTitleFlex}>FLIX</Text>
         </Animated.View>
 
         {/* Minimal Subtext */}

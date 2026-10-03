@@ -119,24 +119,6 @@ export const DownloadsScreen: React.FC = () => {
     } catch {}
   };
 
-  const handleSaveToGalleryItem = async (item: DownloadItem) => {
-    const fileUri = item.fileUri || item.movieFileUri;
-    if (!fileUri) {
-      Alert.alert('Error', 'Movie file path is missing.');
-      return;
-    }
-    const success = await saveToGallery(fileUri);
-    if (success) {
-      Alert.alert(
-        'Saved to Gallery 📸',
-        `"${item.title || item.fileName}" has been exported to your phone's Media Gallery / Camera Roll!`,
-        [{ text: 'OK' }]
-      );
-    } else {
-      Alert.alert('Gallery Save', 'Storage permission denied or file could not be exported to gallery.');
-    }
-  };
-
   const handleParseSocialVideo = async () => {
     if (!socialUrl.trim()) {
       Alert.alert('URL Required', 'Please enter or paste a valid YouTube or Instagram URL.');
@@ -144,7 +126,7 @@ export const DownloadsScreen: React.FC = () => {
     }
     setParsingSocial(true);
     try {
-      const result = await parseSocialVideoUrl(socialUrl.trim());
+      const result = await parseSocialVideoUrl(socialUrl.trim(), backendUrl);
       setParsedMedia(result);
       if (result.formats && result.formats.length > 0) {
         setSelectedFormat(result.formats[0]);
@@ -169,47 +151,82 @@ export const DownloadsScreen: React.FC = () => {
     setParsingSocial(true);
 
     try {
-      const host = backendUrl || 'http://192.168.1.6:3002';
-      const endpoint = `${host}/api/media/download`;
+      let fullDownloadUrl = '';
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Bypass-Tunnel-Reminder': 'true',
-        },
-        body: JSON.stringify({
-          url: socialUrl.trim(),
-          resolution,
-          title: targetTitle,
-          formatId,
-          saveToGallery: saveToGalleryToggle,
-        }),
-      });
+      // 1. Try local backend server if connected
+      if (backendUrl) {
+        try {
+          const endpoint = `${backendUrl.replace(/\/+$/, '')}/api/media/download`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Bypass-Tunnel-Reminder': 'true',
+            },
+            body: JSON.stringify({
+              url: socialUrl.trim(),
+              resolution,
+              title: targetTitle,
+              formatId,
+            }),
+          });
 
-      if (!response.ok) {
-        throw new Error(`Server returned HTTP ${response.status}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.downloadUrl) {
+              fullDownloadUrl = `${backendUrl.replace(/\/+$/, '')}${data.downloadUrl}`;
+            }
+          }
+        } catch (backendErr) {
+          console.warn('[Social Download Backend Error]:', backendErr);
+        }
       }
 
-      const data = await response.json();
-      if (!data || !data.downloadUrl) {
-        throw new Error(data?.error || 'Failed to generate video download link');
+      // 2. Fallback to public Cobalt media API if server unavailable
+      if (!fullDownloadUrl) {
+        const cobaltApis = [
+          'https://api.cobalt.tools/',
+          'https://co.wuk.sh/api/json',
+          'https://v2.cobalt.tools/api/json',
+        ];
+
+        for (const api of cobaltApis) {
+          try {
+            const res = await fetch(api, {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                url: socialUrl.trim(),
+                videoQuality: resolution === 'Audio MP3' ? 'audio' : resolution.replace('p', ''),
+                downloadMode: resolution === 'Audio MP3' ? 'audio' : 'auto',
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && (data.url || data.picker?.[0]?.url)) {
+                fullDownloadUrl = data.url || data.picker[0].url;
+                break;
+              }
+            }
+          } catch (cErr) {
+            console.warn('Cobalt API attempt failed:', cErr);
+          }
+        }
       }
 
-      const fullDownloadUrl = `${host}${data.downloadUrl}`;
+      if (!fullDownloadUrl) {
+        throw new Error('Could not resolve direct video download stream for this URL. Please verify link or check internet connection.');
+      }
+
       const poster = parsedMedia?.thumbnail || 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&q=80';
-
-      const newItem = await startDownload(fullDownloadUrl, `${targetTitle} [${resolution}]`, poster);
-
-      if (saveToGalleryToggle && newItem) {
-        setTimeout(async () => {
-          await handleSaveToGalleryItem(newItem);
-        }, 2000);
-      }
+      await startDownload(fullDownloadUrl, `${targetTitle} [${resolution}]`, poster);
 
       Alert.alert(
         'Downloading Video 🍿',
-        `"${targetTitle}" (${resolution}) is downloading to your VFlix offline library and exporting to your Phone Gallery!`,
+        `"${targetTitle}" (${resolution}) is downloading to your VFlix offline library!`,
         [{ text: 'OK' }]
       );
 
@@ -978,15 +995,6 @@ export const DownloadsScreen: React.FC = () => {
                           activeOpacity={0.7}
                         >
                           <Share2 color="#8E8E93" size={15} />
-                        </TouchableOpacity>
-
-                        {/* Save to Gallery */}
-                        <TouchableOpacity
-                          style={styles.galleryIconBtn}
-                          onPress={() => handleSaveToGalleryItem(item)}
-                          activeOpacity={0.7}
-                        >
-                          <Camera color="#30D158" size={14} />
                         </TouchableOpacity>
 
                         {/* Delete */}
