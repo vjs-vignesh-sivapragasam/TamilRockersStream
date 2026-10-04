@@ -11,6 +11,7 @@ workflows:
         script: |
           npm install --force
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
 
       - name: Install Expo CLI
         script: npm install -g @expo/cli@latest --force
@@ -27,6 +28,7 @@ workflows:
         script: |
           rm -rf ios android
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
 
           export RCT_NEW_ARCH_ENABLED=1
 
@@ -131,6 +133,7 @@ workflows:
         script: |
           npm install --force
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
 
       - name: Extract app version from app.json
         script: |
@@ -144,12 +147,17 @@ workflows:
           set -e
           rm -rf ios android
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
           npx expo prebuild --platform android --clean
 
       - name: Build and Sign Android APK
         script: |
           set -e
           export NODE_OPTIONS="--max-old-space-size=8192"
+
+          # Fix permissions for hermesc compiler binaries before Gradle bundle step
+          chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
 
           cd android
           chmod +x gradlew || true
@@ -221,6 +229,7 @@ workflows:
         script: |
           npm install --force
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
 
       - name: Extract app version from app.json
         script: |
@@ -234,11 +243,15 @@ workflows:
           set -e
           rm -rf ios android
           chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
           npx expo prebuild --platform android --clean
 
       - name: Build Android Debug APK
         script: |
           set -e
+          chmod -R +x node_modules/.bin || true
+          find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
+
           cd android
           chmod +x gradlew || true
           ./gradlew assembleDebug -x configureCMakeDebug -Pandroid.overridePathCheck=true --stacktrace
