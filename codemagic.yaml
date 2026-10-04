@@ -8,7 +8,9 @@ workflows:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          chmod -R +x node_modules/.bin || true
 
       - name: Install Expo CLI
         script: npm install -g @expo/cli@latest --force
@@ -24,6 +26,7 @@ workflows:
       - name: Prebuild iOS project
         script: |
           rm -rf ios android
+          chmod -R +x node_modules/.bin || true
 
           export RCT_NEW_ARCH_ENABLED=1
 
@@ -125,7 +128,9 @@ workflows:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          chmod -R +x node_modules/.bin || true
 
       - name: Extract app version from app.json
         script: |
@@ -138,6 +143,7 @@ workflows:
         script: |
           set -e
           rm -rf ios android
+          chmod -R +x node_modules/.bin || true
           npx expo prebuild --platform android --clean
 
       - name: Build and Sign Android APK
@@ -146,6 +152,7 @@ workflows:
           export NODE_OPTIONS="--max-old-space-size=8192"
 
           cd android
+          chmod +x gradlew || true
           ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true --stacktrace
 
           APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
@@ -211,7 +218,9 @@ workflows:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          chmod -R +x node_modules/.bin || true
 
       - name: Extract app version from app.json
         script: |
@@ -224,12 +233,14 @@ workflows:
         script: |
           set -e
           rm -rf ios android
+          chmod -R +x node_modules/.bin || true
           npx expo prebuild --platform android --clean
 
       - name: Build Android Debug APK
         script: |
           set -e
           cd android
+          chmod +x gradlew || true
           ./gradlew assembleDebug -x configureCMakeDebug -Pandroid.overridePathCheck=true --stacktrace
 
           APK_NAME="${APP_NAME}_v${APP_VERSION}_debug.apk"
