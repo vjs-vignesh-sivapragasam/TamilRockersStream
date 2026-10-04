@@ -1145,8 +1145,16 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         }
 
         if (magnet) {
-          const cleanBackend = (backendUrl || 'http://localhost:3002').trim().replace(/\/+$/, '');
-          const playUrl = `${cleanBackend}/api/stream/play?magnet=${magnet}`;
+          const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+          // 1. Silent background pre-warm to register trackers on backend
+          fetch(`${cleanBackend}/api/stream/warmup?magnet=${encodeURIComponent(magnet)}`).catch(() => {});
+
+          // 2. Generate clean HTTP hashcode stream URL
+          const infoHash = extractInfoHashFromUrl(magnet);
+          const playUrl = infoHash
+            ? `${cleanBackend}/api/stream/${infoHash}`
+            : `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
+
           try {
             await Clipboard.setStringAsync(playUrl);
             Alert.alert(
@@ -1188,8 +1196,16 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         }
 
         if (magnet) {
-          const cleanBackend = (backendUrl || 'http://localhost:3002').trim().replace(/\/+$/, '');
-          const downloadUrl = `${cleanBackend}/api/stream/play?magnet=${magnet}&dl=1`;
+          const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+          // 1. Silent background pre-warm to register trackers on backend
+          fetch(`${cleanBackend}/api/stream/warmup?magnet=${encodeURIComponent(magnet)}`).catch(() => {});
+
+          // 2. Generate clean HTTP hashcode download URL
+          const infoHash = extractInfoHashFromUrl(magnet);
+          const downloadUrl = infoHash
+            ? `${cleanBackend}/api/stream/${infoHash}?raw=1&dl=1`
+            : `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(magnet)}&dl=1`;
+
           try {
             await Clipboard.setStringAsync(downloadUrl);
             Alert.alert(
@@ -2592,6 +2608,29 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           if (extracted.magnetUrl) {
             magnet = extracted.magnetUrl;
             resItem.magnetUrl = extracted.magnetUrl;
+          } else if (extracted.torrentUrl) {
+            magnet = extracted.torrentUrl;
+            resItem.magnetUrl = extracted.torrentUrl;
+          }
+        }
+
+        if (!magnet && movie.movieTitle) {
+          try {
+            const searchResults = await tamilMvService.searchMovie(movie.movieTitle);
+            if (searchResults && searchResults.length > 0) {
+              const matchedMovie = searchResults.find(
+                (m: TamilMvMovieResult) => m.movieTitle.toLowerCase() === movie.movieTitle.toLowerCase()
+              ) || searchResults[0];
+              const matchedRes = matchedMovie.resolutions.find(
+                (r: MovieResolutionItem) => r.resolution === resItem.resolution
+              ) || matchedMovie.resolutions[0];
+              if (matchedRes && (matchedRes.magnetUrl || matchedRes.torrentFileUrl)) {
+                magnet = matchedRes.magnetUrl || matchedRes.torrentFileUrl;
+                resItem.magnetUrl = magnet;
+              }
+            }
+          } catch (searchErr) {
+            console.warn('Fallback magnet search failed:', searchErr);
           }
         }
 
@@ -2997,26 +3036,17 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         ]}
       >
         <View style={styles.headerLeft}>
-          <View style={styles.headerBrandRow}>
-            <LinearGradient
-              colors={['#FF1E27', '#E50914', '#8A030A']}
-              style={styles.headerLogoBadge}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <Text style={styles.headerEmblemVText}>V</Text>
-            </LinearGradient>
-            <View style={styles.brandTitleCol}>
-              <View style={styles.brandTitleRow}>
-                <Text style={styles.brandTitleV}>V</Text>
-                <Text style={styles.brandTitleFlix}>FLIX</Text>
-                <View style={styles.brandCinemaBadge}>
-                  <Text style={styles.brandCinemaBadgeText}>CINEMA</Text>
-                </View>
-              </View>
-              <Text style={styles.screenSubtitle}>Stream & Discover Torrents</Text>
-            </View>
-          </View>
+          <TouchableOpacity
+            style={styles.headerBrandRow}
+            activeOpacity={0.8}
+            onPress={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+          >
+            <Image
+              source={require('../../assets/adaptive-icon.png')}
+              style={styles.netflixVLogo}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.headerRightActions}>
@@ -3670,14 +3700,9 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 4,
   },
-  headerEmblemVText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-  },
-  brandTitleCol: {
-    justifyContent: 'center',
+  netflixVLogo: {
+    width: 36,
+    height: 36,
   },
   brandTitleRow: {
     flexDirection: 'row',

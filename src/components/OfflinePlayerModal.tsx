@@ -1,3 +1,4 @@
+// VFlix Media Engine - Offline & Online WebTorrent Player Modal
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Modal,
@@ -45,6 +46,8 @@ import {
   FileText,
   Clock,
   Settings,
+  Server,
+  RefreshCw,
 } from 'lucide-react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '../constants/theme';
@@ -169,7 +172,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
-  const { backendUrl, isBackendConnected } = useDownloads();
+  const { backendUrl, isBackendConnected, testPing } = useDownloads();
 
   const lastSavedTimeRef = useRef<number>(0);
 
@@ -186,6 +189,84 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [scaleMode, setScaleMode] = useState<VideoScaleMode>('fit');
+
+  // Render Cloud Server Wake-Up State (for Render free tier spin-downs)
+  const [isWakingUp, setIsWakingUp] = useState<boolean>(false);
+  const [wakeUpSeconds, setWakeUpSeconds] = useState<number>(0);
+  const [wakeUpStatusText, setWakeUpStatusText] = useState<string>('');
+  const [wakeUpFailed, setWakeUpFailed] = useState<boolean>(false);
+
+  // Computed Stream Details
+  const localFileUri = item?.fileUri || item?.movieFileUri || '';
+  const rawUrl = item?.url || '';
+  const isDownloadedLocalFile =
+    Boolean(localFileUri) &&
+    (item?.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
+  const fn = item?.movieFileName || item?.fileName;
+  const hash = item?.infoHash || extractInfoHashFromUrl(rawUrl);
+
+  const backendStreamUrl = isBackendConnected
+    ? fn
+      ? `${backendUrl}/downloads/${encodeURIComponent(fn)}`
+      : hash
+      ? `${backendUrl}/api/stream/${hash.toLowerCase()}?raw=1`
+      : ''
+    : '';
+
+  const isOnlineStream = useMemo(() => {
+    return (
+      !isDownloadedLocalFile &&
+      Boolean(rawUrl || backendStreamUrl) &&
+      (rawUrl.startsWith('http') || backendStreamUrl.startsWith('http') || Boolean(hash))
+    );
+  }, [isDownloadedLocalFile, rawUrl, backendStreamUrl, hash]);
+
+  const wakeUpServerRoutine = useCallback(async () => {
+    if (!backendUrl) return;
+    setIsWakingUp(true);
+    setWakeUpFailed(false);
+    setWakeUpSeconds(0);
+    setWakeUpStatusText('Contacting Render cloud server...');
+
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      elapsed += 1;
+      setWakeUpSeconds(elapsed);
+      if (elapsed >= 4 && elapsed < 15) {
+        setWakeUpStatusText(`Server is spinning up... (${elapsed}s elapsed, please wait ~25-30s)`);
+      } else if (elapsed >= 15) {
+        setWakeUpStatusText(`Initializing streaming server engine... (${elapsed}s / 45s)`);
+      }
+    }, 1000);
+
+    let success = false;
+    const maxAttempts = 14;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const pingRes = await testPing(backendUrl, 3500);
+        if (pingRes.ok) {
+          success = true;
+          break;
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+
+    clearInterval(timer);
+
+    if (success) {
+      setIsWakingUp(false);
+      setWakeUpFailed(false);
+      setPlayerError(false);
+      setIsBuffering(true);
+      webViewRef.current?.reload();
+    } else {
+      setIsWakingUp(false);
+      setWakeUpFailed(true);
+      setPlayerError(true);
+    }
+  }, [backendUrl, testPing]);
 
   // Subtitle States & Settings
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
@@ -315,10 +396,14 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
               info.exists &&
               typeof FileSystem.getContentUriAsync === 'function'
             ) {
-              const cUri = await FileSystem.getContentUriAsync(cleanUri);
-              if (cUri) {
-                setContentUri(cUri);
-              } else {
+              try {
+                const cUri = await FileSystem.getContentUriAsync(cleanUri);
+                if (cUri) {
+                  setContentUri(cUri);
+                } else {
+                  setContentUri(cleanUri);
+                }
+              } catch {
                 setContentUri(cleanUri);
               }
             } else {
@@ -326,6 +411,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             }
           } catch (err) {
             console.warn('Error checking file in player:', err);
+            setFileExisted(true);
             setContentUri(cleanUri);
           }
         }
@@ -820,41 +906,51 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             // Dragging up (negative dy) increases brightness
             const delta = -gs.dy / (dims.height * 0.45);
             const nextBrightness = Math.max(0.1, Math.min(1.0, g.startBrightness + delta));
-            setBrightness(nextBrightness);
-            brightnessRef.current = nextBrightness;
-            setHud({
-              type: 'brightness',
-              value: Math.round(nextBrightness * 100),
-              targetTime: 0,
-              deltaSec: 0,
-              visible: true,
-            });
+            if (Math.abs(nextBrightness - brightnessRef.current) >= 0.02) {
+              setBrightness(nextBrightness);
+              brightnessRef.current = nextBrightness;
+              setHud({
+                type: 'brightness',
+                value: Math.round(nextBrightness * 100),
+                targetTime: 0,
+                deltaSec: 0,
+                visible: true,
+              });
+            }
           } else if (g.mode === 'volume') {
             // Dragging up (negative dy) increases volume
             const delta = -gs.dy / (dims.height * 0.45);
             const nextVol = Math.max(0, Math.min(1.0, g.startVolume + delta));
-            setVolume(nextVol);
-            volumeRef.current = nextVol;
-            sendPlayerCommand(`if (v) { v.volume = ${nextVol.toFixed(2)}; v.muted = false; }`);
-            setHud({
-              type: 'volume',
-              value: Math.round(nextVol * 100),
-              targetTime: 0,
-              deltaSec: 0,
-              visible: true,
-            });
+            if (Math.abs(nextVol - volumeRef.current) >= 0.02) {
+              setVolume(nextVol);
+              volumeRef.current = nextVol;
+              sendPlayerCommand(`if (v) { v.volume = ${nextVol.toFixed(2)}; v.muted = false; }`);
+              setHud({
+                type: 'volume',
+                value: Math.round(nextVol * 100),
+                targetTime: 0,
+                deltaSec: 0,
+                visible: true,
+              });
+            }
           } else if (g.mode === 'seek') {
             const totalDur = durationRef.current || 300;
             const maxSeekWindow = Math.min(120, Math.max(30, totalDur * 0.2));
             const deltaSec = (gs.dx / dims.width) * maxSeekWindow;
             const target = Math.max(0, Math.min(totalDur, g.startTime + deltaSec));
             seekPreviewRef.current = target;
-            setHud({
-              type: 'seek',
-              value: 0,
-              targetTime: target,
-              deltaSec: Math.round(deltaSec),
-              visible: true,
+            const roundDelta = Math.round(deltaSec);
+            setHud((prev) => {
+              if (prev.type === 'seek' && prev.deltaSec === roundDelta && prev.visible) {
+                return prev;
+              }
+              return {
+                type: 'seek',
+                value: 0,
+                targetTime: target,
+                deltaSec: roundDelta,
+                visible: true,
+              };
             });
           }
         },
@@ -892,55 +988,39 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     []
   );
 
-  const localFileUri = item?.fileUri || item?.movieFileUri || '';
-  const rawUrl = item?.url || '';
 
-  const isDownloadedLocalFile =
-    Boolean(localFileUri) &&
-    (item?.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
-
-  const fn = item?.movieFileName || item?.fileName;
-  const hash = item?.infoHash || extractInfoHashFromUrl(rawUrl);
-
-  const backendStreamUrl = isBackendConnected
-    ? fn
-      ? `${backendUrl}/downloads/${encodeURIComponent(fn)}`
-      : hash
-      ? `${backendUrl}/api/stream/${hash.toLowerCase()}?raw=1`
-      : ''
-    : '';
 
   const formatFileUriForHtml = (rawUri: string): string => {
     if (!rawUri) return '';
     let clean = rawUri.trim();
-    if (clean.startsWith('content://') || clean.startsWith('http://') || clean.startsWith('https://')) {
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean;
+    }
+    if (clean.startsWith('content://')) {
       return clean;
     }
     if (!clean.startsWith('file://')) {
       clean = 'file://' + clean;
     }
-    if (clean.startsWith('file://')) {
-      const pathOnly = clean.substring(7);
-      try {
-        const decodedPath = decodeURIComponent(pathOnly);
-        return 'file://' + encodeURI(decodedPath).replace(/#/g, '%23').replace(/\?/g, '%3F');
-      } catch {
-        return clean;
-      }
+    clean = clean.replace(/\\/g, '/');
+    const pathOnly = clean.substring(7);
+    try {
+      const decodedPath = decodeURIComponent(pathOnly);
+      return 'file://' + encodeURI(decodedPath).replace(/#/g, '%23').replace(/\?/g, '%3F');
+    } catch {
+      return clean;
     }
-    return clean;
   };
 
   const effectiveVideoSrc = (() => {
-    if (isDownloadedLocalFile) {
-      if (contentUri) {
-        return contentUri;
-      }
-      if (localFileUri) {
-        const formattedLocal = formatFileUriForHtml(localFileUri);
-        if (formattedLocal) return formattedLocal;
-      }
+    if (isDownloadedLocalFile && localFileUri) {
+      const formattedLocal = formatFileUriForHtml(localFileUri);
+      if (formattedLocal) return formattedLocal;
     }
+    if (contentUri && !contentUri.startsWith('content://')) {
+      return contentUri;
+    }
+
     const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
     let streamHttpUrl = rawUrl;
     if (hash) {
@@ -956,18 +1036,10 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     if (streamHttpUrl) {
       return streamHttpUrl;
     }
-    return contentUri || formatFileUriForHtml(localFileUri) || streamHttpUrl || '';
+    return formatFileUriForHtml(localFileUri) || '';
   })();
 
-  const isOnlineStream = Boolean(
-    effectiveVideoSrc &&
-    !effectiveVideoSrc.startsWith('file://') &&
-    !effectiveVideoSrc.startsWith('content://') &&
-    (effectiveVideoSrc.includes('/api/stream') ||
-     rawUrl.startsWith('magnet:') ||
-     rawUrl.includes('urn:btih:') ||
-     item?.speed?.includes('Stream'))
-  );
+
 
   const movieTitle = item?.title || item?.movieFileName || item?.fileName || 'Movie';
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
@@ -1300,8 +1372,12 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   }, [visible, item, playerHtml]);
 
   const webViewSource = useMemo(() => {
-    return { html: playerHtml, baseUrl: 'file:///' };
-  }, [playerHtml]);
+    if (htmlFileUri) {
+      return { uri: htmlFileUri };
+    }
+    const baseDir = FileSystem.documentDirectory || 'file:///';
+    return { html: playerHtml, baseUrl: baseDir };
+  }, [htmlFileUri, playerHtml]);
 
   // Darkness overlay for smooth MX Player-style brightness adjustment
   const brightnessDimOpacity = (1 - brightness) * 0.88;
@@ -1325,7 +1401,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             ref={webViewRef}
             originWhitelist={['*']}
             source={webViewSource}
-            allowingReadAccessToURL="file:///"
+            allowingReadAccessToURL={FileSystem.documentDirectory || 'file:///'}
             allowsFullscreenVideo
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -1374,14 +1450,9 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
                 } else if (data.type === 'VIDEO_ERROR') {
                   setPlayerError(true);
                   if (isOnlineStream) {
-                    Alert.alert(
-                      'Server is not reachable',
-                      `Streaming server is not responding (${backendUrl}).\n\nPlease verify that your VFlix streaming server is running and reachable.`,
-                      [
-                        { text: 'Go Back', onPress: handleClosePlayer },
-                        { text: 'Open in VLC / MX', onPress: handleOpenExternal },
-                      ]
-                    );
+                    if (!isWakingUp && !wakeUpFailed) {
+                      wakeUpServerRoutine();
+                    }
                   }
                 }
               } catch {}
@@ -1399,8 +1470,79 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           />
         </View>
 
+        {/* Render Cloud Server Wake-Up / Cold-Start Overlay */}
+        {(isWakingUp || (playerError && isOnlineStream) || wakeUpFailed) && (
+          <View style={styles.wakeUpOverlay}>
+            <View style={styles.wakeUpCard}>
+              <View
+                style={[
+                  styles.wakeUpIconBadge,
+                  { backgroundColor: isWakingUp ? 'rgba(250, 36, 60, 0.15)' : 'rgba(255, 69, 58, 0.2)' },
+                ]}
+              >
+                {isWakingUp ? (
+                  <ActivityIndicator size="large" color={Colors.netflixRed} />
+                ) : (
+                  <Server color="#FF453A" size={32} />
+                )}
+              </View>
+
+              <Text style={styles.wakeUpTitle}>
+                {isWakingUp ? 'Waking Up Streaming Server...' : 'Server Connection Timed Out'}
+              </Text>
+
+              <Text style={styles.wakeUpSubtitle}>
+                {isWakingUp
+                  ? 'On Render free tier, the streaming server goes to sleep after 15 minutes of inactivity. Please wait while the cloud container spins up...'
+                  : `The streaming server at ${backendUrl} did not respond within 45 seconds.`}
+              </Text>
+
+              {isWakingUp && (
+                <View style={styles.wakeUpProgressSection}>
+                  <View style={styles.wakeUpTimerBadge}>
+                    <Clock color="#A7A7A7" size={13} />
+                    <Text style={styles.wakeUpTimerText}>{wakeUpSeconds}s elapsed</Text>
+                  </View>
+                  <Text style={styles.wakeUpStatusLabel}>{wakeUpStatusText}</Text>
+                </View>
+              )}
+
+              <View style={styles.wakeUpBtnRow}>
+                <TouchableOpacity
+                  style={[styles.wakeUpBtnPrimary, isWakingUp && { opacity: 0.6 }]}
+                  onPress={wakeUpServerRoutine}
+                  disabled={isWakingUp}
+                  activeOpacity={0.8}
+                >
+                  <RefreshCw color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
+                  <Text style={styles.wakeUpBtnPrimaryText}>
+                    {isWakingUp ? 'Waking Up...' : 'Retry Connection'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.wakeUpBtnSecondary}
+                  onPress={handleOpenExternal}
+                  activeOpacity={0.8}
+                >
+                  <ExternalLink color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
+                  <Text style={styles.wakeUpBtnSecondaryText}>Open in VLC</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.wakeUpCloseBtn}
+                onPress={handleClosePlayer}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.wakeUpCloseText}>Cancel & Go Back</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Buffering / Fetching Loader Overlay */}
-        {isBuffering && !playerError && (
+        {isBuffering && !playerError && !isWakingUp && (
           <View style={styles.bufferingOverlay} pointerEvents="none">
             {/* Spinner ring */}
             <View style={styles.bufferingCard}>
@@ -2854,5 +2996,122 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.primary,
+  },
+
+  // ── Render Cloud Server Wake-Up Overlay ──────────────────────────────
+  wakeUpOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+    paddingHorizontal: 20,
+  },
+  wakeUpCard: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    maxWidth: 420,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    elevation: 25,
+  },
+  wakeUpIconBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  wakeUpTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  wakeUpSubtitle: {
+    color: '#A7A7A7',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  wakeUpProgressSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+    width: '100%',
+  },
+  wakeUpTimerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    gap: 6,
+    marginBottom: 8,
+  },
+  wakeUpTimerText: {
+    color: '#D1D1D6',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  wakeUpStatusLabel: {
+    color: Colors.netflixRed,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  wakeUpBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+    marginBottom: 12,
+  },
+  wakeUpBtnPrimary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.netflixRed,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  wakeUpBtnPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  wakeUpBtnSecondary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  wakeUpBtnSecondaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  wakeUpCloseBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  wakeUpCloseText: {
+    color: '#8E8E93',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });

@@ -22,10 +22,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       {/* Top action row */}
       <View style={styles.topRow}>
         <View style={styles.leftGroup}>
-          <Text style={styles.logoText}>
-            <Text style={styles.logoV}>V</Text>
-            <Text style={styles.logoFlex}>Flix</Text>
-          </Text>
+          <Image
+            source={require('../../assets/adaptive-icon.png')}
+            style={styles.netflixVLogo}
+            resizeMode="contain"
+          />
         </View>
         <View style={styles.rightGroup}>
           <TouchableOpacity style={styles.iconBtn} activeOpacity={0.7}>
@@ -85,25 +86,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  netflixLogo: {
-    color: Colors.netflixRed,
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: -1,
-  },
-  logoText: {
-    fontSize: 28,
-    letterSpacing: -0.5,
-  },
-  logoV: {
-    color: Colors.netflixRed,
-    fontWeight: '900',
-    fontSize: 30,
-  },
-  logoFlex: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 26,
+  netflixVLogo: {
+    width: 36,
+    height: 36,
   },
   rightGroup: {
     flexDirection: 'row',

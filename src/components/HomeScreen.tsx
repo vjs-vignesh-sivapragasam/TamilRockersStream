@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -55,8 +55,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
   const { downloads, startDownload, deleteDownload, rescanStorage, storageStats } = useDownloads();
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Filter ONLY real completed downloads
-  const completedDownloads = downloads.filter((item) => item.status === 'completed');
+  // Filter ONLY real completed downloads (memoized to prevent re-filtering on every render frame)
+  const completedDownloads = useMemo(() => {
+    return downloads.filter((item) => item.status === 'completed');
+  }, [downloads]);
 
   const [offlineItem, setOfflineItem] = useState<DownloadItem | null>(null);
   const [offlineModalVisible, setOfflineModalVisible] = useState(false);
@@ -70,7 +72,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
   const isHeaderVisible = useRef(true);
   const lastOffsetY = useRef(0);
 
-  const handleScroll = (event: any) => {
+  const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
     const diff = offsetY - lastOffsetY.current;
 
@@ -104,7 +106,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
     }
 
     lastOffsetY.current = offsetY;
-  };
+  }, [headerAnim]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -198,10 +200,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
 
       {/* Top Header Bar (Hides on Scroll) */}
       <Animated.View style={[styles.topHeader, { transform: [{ translateY: headerAnim }] }]}>
-        <View style={styles.logoRow}>
-          <Text style={styles.vLogo}>V</Text>
-          <Text style={styles.appTitle}>FLIX</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.logoRow}
+          activeOpacity={0.8}
+          onPress={() => scrollViewRef.current?.scrollTo({ y: 0, animated: true })}
+        >
+          <Image
+            source={require('../../assets/adaptive-icon.png')}
+            style={styles.netflixVLogo}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
 
         <View style={styles.topRightActions}>
           {/* Donate Us Quick Button */}
@@ -601,20 +610,11 @@ const styles = StyleSheet.create({
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    paddingVertical: 2,
   },
-  vLogo: {
-    color: Colors.netflixRed,
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: -1,
-  },
-  appTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    marginLeft: -4,
+  netflixVLogo: {
+    width: 36,
+    height: 36,
   },
   topRightActions: {
     flexDirection: 'row',

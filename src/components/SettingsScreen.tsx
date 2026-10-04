@@ -64,6 +64,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     downloads,
     backendUrl,
     setBackendUrl,
+    downloadMode,
+    setDownloadMode,
     testPing,
     boostDownloads,
     isBackendConnected,
@@ -76,6 +78,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [storageModalVisible, setStorageModalVisible] = useState(false);
   const [serverModalVisible, setServerModalVisible] = useState(false);
   const [boosterModalVisible, setBoosterModalVisible] = useState(false);
+  const [downloadModeModalVisible, setDownloadModeModalVisible] = useState(false);
 
   // Speed Booster States
   const [autoTurbo, setAutoTurbo] = useState(true);
@@ -342,6 +345,31 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         <View style={styles.iosSection}>
           <Text style={styles.iosSectionHeader}>DOWNLOAD PREFERENCES</Text>
           <View style={styles.iosCard}>
+            {/* Download Mode */}
+            <TouchableOpacity
+              style={styles.iosRow}
+              activeOpacity={0.7}
+              onPress={() => setDownloadModeModalVisible(true)}
+            >
+              <View style={[styles.iosIconBox, { backgroundColor: '#FF9500' }]}>
+                <Zap color="#FFFFFF" size={16} strokeWidth={2.2} />
+              </View>
+              <View style={styles.iosTitleGroup}>
+                <Text style={styles.iosTitle}>Download Mode</Text>
+                <Text style={styles.iosSubtitle}>Select engine mode for downloads</Text>
+              </View>
+              <Text style={styles.iosValueText} numberOfLines={1}>
+                {downloadMode === 'direct_http'
+                  ? 'Direct HTTP (Default)'
+                  : downloadMode === 'local_p2p'
+                  ? 'Local P2P Bridge'
+                  : 'Cloud Backend Relay'}
+              </Text>
+              <ChevronRight color="#48484A" size={18} strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            <View style={styles.iosDivider} />
+
             {/* Wi-Fi Only */}
             <View style={styles.iosRow}>
               <View style={[styles.iosIconBox, { backgroundColor: '#32D74B' }]}>
@@ -491,6 +519,123 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
         </View>
       </ScrollView>
+
+      {/* ── 0. Download Modes Sub-Screen Modal ── */}
+      <Modal
+        visible={downloadModeModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDownloadModeModalVisible(false)}
+      >
+        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
+          <View style={styles.subModalHeader}>
+            <Text style={styles.subModalHeaderTitle}>Download Modes</Text>
+            <TouchableOpacity
+              style={styles.subModalCloseBtn}
+              onPress={() => setDownloadModeModalVisible(false)}
+            >
+              <X color="#8E8E93" size={18} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
+            <View style={styles.iosSection}>
+              <Text style={styles.iosSectionHeader}>SELECT ACTIVE DOWNLOAD ENGINE MODE</Text>
+              <View style={{ gap: 12 }}>
+                {/* 1. Direct HTTP Downloader */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    downloadMode === 'direct_http' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => {
+                    setDownloadMode('direct_http');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(255, 149, 0, 0.18)' }]}>
+                      <Zap color="#FF9500" size={18} strokeWidth={2} />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.presetName}>Direct HTTP Downloader</Text>
+                        <View style={{ backgroundColor: 'rgba(255, 149, 0, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '700' }}>DEFAULT</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.presetUrl}>
+                        Direct HTTP range chunk downloader. Saves video files natively directly to phone internal storage.
+                      </Text>
+                    </View>
+                  </View>
+                  {downloadMode === 'direct_http' && (
+                    <Check color="#FF9500" size={20} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+
+                {/* 2. Local P2P WebTorrent Bridge */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    downloadMode === 'local_p2p' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => {
+                    setDownloadMode('local_p2p');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(10, 132, 255, 0.18)' }]}>
+                      <Cpu color="#0A84FF" size={18} strokeWidth={2} />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={styles.presetName}>Local P2P WebTorrent Bridge</Text>
+                      <Text style={styles.presetUrl}>
+                        Client-side peer-to-peer WebTorrent engine running inside the mobile app using WSS & WebRTC trackers.
+                      </Text>
+                    </View>
+                  </View>
+                  {downloadMode === 'local_p2p' && (
+                    <Check color="#0A84FF" size={20} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+
+                {/* 3. Cloud Backend Relay */}
+                <TouchableOpacity
+                  style={[
+                    styles.serverPresetCard,
+                    downloadMode === 'backend_relay' && styles.serverPresetCardActive,
+                  ]}
+                  onPress={() => {
+                    setDownloadMode('backend_relay');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.presetLeft}>
+                    <View style={[styles.presetIconBadge, { backgroundColor: 'rgba(250, 36, 60, 0.18)' }]}>
+                      <Server color={Colors.primary} size={18} strokeWidth={2} />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={styles.presetName}>Cloud Backend Relay</Text>
+                      <Text style={styles.presetUrl}>
+                        Relays torrent downloads through VFlix backend server over Socket.io and streams completed media.
+                      </Text>
+                    </View>
+                  </View>
+                  {downloadMode === 'backend_relay' && (
+                    <Check color={Colors.primary} size={20} strokeWidth={2.5} />
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.iosSectionFooter}>
+                All 3 download modes are active and handled in VFlix. By default, Direct HTTP Downloader is selected for maximum speed and compatibility.
+              </Text>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* ── 1. Active Domain Settings Sub-Screen Modal ── */}
       <Modal

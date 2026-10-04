@@ -1,10 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { io, Socket } from 'socket.io-client';
 
-import { DownloadItem, StorageStats } from '../types/downloads';
+import { DownloadItem, StorageStats, DownloadMode } from '../types/downloads';
 import { downloadService, makeUniqueFileName } from '../services/downloadService';
 import { torrentEngine } from '../services/torrentEngine';
 import { resolveTorrentMoviePayload, extractInfoHashFromUrl } from '../utils/bencode';
@@ -55,6 +55,9 @@ export const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const BACKEND_CONFIG_FILE = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}backend_config.json`
   : '';
+const DOWNLOAD_MODE_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}download_mode_config.json`
+  : '';
 
 interface DownloadContextType {
   downloads: DownloadItem[];
@@ -63,7 +66,9 @@ interface DownloadContextType {
   isBackendConnected: boolean;
   backendUrl: string;
   setBackendUrl: (url: string) => void;
-  testPing: (url?: string) => Promise<{ ok: boolean; latency: number; message: string }>;
+  downloadMode: DownloadMode;
+  setDownloadMode: (mode: DownloadMode) => void;
+  testPing: (url?: string, timeoutMs?: number) => Promise<{ ok: boolean; latency: number; message: string }>;
   boostDownloads: () => Promise<{ success: boolean; boostedCount: number; message: string }>;
   startDownload: (url: string, suggestedTitle?: string, posterUrl?: string) => Promise<DownloadItem>;
   pauseDownload: (id: string) => Promise<void>;
@@ -91,6 +96,37 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
   const socketRef = useRef<Socket | null>(null);
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [backendUrl, setBackendUrlState] = useState(DEFAULT_BACKEND_URL);
+  const [downloadMode, setDownloadModeState] = useState<DownloadMode>('direct_http');
+
+  // Load persisted custom downloadMode
+  useEffect(() => {
+    if (DOWNLOAD_MODE_FILE) {
+      FileSystem.readAsStringAsync(DOWNLOAD_MODE_FILE)
+        .then((content) => {
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.downloadMode && ['direct_http', 'local_p2p', 'backend_relay'].includes(parsed.downloadMode)) {
+              setDownloadModeState(parsed.downloadMode);
+            }
+          } catch {}
+        })
+        .catch(() => {});
+    } else if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      const savedMode = localStorage.getItem('vflix_download_mode') as DownloadMode;
+      if (savedMode && ['direct_http', 'local_p2p', 'backend_relay'].includes(savedMode)) {
+        setDownloadModeState(savedMode);
+      }
+    }
+  }, []);
+
+  const setDownloadMode = (mode: DownloadMode) => {
+    setDownloadModeState(mode);
+    if (DOWNLOAD_MODE_FILE) {
+      FileSystem.writeAsStringAsync(DOWNLOAD_MODE_FILE, JSON.stringify({ downloadMode: mode })).catch(() => {});
+    } else if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      localStorage.setItem('vflix_download_mode', mode);
+    }
+  };
 
   const [storageStats, setStorageStats] = useState<StorageStats>({
     freeBytes: 64 * 1024 * 1024 * 1024,
@@ -127,7 +163,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  const testPing = async (targetUrl?: string): Promise<{ ok: boolean; latency: number; message: string }> => {
+  const testPing = async (targetUrl?: string, timeoutMs: number = 8000): Promise<{ ok: boolean; latency: number; message: string }> => {
     let raw = (targetUrl || backendUrl).trim().replace(/\/+$/, '');
     if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
       raw = 'http://' + raw;
@@ -136,7 +172,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
     const startTime = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${effectiveUrl}/api/ping`, {
         signal: controller.signal,
         headers: { 'Bypass-Tunnel-Reminder': 'true' }
@@ -144,7 +180,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       clearTimeout(timeout);
       const latency = Date.now() - startTime;
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({ server: 'Server Online' }));
         return { ok: true, latency, message: `Connected (${latency}ms) • ${data.server || 'Server Online'}` };
       }
       return { ok: false, latency, message: `Server responded with HTTP ${res.status}` };
@@ -582,33 +618,13 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
               url: directMovieUrl || activeItem.url,
             };
 
-            // If direct WebSeed/Media stream URL or HTTP backend stream URL is resolved, download the real movie data directly!
+            // Check mode preference
             const isHttpUrl = updatedPayloadItem.url.startsWith('http://') || updatedPayloadItem.url.startsWith('https://');
 
-            if (directMovieUrl || isHttpUrl) {
-              downloadService.startRealDownload(
-                updatedPayloadItem,
-                (progressUpdates) => {
-                  updateItem(initialItem.id, progressUpdates);
-                },
-                (completedUpdates) => {
-                  updateItem(initialItem.id, {
-                    ...completedUpdates,
-                    title: resolved.title || updatedPayloadItem.title,
-                    movieFileName: uniqueMovieFileName,
-                    movieFileUri,
-                  });
-                },
-                (errorMsg) => {
-                  updateItem(initialItem.id, {
-                    status: 'error',
-                    error: errorMsg,
-                    speed: '0 KB/s',
-                  });
-                }
-              );
-            } else {
-              // Push to our dedicated backend server
+            if (downloadMode === 'local_p2p' && !isHttpUrl) {
+              updateItem(initialItem.id, { speed: 'Connecting to Local P2P Swarm...' });
+              torrentEngine.addTorrent(initialItem.id, initialItem.url);
+            } else if (downloadMode === 'backend_relay' && !isHttpUrl) {
               const runBackendDownload = async () => {
                 updateItem(initialItem.id, { speed: 'Connecting to Backend...' });
                 try {
@@ -624,7 +640,6 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
                     });
                     if (!res.ok) throw new Error('Failed to send magnet to backend');
                   } else if (initialItem.url.startsWith('data:')) {
-                    // It's a base64 encoded data URI!
                     const res = await fetch(`${backendUrl}/api/torrent/file-base64`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
@@ -636,7 +651,6 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
                     });
                     if (!res.ok) throw new Error('Failed to upload base64 torrent to backend');
                   } else {
-                    // Upload .torrent file via form data (if it's a file:// uri)
                     const formData = new FormData();
                     formData.append('appId', initialItem.id);
                     formData.append('torrent', {
@@ -662,6 +676,35 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
                 }
               };
               runBackendDownload();
+            } else {
+              // Direct HTTP Downloader (Default)
+              let httpDownloadUrl = updatedPayloadItem.url;
+              if (!isHttpUrl && infoHash) {
+                httpDownloadUrl = `${backendUrl}/api/stream/${infoHash}?raw=1&dl=1`;
+              }
+              const finalItemToDownload = { ...updatedPayloadItem, url: httpDownloadUrl };
+
+              downloadService.startRealDownload(
+                finalItemToDownload,
+                (progressUpdates) => {
+                  updateItem(initialItem.id, progressUpdates);
+                },
+                (completedUpdates) => {
+                  updateItem(initialItem.id, {
+                    ...completedUpdates,
+                    title: resolved.title || updatedPayloadItem.title,
+                    movieFileName: uniqueMovieFileName,
+                    movieFileUri,
+                  });
+                },
+                (errorMsg) => {
+                  updateItem(initialItem.id, {
+                    status: 'error',
+                    error: errorMsg,
+                    speed: '0 KB/s',
+                  });
+                }
+              );
             }
 
             return currentDownloads.map((item) => (item.id === initialItem.id ? updatedPayloadItem : item));
@@ -689,7 +732,7 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       return initialItem;
     },
-    [backendUrl, downloads, updateItem]
+    [backendUrl, downloads, updateItem, downloadMode]
   );
 
   const pauseDownload = useCallback(
@@ -797,27 +840,51 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
     setDownloads((prev) => prev.filter((d) => d.status !== 'completed'));
   }, [downloads]);
 
+  const contextValue = useMemo(
+    () => ({
+      downloads,
+      activeDownloadsCount,
+      storageStats,
+      isBackendConnected,
+      backendUrl,
+      setBackendUrl,
+      downloadMode,
+      setDownloadMode,
+      testPing,
+      boostDownloads,
+      startDownload,
+      pauseDownload,
+      resumeDownload,
+      deleteDownload,
+      clearCompleted,
+      refreshStorageStats,
+      rescanStorage,
+      importMovie,
+    }),
+    [
+      downloads,
+      activeDownloadsCount,
+      storageStats,
+      isBackendConnected,
+      backendUrl,
+      setBackendUrl,
+      downloadMode,
+      setDownloadMode,
+      testPing,
+      boostDownloads,
+      startDownload,
+      pauseDownload,
+      resumeDownload,
+      deleteDownload,
+      clearCompleted,
+      refreshStorageStats,
+      rescanStorage,
+      importMovie,
+    ]
+  );
+
   return (
-    <DownloadContext.Provider
-      value={{
-        downloads,
-        activeDownloadsCount,
-        storageStats,
-        isBackendConnected,
-        backendUrl,
-        setBackendUrl,
-        testPing,
-        boostDownloads,
-        startDownload,
-        pauseDownload,
-        resumeDownload,
-        deleteDownload,
-        clearCompleted,
-        refreshStorageStats,
-        rescanStorage,
-        importMovie,
-      }}
-    >
+    <DownloadContext.Provider value={contextValue}>
       {children}
     </DownloadContext.Provider>
   );

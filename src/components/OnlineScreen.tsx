@@ -143,8 +143,9 @@ export const OnlineScreen: React.FC = () => {
     if (!raw) return;
 
     const timer = setTimeout(() => {
+      fetch(`${backendUrl}/api/ping`, { headers: { 'Bypass-Tunnel-Reminder': 'true' } }).catch(() => {});
       fetch(`${backendUrl}/api/stream/warmup?magnet=${encodeURIComponent(raw)}`).catch(() => {});
-    }, 400);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [magnetInput, parsedDetails, backendUrl]);

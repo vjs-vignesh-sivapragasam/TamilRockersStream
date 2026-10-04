@@ -5,79 +5,86 @@ import {
   Animated,
   Text,
   Easing,
+  StatusBar,
 } from 'react-native';
+import { Colors } from '../constants/theme';
 
 interface SplashScreenProps {
   onFinish: () => void;
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
-  // Animation Refs (100% native driver compatible)
+  // Animation Refs
+  const scaleAnim = useRef(new Animated.Value(0.35)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.94)).current;
-  const translateYAnim = useRef(new Animated.Value(14)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
 
   const subtextFadeAnim = useRef(new Animated.Value(0)).current;
-  const subtextTranslateYAnim = useRef(new Animated.Value(8)).current;
+  const subtextScaleAnim = useRef(new Animated.Value(0.9)).current;
 
   const containerOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Neat & Simple Animation Sequence
+    // Netflix style "Ta-Dum" Cinematic Animation Sequence
     Animated.sequence([
-      // 1. Smooth, elegant fade-in & scale of main VFlix text
+      // Step 1: Rapid Netflix-style text pop & zoom in + glow expansion
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 550,
-          easing: Easing.out(Easing.cubic),
+          duration: 400,
+          easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.timing(scaleAnim, {
+        Animated.spring(scaleAnim, {
           toValue: 1,
-          duration: 650,
-          easing: Easing.out(Easing.cubic),
+          friction: 6,
+          tension: 40,
           useNativeDriver: true,
         }),
-        Animated.timing(translateYAnim, {
-          toValue: 0,
-          duration: 550,
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 700,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
       ]),
 
-      // 2. Subtext gentle fade in
+      // Step 2: Subtext elegant fade and subtle scale up
       Animated.parallel([
         Animated.timing(subtextFadeAnim, {
           toValue: 1,
-          duration: 400,
+          duration: 450,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.timing(subtextTranslateYAnim, {
-          toValue: 0,
-          duration: 400,
+        Animated.timing(subtextScaleAnim, {
+          toValue: 1,
+          duration: 450,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
       ]),
 
-      // 3. Short hold for pleasant readability
-      Animated.delay(650),
+      // Step 3: Hold briefly for high-impact brand visibility
+      Animated.delay(800),
 
-      // 4. Smooth fade out into main app
+      // Step 4: Netflix zoom-through cinematic exit (text scales up into screen as background dissolves)
       Animated.parallel([
         Animated.timing(containerOpacity, {
           toValue: 0,
-          duration: 400,
-          easing: Easing.in(Easing.quad),
+          duration: 450,
+          easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(scaleAnim, {
-          toValue: 1.05,
-          duration: 400,
+          toValue: 1.25,
+          duration: 450,
           easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 350,
           useNativeDriver: true,
         }),
       ]),
@@ -87,42 +94,57 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
   }, [
     containerOpacity,
     fadeAnim,
+    glowAnim,
     onFinish,
     scaleAnim,
     subtextFadeAnim,
-    subtextTranslateYAnim,
-    translateYAnim,
+    subtextScaleAnim,
   ]);
+
+  const glowScale = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.5, 1.8],
+  });
 
   return (
     <Animated.View style={[styles.container, { opacity: containerOpacity }]}>
-      {/* Center Minimal Content */}
+      <StatusBar hidden barStyle="light-content" backgroundColor="#000000" />
+      
+      {/* Background Red Ambient Glow behind logo */}
+      <Animated.View
+        style={[
+          styles.glowCircle,
+          {
+            opacity: glowAnim,
+            transform: [{ scale: glowScale }],
+          },
+        ]}
+      />
+
+      {/* Main Content */}
       <View style={styles.centerBox}>
-        {/* Main Brand Text: VFlix */}
+        {/* Animated Brand Title: VFLIX */}
         <Animated.View
           style={[
             styles.brandTitleRow,
             {
               opacity: fadeAnim,
-              transform: [
-                { scale: scaleAnim },
-                { translateY: translateYAnim },
-              ],
+              transform: [{ scale: scaleAnim }],
             },
           ]}
         >
-          <Text style={styles.brandTitleViki}>V</Text>
-          <Text style={styles.brandTitleFlex}>FLIX</Text>
+          <Text style={styles.netflixRedText}>VFLIX</Text>
         </Animated.View>
 
         {/* Minimal Subtext */}
         <Animated.View
           style={{
             opacity: subtextFadeAnim,
-            transform: [{ translateY: subtextTranslateYAnim }],
+            transform: [{ scale: subtextScaleAnim }],
+            marginTop: 14,
           }}
         >
-          <Text style={styles.subtext}>CINEMA STREAMING</Text>
+          <Text style={styles.subtext}>UNLIMITED MOVIES & TV SHOWS</Text>
         </Animated.View>
       </View>
     </Animated.View>
@@ -132,10 +154,21 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#0A0A0C',
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 9999,
+    zIndex: 99999,
+  },
+  glowCircle: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(229, 9, 20, 0.28)',
+    shadowColor: Colors.netflixRed,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 60,
   },
   centerBox: {
     alignItems: 'center',
@@ -144,31 +177,23 @@ const styles = StyleSheet.create({
   brandTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  brandTitleViki: {
+  netflixRedText: {
     color: '#E50914',
-    fontSize: 44,
+    fontSize: 54,
     fontWeight: '900',
-    letterSpacing: 1,
-    textShadowColor: 'rgba(229, 9, 20, 0.4)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 12,
-  },
-  brandTitleFlex: {
-    color: '#FFFFFF',
-    fontSize: 44,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textShadowColor: 'rgba(255, 255, 255, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 8,
+    letterSpacing: 4,
+    textAlign: 'center',
+    textShadowColor: 'rgba(229, 9, 20, 0.75)',
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 20,
   },
   subtext: {
-    color: '#8E8E93',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 5,
-    marginTop: 10,
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 4,
     textAlign: 'center',
   },
 });

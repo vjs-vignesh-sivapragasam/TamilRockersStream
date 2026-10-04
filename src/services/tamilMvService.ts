@@ -451,13 +451,32 @@ export const tamilMvService = {
       if (!response.ok) return {};
       const html = await response.text();
 
-      // Find all magnet links with surrounding context (500 chars before, 300 chars after, plus dn= param)
-      const magnetRegex = /href=["'](magnet:\?[^"']+)["']/gi;
-      let mMatch;
-      const allMagnets: { url: string; context: string; dn: string; size: string }[] = [];
+      // Extract torrent file attachment URL
+      const torrentMatch =
+        html.match(/href=["'](https?:\/\/[^"']+\.torrent[^"']*)["']/i) ||
+        html.match(
+          /href=["'](https?:\/\/[^"']*\/index\.php\?\/applications\/core\/interface\/file\/attachment\.php\?[^"']+)["']/i
+        );
+      let torrentUrl = torrentMatch ? torrentMatch[1] : undefined;
+      if (torrentUrl) {
+        torrentUrl = torrentUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+      }
 
+      // Find all magnet links with surrounding context (500 chars before, 300 chars after, plus dn= param)
+      const magnetsMap = new Map<string, { url: string; context: string; dn: string; size: string }>();
+
+      // 1. Standard href or text magnets
+      const magnetRegex = /(magnet:\?[^\s"'<>]+)/gi;
+      let mMatch;
       while ((mMatch = magnetRegex.exec(html)) !== null) {
-        let cleanMagnet = mMatch[1].replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
+        let cleanMagnet = mMatch[1]
+          .replace(/&amp;/g, '&')
+          .replace(/&#38;/g, '&')
+          .replace(/&quot;.*/g, '')
+          .replace(/[>;"'].*$/, '')
+          .trim();
+        if (!cleanMagnet.startsWith('magnet:?')) continue;
+
         const start = Math.max(0, mMatch.index - 500);
         const end = Math.min(html.length, mMatch.index + 300);
         const context = html.substring(start, end).replace(/<[^>]+>/g, ' ');
@@ -468,10 +487,41 @@ export const tamilMvService = {
         const sizeMatch = fullText.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
         const size = sizeMatch ? sizeMatch[1].toUpperCase().replace(/\s+/, '') : '';
 
-        allMagnets.push({ url: cleanMagnet, context: fullText, dn, size });
+        if (!magnetsMap.has(cleanMagnet)) {
+          magnetsMap.set(cleanMagnet, { url: cleanMagnet, context: fullText, dn, size });
+        }
       }
 
-      if (allMagnets.length === 0) return {};
+      // 2. URL encoded magnets
+      const encodedRegex = /(magnet%3A%3F[^\s"'<>]+)/gi;
+      while ((mMatch = encodedRegex.exec(html)) !== null) {
+        try {
+          let decoded = decodeURIComponent(mMatch[1]);
+          decoded = decoded.replace(/&amp;/g, '&').replace(/[>;"'].*$/, '').trim();
+          if (decoded.startsWith('magnet:?') && !magnetsMap.has(decoded)) {
+            magnetsMap.set(decoded, { url: decoded, context: '', dn: '', size: '' });
+          }
+        } catch {}
+      }
+
+      // 3. InfoHash fallback (40 hex chars)
+      if (magnetsMap.size === 0) {
+        const hashMatches = html.match(/\b([a-fA-F0-9]{40})\b/g);
+        if (hashMatches) {
+          for (const hash of hashMatches) {
+            const constructed = `magnet:?xt=urn:btih:${hash.toLowerCase()}&dn=Movie`;
+            if (!magnetsMap.has(constructed)) {
+              magnetsMap.set(constructed, { url: constructed, context: '', dn: '', size: '' });
+            }
+          }
+        }
+      }
+
+      const allMagnets = Array.from(magnetsMap.values());
+
+      if (allMagnets.length === 0) {
+        return { magnetUrl: torrentUrl, torrentUrl };
+      }
 
       let selectedMagnet = allMagnets[0].url;
 
@@ -530,17 +580,6 @@ export const tamilMvService = {
             selectedMagnet = highMatch.url;
           }
         }
-      }
-
-      // Extract torrent file attachment URL
-      const torrentMatch =
-        html.match(/href=["'](https?:\/\/[^"']+\.torrent[^"']*)["']/i) ||
-        html.match(
-          /href=["'](https?:\/\/[^"']*\/index\.php\?\/applications\/core\/interface\/file\/attachment\.php\?[^"']+)["']/i
-        );
-      let torrentUrl = torrentMatch ? torrentMatch[1] : undefined;
-      if (torrentUrl) {
-        torrentUrl = torrentUrl.replace(/&amp;/g, '&').replace(/&#38;/g, '&').trim();
       }
 
       return { magnetUrl: selectedMagnet, torrentUrl };

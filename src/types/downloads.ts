@@ -31,3 +31,6 @@ export interface StorageStats {
   totalBytes: number;
   appDownloadsBytes: number;
 }
+
+export type DownloadMode = 'direct_http' | 'local_p2p' | 'backend_relay';
+
