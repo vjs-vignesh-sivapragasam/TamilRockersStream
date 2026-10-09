@@ -65,6 +65,8 @@ import {
   MovieResolutionItem,
   POPULAR_MIRRORS,
   posterCache,
+  savePosterCacheToDisk,
+  loadPosterCacheFromDisk,
 } from '../services/tamilMvService';
 import { useDownloads } from '../context/DownloadContext';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
@@ -254,7 +256,7 @@ const ContinueWatchingCard = React.memo<ContinueWatchingCardProps>(({ item, onRe
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PosterGridCard — compact 2-column poster card for the grid layout
+// PosterGridCard — 2-column poster card (Poster first, title next line)
 // ─────────────────────────────────────────────────────────────────────────────
 interface PosterGridCardProps {
   item: TamilMvMovieResult;
@@ -266,16 +268,18 @@ interface PosterGridCardProps {
 
 const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
   const { width: screenWidth } = useWindowDimensions();
-  const cardWidth = Math.floor((screenWidth - 36) / 2);
-  const cardHeight = Math.round(cardWidth * 1.5);
+  const NUM_COLUMNS = 2;
+  const cardWidth = Math.floor((screenWidth - 32 - (NUM_COLUMNS - 1) * 10) / NUM_COLUMNS);
+  const posterHeight = Math.round(cardWidth * 1.48);
 
   const topicUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
   const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (item.posterUrl) return item.posterUrl;
     if (!topicUrl) return null;
     const cached = posterCache.get(topicUrl);
     return cached !== undefined ? cached : null;
   });
-  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(!item.posterUrl && topicUrl && !posterCache.has(topicUrl)));
 
   useEffect(() => {
     if (!topicUrl) return;
@@ -290,15 +294,6 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
       setPosterLoading(false);
     });
   }, [topicUrl, enqueuePosterFetch]);
-
-  // Determine best quality badge label
-  const bestRes = useMemo(() => {
-    if (!item.resolutions || item.resolutions.length === 0) return null;
-    const idx = getInitialResolutionIndex(item.resolutions);
-    return item.resolutions[idx] || item.resolutions[0];
-  }, [item.resolutions]);
-
-  const badge = getQualityBadgeConfig(bestRes?.resolution || '');
 
   const cleanMovieName = useMemo(() => {
     const isBad = (name?: string) =>
@@ -324,89 +319,49 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
 
   return (
     <TouchableOpacity
-      style={[styles.pgCard, { width: cardWidth, height: cardHeight }]}
+      style={[styles.pgCard, { width: cardWidth }]}
       onPress={onPress}
       activeOpacity={0.82}
     >
-      {/* Poster Image */}
-      {posterUrl ? (
-        <Image
-          source={{ uri: posterUrl }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-          onError={() => {
-            setPosterUrl(null);
-          }}
-        />
-      ) : posterLoading ? (
-        <LinearGradient
-          colors={['#181920', '#252834', '#181920']}
-          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Film color="#3A3E4E" size={32} strokeWidth={1.5} />
-        </LinearGradient>
-      ) : (
-        <LinearGradient
-          colors={[Colors.primary, '#660814']}
-          style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Film color="rgba(255,255,255,0.4)" size={32} strokeWidth={1.5} />
-        </LinearGradient>
-      )}
+      {/* 1. Show Movie Poster First */}
+      <View style={[styles.pgPosterWrapper, { width: cardWidth, height: posterHeight }]}>
+        {posterUrl ? (
+          <Image
+            source={{ uri: posterUrl }}
+            style={styles.pgPosterImage}
+            resizeMode="cover"
+            onError={() => setPosterUrl(null)}
+          />
+        ) : posterLoading ? (
+          <LinearGradient
+            colors={['#1B182B', '#27223D', '#1B182B']}
+            style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Film color="#574F7A" size={28} strokeWidth={1.5} />
+          </LinearGradient>
+        ) : (
+          <LinearGradient
+            colors={['#8B5CF6', '#4C1D95']}
+            style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Film color="rgba(255,255,255,0.4)" size={28} strokeWidth={1.5} />
+          </LinearGradient>
+        )}
+      </View>
 
-      {/* Bottom gradient overlay */}
-      <LinearGradient
-        colors={['transparent', 'rgba(10,10,14,0.45)', 'rgba(10,10,14,0.96)']}
-        style={styles.pgGradientOverlay}
-        start={{ x: 0, y: 0.2 }}
-        end={{ x: 0, y: 1 }}
-      >
-        {bestRes ? (
-          <View style={styles.pgCardBadgeRow}>
-            <View style={[styles.pgQualityBadgeInline, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-              <Text style={[styles.pgQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
-            </View>
-          </View>
-        ) : null}
+      {/* 2. Next line shows - Title of the Movie */}
+      <View style={styles.pgTitleContainer}>
         <Text style={styles.pgTitle} numberOfLines={2}>
           {cleanMovieName}
         </Text>
-      </LinearGradient>
-
-      {/* Year badge — top-left */}
-      {item.year ? (
-        <View style={styles.pgYearBadge}>
-          <Text style={styles.pgYearText}>{item.year}</Text>
-        </View>
-      ) : null}
-
-      {/* Language badge — top-left next to year */}
-      {item.language ? (
-        <View style={[styles.pgLangBadge, { left: item.year ? 46 : 7, right: undefined }]}>
-          <Text style={styles.pgLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
-        </View>
-      ) : null}
-
-      {/* Bookmark button — top-right */}
-      <TouchableOpacity
-        style={styles.cardBookmarkBtn}
-        onPress={(e) => {
-          e.stopPropagation?.();
-          onToggleSave?.(posterUrl);
-        }}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        activeOpacity={0.7}
-      >
-        <Bookmark
-          color={isSaved ? Colors.primary : '#FFFFFF'}
-          size={13}
-          fill={isSaved ? Colors.primary : 'transparent'}
-        />
-      </TouchableOpacity>
+        <Text style={styles.pgMetaSub} numberOfLines={1}>
+          {item.year ? `${item.year} • ` : ''}{item.language ? item.language.toUpperCase() : 'TAMIL'}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 });
@@ -426,11 +381,12 @@ interface TopReleaseCardProps {
 const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
   const topicUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
   const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (item.posterUrl) return item.posterUrl;
     if (!topicUrl) return null;
     const cached = posterCache.get(topicUrl);
     return cached !== undefined ? cached : null;
   });
-  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(!item.posterUrl && topicUrl && !posterCache.has(topicUrl)));
 
   useEffect(() => {
     if (!topicUrl) return;
@@ -445,14 +401,6 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
       setPosterLoading(false);
     });
   }, [topicUrl, enqueuePosterFetch]);
-
-  const bestRes = useMemo(() => {
-    if (!item.resolutions || item.resolutions.length === 0) return null;
-    const idx = getInitialResolutionIndex(item.resolutions);
-    return item.resolutions[idx] || item.resolutions[0];
-  }, [item.resolutions]);
-
-  const badge = getQualityBadgeConfig(bestRes?.resolution || '');
 
   const cleanMovieName = useMemo(() => {
     const isBad = (name?: string) =>
@@ -517,53 +465,10 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
         start={{ x: 0, y: 0.2 }}
         end={{ x: 0, y: 1 }}
       >
-        {bestRes ? (
-          <View style={styles.trCardBadgeRow}>
-            <View style={[styles.trQualityBadgeInline, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-              <Text style={[styles.trQualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
-            </View>
-          </View>
-        ) : null}
         <Text style={styles.trTitle} numberOfLines={2}>
           {cleanMovieName}
         </Text>
       </LinearGradient>
-
-      {/* Top-Left: Rank Badge (#1, #2, ...) */}
-      <View style={styles.trRankBadge}>
-        <LinearGradient
-          colors={rank <= 3 ? [Colors.primary, '#850E1B'] : ['#2C2D38', '#181920']}
-          style={styles.trRankGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Text style={styles.trRankText}>#{rank}</Text>
-        </LinearGradient>
-      </View>
-
-      {/* Top-Left: Language badge next to rank */}
-      {item.language ? (
-        <View style={[styles.trLangBadge, { left: 38, right: undefined }]}>
-          <Text style={styles.pgLangText}>{item.language.slice(0, 3).toUpperCase()}</Text>
-        </View>
-      ) : null}
-
-      {/* Top-Right: Bookmark button */}
-      <TouchableOpacity
-        style={styles.cardBookmarkBtn}
-        onPress={(e) => {
-          e.stopPropagation?.();
-          onToggleSave?.(posterUrl);
-        }}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        activeOpacity={0.7}
-      >
-        <Bookmark
-          color={isSaved ? Colors.primary : '#FFFFFF'}
-          size={13}
-          fill={isSaved ? Colors.primary : 'transparent'}
-        />
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 });
@@ -671,11 +576,12 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
 
   const topicUrl = movie.topicUrl || movie.resolutions?.[0]?.topicUrl || '';
   const [posterUrl, setPosterUrl] = useState<string | null>(() => {
+    if (movie.posterUrl) return movie.posterUrl;
     if (!topicUrl) return null;
     const cached = posterCache.get(topicUrl);
     return cached !== undefined ? cached : null;
   });
-  const [posterLoading, setPosterLoading] = useState(() => Boolean(topicUrl && !posterCache.has(topicUrl)));
+  const [posterLoading, setPosterLoading] = useState(() => Boolean(!movie.posterUrl && topicUrl && !posterCache.has(topicUrl)));
 
   useEffect(() => {
     if (!topicUrl) return;
@@ -743,55 +649,23 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       >
-        {/* Top Header Row (positioned under top overlay header) */}
-        <View style={[styles.heroHeaderRow, { marginTop: insets.top + 46 }]}>
-          <View style={styles.heroBadge}>
-            <Sparkles color="#FFD700" size={13} strokeWidth={2.5} />
-            <Text style={styles.heroBadgeText}>
-              {totalSlides && totalSlides > 1 ? `FEATURED (${slideNumber}/${totalSlides})` : 'FEATURED RELEASE'}
-            </Text>
+        {/* Center Play Icon Overlay with Glowing White Effect */}
+        <View style={styles.heroCenterPlayWrap}>
+          <View style={styles.heroCenterPlayGlowOuter}>
+            <View style={styles.heroCenterPlayCircle}>
+              <Play color="#FFFFFF" size={28} fill="#FFFFFF" style={{ marginLeft: 3 }} />
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.heroBookmarkBtn}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onToggleSave?.(posterUrl);
-            }}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.7}
-          >
-            <Bookmark
-              color={isSaved ? Colors.primary : '#FFFFFF'}
-              size={16}
-              fill={isSaved ? Colors.primary : 'transparent'}
-            />
-          </TouchableOpacity>
         </View>
 
-        {/* Bottom Content Area */}
+        {/* Bottom Content Area: Anchored Movie Title, Year & Dots at Slider Bottom */}
         <View style={styles.heroBottomContent}>
-          {/* Centered Slideshow Dots Indicator before movie title */}
-          {totalSlides && totalSlides > 1 ? (
-            <View style={styles.heroDotsCenterRow}>
-              {Array.from({ length: totalSlides }).map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.slideshowDot,
-                    i === (slideNumber ? slideNumber - 1 : 0)
-                      ? styles.slideshowDotActive
-                      : styles.slideshowDotInactive,
-                  ]}
-                />
-              ))}
-            </View>
-          ) : null}
-
+          {/* Movie Name */}
           <Text style={styles.heroTitle} numberOfLines={2}>
             {cleanMovieName}
           </Text>
 
-          {/* Meta badges */}
+          {/* Year & Language Badges */}
           <View style={styles.heroMetaRow}>
             {movie.year ? (
               <View style={styles.heroMetaBadge}>
@@ -800,38 +674,30 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
             ) : null}
 
             {movie.language ? (
-              <View style={[styles.heroMetaBadge, { backgroundColor: 'rgba(250,36,60,0.2)', borderColor: 'rgba(250,36,60,0.5)' }]}>
+              <View style={[styles.heroMetaBadge, { backgroundColor: Colors.navActivePill, borderColor: Colors.primary }]}>
                 <Text style={[styles.heroMetaBadgeText, { color: Colors.primary }]}>
                   {movie.language.toUpperCase()}
                 </Text>
               </View>
             ) : null}
-
-            {bestRes ? (
-              <View style={[styles.heroMetaBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                <Text style={[styles.heroMetaBadgeText, { color: badge.text }]}>
-                  {bestRes.resolution}
-                </Text>
-              </View>
-            ) : null}
           </View>
 
-          {/* CTA Action Button */}
-          <TouchableOpacity
-            style={styles.heroCtaBtn}
-            onPress={onPress}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={[Colors.primary, '#B51527']}
-              style={styles.heroCtaGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <Play color="#FFFFFF" size={16} fill="#FFFFFF" />
-              <Text style={styles.heroCtaText}>View Movie & Stream</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+          {/* Centered Slideshow Dots Indicator */}
+          {totalSlides && totalSlides > 1 ? (
+            <View style={styles.heroDotsCenterRow}>
+              {Array.from({ length: totalSlides }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.slideshowDot,
+                    i === (slideNumber ? slideNumber - 1 : 0)
+                      ? [styles.slideshowDotActive, { backgroundColor: Colors.primary }]
+                      : styles.slideshowDotInactive,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -1877,7 +1743,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 
 export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigateToTab, onOpenInBrowserTab }) => {
   const insets = useSafeAreaInsets();
-  const { downloads, isBackendConnected, startDownload, backendUrl, testPing } = useDownloads();
+  const { downloads, isBackendConnected, startDownload, backendUrl, testPing, themeKey } = useDownloads();
 
   const [query, setQuery] = useState(globalCachedFinderState.query);
   const [loading, setLoading] = useState(false);
@@ -2229,6 +2095,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
           activeFetchesRef.current.delete(topicUrl);
           if (posterUrl) {
             posterCache.set(topicUrl, posterUrl);
+            savePosterCacheToDisk();
             const cb = posterCallbacksRef.current.get(topicUrl);
             if (cb) {
               cb(posterUrl);
@@ -2255,6 +2122,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   // Restore persisted state from storage on first mount or auto-fetch Recent Upload
   useEffect(() => {
+    loadPosterCacheFromDisk();
     if (globalCachedFinderState.results.length > 0) {
       const isHome = !globalCachedFinderState.searchedQuery || /^recent/i.test(globalCachedFinderState.searchedQuery);
       if (isHome) {
@@ -2441,6 +2309,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
         const result: string | null = url || null;
         // Store in global cache
         posterCache.set(topicUrl, result);
+        savePosterCacheToDisk();
         // Fire the waiting callback so MovieCardItem re-renders
         const cb = posterCallbacksRef.current.get(topicUrl);
         if (cb) {
@@ -3025,52 +2894,6 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
 
   return (
     <View style={styles.container}>
-      {/* 1. Premium VFlix Home Header (Overlaid at Top, Hides on Scroll) */}
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            paddingTop: insets.top + 6,
-            transform: [{ translateY: headerAnim }],
-          },
-        ]}
-      >
-        <View style={styles.headerLeft}>
-          <TouchableOpacity
-            style={styles.headerBrandRow}
-            activeOpacity={0.8}
-            onPress={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
-          >
-            <Image
-              source={require('../../assets/adaptive-icon.png')}
-              style={styles.netflixVLogo}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.headerRightActions}>
-          <TouchableOpacity
-            style={styles.headerSearchBtn}
-            onPress={() => onNavigateToTab?.('search')}
-            activeOpacity={0.75}
-          >
-            <Search color="#FFFFFF" size={18} strokeWidth={2.4} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.mirrorChip}
-            onPress={() => setUrlModalVisible(true)}
-            activeOpacity={0.75}
-          >
-            <View style={styles.livePulseDot} />
-            <Text style={styles.mirrorChipText} numberOfLines={1} ellipsizeMode="tail">
-              {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}
-            </Text>
-            <ChevronDown color="#9E9EA7" size={12} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
 
       {/* 3. Main Body Content */}
       {loading ? (
@@ -3536,35 +3359,7 @@ export const MovieFinderScreen: React.FC<MovieFinderScreenProps> = ({ onNavigate
                 </LinearGradient>
               </TouchableOpacity>
 
-              {/* Option 2: External Player (VLC / MX) */}
-              <TouchableOpacity
-                style={styles.secondaryStreamBtn}
-                activeOpacity={0.7}
-                onPress={() => {
-                  if (!streamModalData) return;
-                  setStreamModalVisible(false);
-                  const target = streamModalData.streamUrl || streamModalData.magnet;
-                  Linking.openURL(`vlc://${target}`).catch(() => {
-                    Linking.openURL(target).catch(() => {
-                      Alert.alert(
-                        'VLC Not Detected',
-                        'VLC for Android is recommended for direct hardware accelerated torrent playback.'
-                      );
-                    });
-                  });
-                }}
-              >
-                <View style={[styles.secondaryIconCircle, { backgroundColor: 'rgba(255, 140, 0, 0.15)' }]}>
-                  <Tv color="#FF9800" size={19} />
-                </View>
-                <View style={styles.secondaryTextWrap}>
-                  <Text style={styles.secondaryTitle}>Play in VLC / MX Player</Text>
-                  <Text style={styles.secondarySub}>
-                    Hardware accelerated playback in external media player
-                  </Text>
-                </View>
-                <ExternalLink color="#666" size={15} />
-              </TouchableOpacity>
+
 
               {/* Option 3: Webtor Cloud in Browser */}
               <TouchableOpacity
@@ -3775,6 +3570,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     maxWidth: 75,
   },
+  brandTitleText: {
+    color: Colors.primary,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  rescanHeaderBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#16171D',
+    borderWidth: 1,
+    borderColor: '#262835',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   headerSearchBtn: {
     width: 32,
     height: 32,
@@ -3914,9 +3725,9 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   listGridColumnWrapper: {
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 12,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   listHeaderBox: {
     marginBottom: 10,
@@ -4218,42 +4029,66 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // ── Poster Grid Card (2-column Netflix/VFlix style) ──
+  // ── Poster Grid Card (3-column UI style: Poster image then title next line) ──
   pgCard: {
+    marginBottom: 14,
+    backgroundColor: 'transparent',
+  },
+  pgPosterWrapper: {
     borderRadius: 12,
-    backgroundColor: '#16171E',
-    borderWidth: 1,
-    borderColor: '#242634',
     overflow: 'hidden',
+    backgroundColor: '#19152B',
     position: 'relative',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 5,
   },
-  pgImage: {
-    ...StyleSheet.absoluteFill,
+  pgPosterImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
   },
   pgShimmerCenter: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pgGradientOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-    paddingTop: 28,
+  pgTitleContainer: {
+    marginTop: 6,
+    paddingHorizontal: 2,
+    alignItems: 'center',
   },
   pgTitle: {
     color: '#FFFFFF',
-    fontSize: 12.5,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     lineHeight: 16,
-    letterSpacing: -0.2,
+    textAlign: 'center',
+    letterSpacing: -0.1,
+  },
+  pgMetaSub: {
+    color: '#A09DB1',
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  pgQualityBadgeInline: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: 'rgba(139, 92, 246, 0.85)',
+    borderRadius: 4,
+    paddingHorizontal: 4.5,
+    paddingVertical: 1.5,
+    zIndex: 5,
+  },
+  pgQualityText: {
+    color: '#FFFFFF',
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   pgYearBadge: {
     position: 'absolute',
@@ -4271,32 +4106,11 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     fontWeight: '700',
   },
-  pgLangBadge: {
-    position: 'absolute',
-    top: 7,
-    right: 7,
-    backgroundColor: 'rgba(250, 36, 60, 0.85)',
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-  },
   pgLangText: {
     color: '#FFFFFF',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.5,
-  },
-  pgCardBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  pgQualityBadgeInline: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 4.5,
-    paddingVertical: 1,
-    alignSelf: 'flex-start',
   },
   trCardBadgeRow: {
     flexDirection: 'row',
@@ -4309,20 +4123,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4.5,
     paddingVertical: 1,
     alignSelf: 'flex-start',
-  },
-  pgQualityBadge: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 4.5,
-    paddingVertical: 1,
-  },
-  pgQualityText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.2,
   },
 
   // ── Movie Detail Sheet (Netflix-style full page sheet) ──
@@ -5194,8 +4994,45 @@ const styles = StyleSheet.create({
   },
   heroGradientOverlay: {
     ...StyleSheet.absoluteFill,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     padding: 16,
+    paddingBottom: 20,
+  },
+  heroCenterPlayWrap: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  heroCenterPlayGlowOuter: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.95,
+    shadowRadius: 24,
+    elevation: 14,
+  },
+  heroCenterPlayCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.32)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2.2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    elevation: 12,
   },
   heroHeaderRow: {
     flexDirection: 'row',
@@ -5228,45 +5065,51 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroBottomContent: {
-    gap: 8,
+    gap: 6,
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+    paddingBottom: 12,
+    paddingHorizontal: 12,
   },
   heroDotsCenterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginBottom: 2,
+    marginTop: 6,
   },
   heroTitle: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 28,
+    fontSize: 23,
+    fontWeight: '900',
+    lineHeight: 29,
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
+    textShadowRadius: 8,
   },
   heroMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginVertical: 2,
+    marginTop: 4,
   },
   heroMetaBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    paddingHorizontal: 8,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 6,
   },
   heroMetaBadgeText: {
     color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   heroCtaBtn: {
     borderRadius: 12,

@@ -6,7 +6,10 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "update": "eas update",
+    "update:production": "eas update --branch production",
+    "update:preview": "eas update --branch preview"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -24,6 +27,7 @@
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-updates": "~57.0.23",
+    "expo-video": "~57.0.5",
     "lucide-react-native": "^0.562.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",

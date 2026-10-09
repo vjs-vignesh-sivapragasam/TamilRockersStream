@@ -92,7 +92,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               onPress={onPlayPress}
               activeOpacity={0.85}
             >
-              <Play color="#000000" size={20} fill="#000000" />
+              <Play color="#FFFFFF" size={20} fill="#FFFFFF" />
               <Text style={styles.playButtonText}>Play</Text>
             </TouchableOpacity>
 
@@ -193,21 +193,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
     paddingVertical: 10,
     paddingHorizontal: 28,
-    borderRadius: 6,
+    borderRadius: 8,
+    borderWidth: 1.8,
+    borderColor: '#FFFFFF',
     gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 4,
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.95,
+    shadowRadius: 14,
+    elevation: 8,
   },
   playButtonText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   actionBtnSecondary: {
     alignItems: 'center',

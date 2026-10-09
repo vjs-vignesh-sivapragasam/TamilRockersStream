@@ -331,6 +331,15 @@ export const DownloadsScreen: React.FC = () => {
   };
 
   const handlePlayInNetflixPlayer = (item: DownloadItem) => {
+    console.log('[VFLIX DownloadsScreen] Launching internal player for item:', {
+      id: item.id,
+      title: item.title || item.movieFileName || item.fileName,
+      fileUri: item.fileUri,
+      movieFileUri: item.movieFileUri,
+      status: item.status,
+      progress: item.progress,
+      url: item.url,
+    });
     setSelectedMovie(item);
     setPlayerModalVisible(true);
   };
@@ -530,14 +539,14 @@ export const DownloadsScreen: React.FC = () => {
                 style={[
                   styles.statusDot,
                   {
-                    backgroundColor: isBackendConnected ? '#46D369' : Colors.netflixRed,
+                    backgroundColor: isBackendConnected ? '#46D369' : Colors.primary,
                   },
                 ]}
               />
               <Text
                 style={[
                   styles.serverStatusText,
-                  { color: isBackendConnected ? '#46D369' : Colors.netflixRed },
+                  { color: isBackendConnected ? '#46D369' : Colors.primary },
                 ]}
               >
                 {isBackendConnected ? 'ENGINE ONLINE' : 'ENGINE OFFLINE'}
@@ -557,15 +566,15 @@ export const DownloadsScreen: React.FC = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor={Colors.netflixRed}
-            colors={[Colors.netflixRed]}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
       >
         {/* High-End YouTube & Instagram Downloader Studio */}
         <View style={styles.socialStudioCard}>
           <LinearGradient
-            colors={['#2A0A10', '#1C0D18', '#14141A']}
+            colors={[Colors.primaryRedDark, '#1C0D18', '#14141A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.socialStudioGradient}
@@ -623,7 +632,7 @@ export const DownloadsScreen: React.FC = () => {
                 ) : (
                   <TouchableOpacity
                     onPress={handlePasteToSocial}
-                    style={styles.pasteActionBtn}
+                    style={[styles.pasteActionBtn, { backgroundColor: Colors.primary }]}
                     activeOpacity={0.8}
                   >
                     <Sparkles color="#FFFFFF" size={12} />
@@ -669,7 +678,10 @@ export const DownloadsScreen: React.FC = () => {
                     return (
                       <TouchableOpacity
                         key={fmt.id}
-                        style={[styles.formatCard, isSelected && styles.formatCardSelected]}
+                        style={[
+                          styles.formatCard,
+                          isSelected && { borderColor: Colors.primary, backgroundColor: Colors.navActivePill },
+                        ]}
                         onPress={() => setSelectedFormat(fmt)}
                         activeOpacity={0.8}
                       >
@@ -678,7 +690,7 @@ export const DownloadsScreen: React.FC = () => {
                             {fmt.label || fmt.resolution}
                           </Text>
                         </View>
-                        {isSelected && <CheckCircle2 color={Colors.netflixRed} size={16} />}
+                        {isSelected && <CheckCircle2 color={Colors.primary} size={16} />}
                       </TouchableOpacity>
                     );
                   })}
@@ -715,7 +727,7 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={['#FF0000', '#B51527']}
+                colors={[Colors.primary, Colors.primaryRedDark]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.socialCtaGradient}
@@ -745,7 +757,7 @@ export const DownloadsScreen: React.FC = () => {
                 Downloading Now ({activeQueue.length})
               </Text>
               <View style={styles.activePulseBadge}>
-                <Radio color={Colors.netflixRed} size={12} />
+                <Radio color={Colors.primary} size={12} />
                 <Text style={styles.activePulseText}>LIVE</Text>
               </View>
             </View>
@@ -779,7 +791,7 @@ export const DownloadsScreen: React.FC = () => {
                         </Text>
                         <View style={styles.speedBadge}>
                           <Radio
-                            color={isError ? '#FF453A' : Colors.netflixRed}
+                            color={isError ? '#FF453A' : Colors.primary}
                             size={11}
                           />
                           <Text
@@ -832,7 +844,7 @@ export const DownloadsScreen: React.FC = () => {
                               ? '#FF453A'
                               : isPaused
                               ? '#8E8E93'
-                              : Colors.netflixRed,
+                              : Colors.primary,
                           },
                         ]}
                       />
@@ -865,7 +877,7 @@ export const DownloadsScreen: React.FC = () => {
           {completedList.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconCircle}>
-                <Film color={Colors.netflixRed} size={36} />
+                <Film color={Colors.primary} size={36} />
               </View>
               <Text style={styles.emptyTitle}>No Offline Movies Downloaded</Text>
               <Text style={styles.emptySubtitle}>
@@ -968,24 +980,14 @@ export const DownloadsScreen: React.FC = () => {
 
                       {/* Watch & External Player Buttons */}
                       <View style={styles.actionButtonsRow}>
-                        {/* Netflix In-App Player */}
+                        {/* Watch Offline */}
                         <TouchableOpacity
                           style={styles.playNetflixBtn}
                           onPress={() => handlePlayInNetflixPlayer(item)}
                           activeOpacity={0.85}
                         >
                           <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
-                          <Text style={styles.playNetflixText}>Watch</Text>
-                        </TouchableOpacity>
-
-                        {/* External Player (VLC / MX Player) */}
-                        <TouchableOpacity
-                          style={styles.externalPlayerBtn}
-                          onPress={() => handlePlayInExternalPlayer(item)}
-                          activeOpacity={0.8}
-                        >
-                          <ExternalLink color="#E5E5EA" size={12} />
-                          <Text style={styles.externalPlayerText}>VLC / MX</Text>
+                          <Text style={styles.playNetflixText}>Watch Offline</Text>
                         </TouchableOpacity>
 
                         {/* Share */}

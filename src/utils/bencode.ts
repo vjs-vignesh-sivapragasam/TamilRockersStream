@@ -3,7 +3,29 @@
  * Supports integers, strings/byte arrays, lists, and dictionaries.
  */
 import * as FileSystem from 'expo-file-system/legacy';
-import { formatMovieFileName } from '../services/downloadService';
+
+function simpleFormatMovieFileName(rawName: string, fallbackExt = '.mp4'): string {
+  if (!rawName || typeof rawName !== 'string' || rawName.trim().length === 0) {
+    return `Movie_${Date.now()}${fallbackExt}`;
+  }
+  let str = rawName.trim();
+  let ext = fallbackExt;
+  const extMatch = str.match(/\.([a-zA-Z0-9]+)$/);
+  if (extMatch) {
+    const foundExt = extMatch[0].toLowerCase();
+    const validExts = ['.mkv', '.mp4', '.avi', '.mov', '.webm', '.ts', '.m4v', '.torrent', '.mp3'];
+    if (validExts.includes(foundExt)) {
+      ext = foundExt;
+    } else {
+      ext = fallbackExt;
+    }
+    str = str.slice(0, -extMatch[0].length);
+  }
+  str = str.replace(/[^a-zA-Z0-9]+/g, '_');
+  const parts = str.split('_').filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  const formatted = parts.join('_') || 'Movie';
+  return `${formatted}${ext}`;
+}
 
 export interface ParsedTorrentInfo {
   name: string;
@@ -96,13 +118,13 @@ export function extractTorrentFileName(url: string, suggestedTitle?: string): st
   const infoHash = extractInfoHashFromUrl(url);
 
   if (suggestedTitle && suggestedTitle.trim().length > 0) {
-    return formatMovieFileName(suggestedTitle);
+    return simpleFormatMovieFileName(suggestedTitle);
   }
 
   if (url.startsWith('magnet:?')) {
     const parsed = parseMagnetUri(url);
     if (parsed && parsed.name && parsed.name !== 'Torrent Download') {
-      return formatMovieFileName(parsed.name);
+      return simpleFormatMovieFileName(parsed.name);
     }
     return infoHash ? `Movie_${infoHash.substring(0, 10)}.mp4` : `Movie_${Date.now()}.mp4`;
   }
@@ -117,7 +139,7 @@ export function extractTorrentFileName(url: string, suggestedTitle?: string): st
     const last = segments[segments.length - 1];
     if (last) {
       const decoded = decodeURIComponent(last);
-      return formatMovieFileName(decoded);
+      return simpleFormatMovieFileName(decoded);
     }
   } catch {
     // fallback
@@ -375,7 +397,7 @@ export async function resolveTorrentMoviePayload(
       }
     }
 
-    let safeName = formatMovieFileName(baseFileName);
+    let safeName = simpleFormatMovieFileName(baseFileName);
 
     return {
       title,
@@ -419,7 +441,7 @@ export async function resolveTorrentMoviePayload(
       if (meta) {
         const title = meta.name || suggestedTitle || 'Downloaded Movie';
         let rawName = meta.mainMovieFile?.name || meta.name || suggestedTitle || `${title}.mp4`;
-        rawName = formatMovieFileName(rawName);
+        rawName = simpleFormatMovieFileName(rawName);
         const totalBytes = meta.mainMovieFile?.length || meta.totalSize || 0;
         const movieDownloadUrl = meta.mainMovieFile?.downloadUrl;
 
@@ -437,7 +459,7 @@ export async function resolveTorrentMoviePayload(
   }
 
   const fallbackName = extractTorrentFileName(torrentUrl, suggestedTitle);
-  const movieFileName = formatMovieFileName(fallbackName);
+  const movieFileName = simpleFormatMovieFileName(fallbackName);
 
   return {
     title: suggestedTitle || movieFileName.replace(/\.mp4$/i, ''),

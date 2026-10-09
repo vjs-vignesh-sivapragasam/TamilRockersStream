@@ -9,6 +9,7 @@ import { downloadService, makeUniqueFileName } from '../services/downloadService
 import { torrentEngine } from '../services/torrentEngine';
 import { resolveTorrentMoviePayload, extractInfoHashFromUrl } from '../utils/bencode';
 import { debridService } from '../services/debridService';
+import { ThemeKey, applyTheme, THEME_OPTIONS } from '../constants/theme';
 
 // Default backend URL with auto-detection for physical phones running Expo Go
 const resolveDefaultBackendUrl = (): string => {
@@ -58,6 +59,9 @@ const BACKEND_CONFIG_FILE = FileSystem.documentDirectory
 const DOWNLOAD_MODE_FILE = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}download_mode_config.json`
   : '';
+const THEME_CONFIG_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}theme_config.json`
+  : '';
 
 interface DownloadContextType {
   downloads: DownloadItem[];
@@ -68,6 +72,8 @@ interface DownloadContextType {
   setBackendUrl: (url: string) => void;
   downloadMode: DownloadMode;
   setDownloadMode: (mode: DownloadMode) => void;
+  themeKey: ThemeKey;
+  setThemeKey: (key: ThemeKey) => void;
   testPing: (url?: string, timeoutMs?: number) => Promise<{ ok: boolean; latency: number; message: string }>;
   boostDownloads: () => Promise<{ success: boolean; boostedCount: number; message: string }>;
   startDownload: (url: string, suggestedTitle?: string, posterUrl?: string) => Promise<DownloadItem>;
@@ -97,6 +103,51 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [backendUrl, setBackendUrlState] = useState(DEFAULT_BACKEND_URL);
   const [downloadMode, setDownloadModeState] = useState<DownloadMode>('direct_http');
+  const [themeKey, setThemeKeyState] = useState<ThemeKey>('red');
+
+  // Load persisted theme & apply immediately
+  useEffect(() => {
+    if (THEME_CONFIG_FILE) {
+      FileSystem.readAsStringAsync(THEME_CONFIG_FILE)
+        .then((content) => {
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.themeKey && THEME_OPTIONS[parsed.themeKey as ThemeKey]) {
+              const k = parsed.themeKey as ThemeKey;
+              applyTheme(k);
+              setThemeKeyState(k);
+            } else {
+              applyTheme('red');
+            }
+          } catch {
+            applyTheme('red');
+          }
+        })
+        .catch(() => {
+          applyTheme('red');
+        });
+    } else if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      const savedTheme = localStorage.getItem('vflix_theme_key') as ThemeKey;
+      if (savedTheme && THEME_OPTIONS[savedTheme]) {
+        applyTheme(savedTheme);
+        setThemeKeyState(savedTheme);
+      } else {
+        applyTheme('red');
+      }
+    } else {
+      applyTheme('red');
+    }
+  }, []);
+
+  const setThemeKey = (key: ThemeKey) => {
+    applyTheme(key);
+    setThemeKeyState(key);
+    if (THEME_CONFIG_FILE) {
+      FileSystem.writeAsStringAsync(THEME_CONFIG_FILE, JSON.stringify({ themeKey: key })).catch(() => {});
+    } else if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      localStorage.setItem('vflix_theme_key', key);
+    }
+  };
 
   // Load persisted custom downloadMode
   useEffect(() => {
@@ -850,6 +901,8 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       setBackendUrl,
       downloadMode,
       setDownloadMode,
+      themeKey,
+      setThemeKey,
       testPing,
       boostDownloads,
       startDownload,
@@ -870,6 +923,8 @@ export const DownloadProvider: React.FC<{ children: ReactNode }> = ({ children }
       setBackendUrl,
       downloadMode,
       setDownloadMode,
+      themeKey,
+      setThemeKey,
       testPing,
       boostDownloads,
       startDownload,

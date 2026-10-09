@@ -3,6 +3,8 @@
  * Scrapes and parses movie listings, topics, and multi-resolution magnet/torrent links from 1TamilMV
  */
 
+import * as FileSystem from 'expo-file-system/legacy';
+
 export interface MovieResolutionItem {
   id: string;
   resolution: string; // e.g. "1080p", "720p", "4K 2160p", "HQ HDRip 250MB", etc.
@@ -34,6 +36,45 @@ export const POPULAR_MIRRORS = [
   'https://www.1tamilmv.rocks',
   'https://www.1tamilmv.li',
 ];
+
+export const posterCache = new Map<string, string | null>();
+
+const POSTER_CACHE_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}vflix_poster_cache.json`
+  : '';
+
+let isPosterCacheLoaded = false;
+
+export async function loadPosterCacheFromDisk() {
+  if (isPosterCacheLoaded || !POSTER_CACHE_FILE) return;
+  try {
+    const content = await FileSystem.readAsStringAsync(POSTER_CACHE_FILE);
+    if (content) {
+      const entries: [string, string | null][] = JSON.parse(content);
+      if (Array.isArray(entries)) {
+        entries.forEach(([key, val]) => {
+          if (key) posterCache.set(key, val);
+        });
+      }
+    }
+    isPosterCacheLoaded = true;
+  } catch {}
+}
+
+// Auto load cache on file import
+loadPosterCacheFromDisk();
+
+let saveTimer: any = null;
+export function savePosterCacheToDisk() {
+  if (!POSTER_CACHE_FILE) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const entries = Array.from(posterCache.entries());
+      FileSystem.writeAsStringAsync(POSTER_CACHE_FILE, JSON.stringify(entries)).catch(() => {});
+    } catch {}
+  }, 1000);
+}
 
 let configuredBaseUrl = DEFAULT_TAMILMV_URL;
 
@@ -851,6 +892,5 @@ export const tamilMvService = {
   },
 };
 
-// Module-level in-memory poster cache: topicUrl → posterUrl | null (null = confirmed no poster)
-export const posterCache = new Map<string, string | null>();
+
 

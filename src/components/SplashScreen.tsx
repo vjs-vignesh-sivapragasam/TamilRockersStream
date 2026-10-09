@@ -6,69 +6,87 @@ import {
   Text,
   Easing,
   StatusBar,
+  Dimensions,
 } from 'react-native';
-import { Colors } from '../constants/theme';
+
+const { width, height } = Dimensions.get('window');
 
 interface SplashScreenProps {
   onFinish: () => void;
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
-  // Animation Refs
-  const scaleAnim = useRef(new Animated.Value(0.35)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
+  // Animation Refs (Driven by Native Driver for 60fps cinematic fluidity)
+  const logoScale = useRef(new Animated.Value(0.55)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const glowScale = useRef(new Animated.Value(0.2)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
 
-  const subtextFadeAnim = useRef(new Animated.Value(0)).current;
-  const subtextScaleAnim = useRef(new Animated.Value(0.9)).current;
+  const beamWidth = useRef(new Animated.Value(0)).current;
+
+  const subtextOpacity = useRef(new Animated.Value(0)).current;
+  const subtextTranslateY = useRef(new Animated.Value(12)).current;
 
   const containerOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Netflix style "Ta-Dum" Cinematic Animation Sequence
+    // Cinematic Netflix "Ta-Dum" Animation Sequence
     Animated.sequence([
-      // Step 1: Rapid Netflix-style text pop & zoom in + glow expansion
+      // Phase 1: Rapid Netflix logo spring entrance & ambient red glow expansion
       Animated.parallel([
-        Animated.timing(fadeAnim, {
+        Animated.timing(logoOpacity, {
+          toValue: 1,
+          duration: 350,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(logoScale, {
+          toValue: 1,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowOpacity, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.spring(glowScale, {
+          toValue: 1,
+          friction: 5,
+          tension: 35,
+          useNativeDriver: true,
+        }),
+      ]),
+
+      // Phase 2: Red accent line expansion & subtext reveal
+      Animated.parallel([
+        Animated.timing(beamWidth, {
+          toValue: 1,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(subtextOpacity, {
           toValue: 1,
           duration: 400,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          friction: 6,
-          tension: 40,
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 700,
-          easing: Easing.out(Easing.cubic),
+        Animated.timing(subtextTranslateY, {
+          toValue: 0,
+          duration: 400,
+          easing: Easing.out(Easing.back(1.2)),
           useNativeDriver: true,
         }),
       ]),
 
-      // Step 2: Subtext elegant fade and subtle scale up
-      Animated.parallel([
-        Animated.timing(subtextFadeAnim, {
-          toValue: 1,
-          duration: 450,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(subtextScaleAnim, {
-          toValue: 1,
-          duration: 450,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
+      // Phase 3: Hold for high-impact brand visibility
+      Animated.delay(750),
 
-      // Step 3: Hold briefly for high-impact brand visibility
-      Animated.delay(800),
-
-      // Step 4: Netflix zoom-through cinematic exit (text scales up into screen as background dissolves)
+      // Phase 4: Iconic Netflix cinematic zoom-through exit
+      // Text zooms dramatically towards camera into the screen while dissolving into app
       Animated.parallel([
         Animated.timing(containerOpacity, {
           toValue: 0,
@@ -76,15 +94,21 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.timing(scaleAnim, {
-          toValue: 1.25,
+        Animated.timing(logoScale, {
+          toValue: 4.8,
           duration: 450,
           easing: Easing.in(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.timing(glowAnim, {
+        Animated.timing(logoOpacity, {
           toValue: 0,
-          duration: 350,
+          duration: 400,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowOpacity, {
+          toValue: 0,
+          duration: 300,
           useNativeDriver: true,
         }),
       ]),
@@ -92,55 +116,87 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       onFinish();
     });
   }, [
+    beamWidth,
     containerOpacity,
-    fadeAnim,
-    glowAnim,
+    glowOpacity,
+    glowScale,
+    logoOpacity,
+    logoScale,
     onFinish,
-    scaleAnim,
-    subtextFadeAnim,
-    subtextScaleAnim,
+    subtextOpacity,
+    subtextTranslateY,
   ]);
 
-  const glowScale = glowAnim.interpolate({
+  const beamScaleX = beamWidth.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.5, 1.8],
+    outputRange: [0, 1],
+  });
+
+  const interpolatedGlowScale = glowScale.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 1.8],
   });
 
   return (
     <Animated.View style={[styles.container, { opacity: containerOpacity }]}>
-      <StatusBar hidden barStyle="light-content" backgroundColor="#000000" />
-      
-      {/* Background Red Ambient Glow behind logo */}
+      <StatusBar hidden={false} barStyle="light-content" backgroundColor="#000000" translucent />
+
+      {/* Pitch Dark Background */}
+      <View style={styles.darkBackground} />
+
+      {/* Ambient Netflix Red Glow */}
       <Animated.View
         style={[
           styles.glowCircle,
           {
-            opacity: glowAnim,
-            transform: [{ scale: glowScale }],
+            opacity: glowOpacity,
+            transform: [{ scale: interpolatedGlowScale }],
           },
         ]}
       />
 
-      {/* Main Content */}
+      {/* Vertical Light Ribbon Beam Accent */}
+      <Animated.View
+        style={[
+          styles.ribbonBeam,
+          {
+            opacity: glowOpacity,
+            transform: [{ scaleY: interpolatedGlowScale }],
+          },
+        ]}
+      />
+
+      {/* Central Brand Content Box */}
       <View style={styles.centerBox}>
-        {/* Animated Brand Title: VFLIX */}
+        {/* Netflix Red Animated Brand Logo Text */}
         <Animated.View
           style={[
-            styles.brandTitleRow,
+            styles.brandTitleContainer,
             {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
+              opacity: logoOpacity,
+              transform: [{ scale: logoScale }],
             },
           ]}
         >
           <Text style={styles.netflixRedText}>VFLIX</Text>
         </Animated.View>
 
-        {/* Minimal Subtext */}
+        {/* Expanding Red Accent Line */}
+        <Animated.View
+          style={[
+            styles.redAccentBeam,
+            {
+              opacity: logoOpacity,
+              transform: [{ scaleX: beamScaleX }],
+            },
+          ]}
+        />
+
+        {/* Subtext Reveal */}
         <Animated.View
           style={{
-            opacity: subtextFadeAnim,
-            transform: [{ scale: subtextScaleAnim }],
+            opacity: subtextOpacity,
+            transform: [{ translateY: subtextTranslateY }],
             marginTop: 14,
           }}
         >
@@ -159,41 +215,65 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 99999,
   },
+  darkBackground: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000000',
+  },
   glowCircle: {
     position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: 'rgba(229, 9, 20, 0.28)',
-    shadowColor: Colors.netflixRed,
+    width: width * 0.75,
+    height: width * 0.75,
+    borderRadius: (width * 0.75) / 2,
+    backgroundColor: 'rgba(229, 9, 20, 0.32)',
+    shadowColor: '#E50914',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 60,
+    shadowOpacity: 0.95,
+    shadowRadius: 70,
+    elevation: 25,
+  },
+  ribbonBeam: {
+    position: 'absolute',
+    width: 120,
+    height: height * 0.8,
+    backgroundColor: 'rgba(229, 9, 20, 0.08)',
+    borderRadius: 60,
   },
   centerBox: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 20,
   },
-  brandTitleRow: {
-    flexDirection: 'row',
+  brandTitleContainer: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   netflixRedText: {
     color: '#E50914',
-    fontSize: 54,
+    fontSize: 62,
     fontWeight: '900',
-    letterSpacing: 4,
+    letterSpacing: 6,
     textAlign: 'center',
-    textShadowColor: 'rgba(229, 9, 20, 0.75)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 20,
+    textShadowColor: 'rgba(229, 9, 20, 0.9)',
+    textShadowOffset: { width: 0, height: 6 },
+    textShadowRadius: 28,
+  },
+  redAccentBeam: {
+    height: 3,
+    width: 140,
+    backgroundColor: '#E50914',
+    borderRadius: 2,
+    marginTop: 8,
+    shadowColor: '#E50914',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 10,
   },
   subtext: {
-    color: 'rgba(255, 255, 255, 0.75)',
+    color: 'rgba(255, 255, 255, 0.78)',
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 4,
+    letterSpacing: 4.5,
     textAlign: 'center',
   },
 });

@@ -198,20 +198,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#141414" translucent />
 
-      {/* Top Header Bar (Hides on Scroll) */}
-      <Animated.View style={[styles.topHeader, { transform: [{ translateY: headerAnim }] }]}>
-        <TouchableOpacity
-          style={styles.logoRow}
-          activeOpacity={0.8}
-          onPress={() => scrollViewRef.current?.scrollTo({ y: 0, animated: true })}
-        >
-          <Image
-            source={require('../../assets/adaptive-icon.png')}
-            style={styles.netflixVLogo}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-
+      {/* Top Header Bar */}
+      <View style={styles.topHeader}>
         <View style={styles.topRightActions}>
           {/* Donate Us Quick Button */}
           <TouchableOpacity
@@ -234,16 +222,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
               style={styles.devAvatarMini}
             />
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.rescanHeaderBtn}
-            onPress={onRefresh}
-            activeOpacity={0.7}
-          >
-            <RotateCcw color="#FFFFFF" size={16} />
-          </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
 
       <ScrollView
         ref={scrollViewRef}
@@ -295,26 +275,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
                     {heroMovie.movieFileName || heroMovie.fileName}
                   </Text>
 
-                  {/* Dual Play Action Buttons */}
+                  {/* Play Action Button */}
                   <View style={styles.heroActionsRow}>
-                    {/* Watch in Netflix Player */}
                     <TouchableOpacity
                       style={styles.heroPlayBtn}
                       onPress={() => handlePlayDownloadedMovie(heroMovie)}
                       activeOpacity={0.85}
                     >
-                      <Play color="#000000" size={18} fill="#000000" />
-                      <Text style={styles.heroPlayText}>Play Movie</Text>
-                    </TouchableOpacity>
-
-                    {/* External Player (VLC / MX Player) */}
-                    <TouchableOpacity
-                      style={styles.heroExternalBtn}
-                      onPress={() => handlePlayExternal(heroMovie)}
-                      activeOpacity={0.8}
-                    >
-                      <ExternalLink color="#FFFFFF" size={16} />
-                      <Text style={styles.heroExternalText}>VLC / MX</Text>
+                      <Play color="#FFFFFF" size={18} fill="#FFFFFF" />
+                      <Text style={styles.heroPlayText}>Play Movie (Internal Player)</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -394,7 +363,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
                           <Text style={styles.cardResText}>{item.resolution || '1080p'}</Text>
                         </View>
 
-                        {/* Watch and External Player buttons */}
+                        {/* Watch & Delete buttons */}
                         <View style={styles.cardActionsRow}>
                           <TouchableOpacity
                             style={styles.cardPlayBtn}
@@ -402,16 +371,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab }) => {
                             activeOpacity={0.85}
                           >
                             <Play color="#FFFFFF" size={13} fill="#FFFFFF" />
-                            <Text style={styles.cardPlayBtnText}>Watch</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={styles.cardExternalBtn}
-                            onPress={() => handlePlayExternal(item)}
-                            activeOpacity={0.8}
-                          >
-                            <ExternalLink color="#FFFFFF" size={12} />
-                            <Text style={styles.cardExternalBtnText}>VLC/MX</Text>
+                            <Text style={styles.cardPlayBtnText}>Watch Offline</Text>
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -612,6 +572,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 2,
   },
+  brandTitleText: {
+    color: Colors.netflixRed,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
   netflixVLogo: {
     width: 36,
     height: 36,
@@ -771,12 +737,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
     paddingVertical: 12,
-    borderRadius: 6,
+    borderRadius: 8,
+    borderWidth: 1.8,
+    borderColor: '#FFFFFF',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.95,
+    shadowRadius: 14,
+    elevation: 8,
   },
   heroPlayText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
   },

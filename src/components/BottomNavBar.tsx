@@ -9,12 +9,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Clapperboard,
+  Search,
   Bookmark,
   Globe,
   ArrowDownToLine,
   SlidersHorizontal,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
+import { useDownloads } from '../context/DownloadContext';
 
 export type TabKey = 'home' | 'search' | 'mylist' | 'browser' | 'downloads' | 'settings';
 
@@ -31,20 +33,17 @@ interface TabConfig {
   badge?: number;
 }
 
-const RED = Colors.primary;
-const INACTIVE = Colors.textSecondary;
-const NAV_BG = Colors.navBg;
-const PILL_BG = Colors.navActivePill;
-
 /* ─────────────────────────── Tab Item ─────────────────────────── */
 function TabItem({
   tab,
   isActive,
   onPress,
+  primaryColor,
 }: {
   tab: TabConfig;
   isActive: boolean;
   onPress: () => void;
+  primaryColor: string;
 }) {
   // Animated values
   const bounce     = useRef(new Animated.Value(1)).current;
@@ -70,8 +69,7 @@ function TabItem({
 
   const Icon = tab.icon;
 
-  const pillBgOpacity = bgAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const iconColor     = isActive ? RED : INACTIVE;
+  const iconColor     = isActive ? primaryColor : Colors.textSecondary;
   const iconStroke    = isActive ? 2.5 : 1.8;
   const iconSize      = isActive ? 22 : 20;
 
@@ -86,7 +84,7 @@ function TabItem({
 
             {/* Badge */}
             {tab.badge ? (
-              <View style={styles.badge}>
+              <View style={[styles.badge, { backgroundColor: primaryColor }]}>
                 <Text style={styles.badgeText}>
                   {tab.badge > 99 ? '99+' : tab.badge}
                 </Text>
@@ -101,7 +99,7 @@ function TabItem({
           style={[
             styles.tabLabel,
             {
-              color: isActive ? RED : INACTIVE,
+              color: isActive ? primaryColor : Colors.textSecondary,
               fontWeight: isActive ? '700' : '500',
               opacity: labelAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }),
             },
@@ -121,9 +119,12 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   downloadBadgeCount = 0,
 }) => {
   const insets = useSafeAreaInsets();
+  const { themeKey } = useDownloads();
+  const primaryColor = Colors.primary;
 
   const tabs: TabConfig[] = [
     { key: 'home',      label: 'Home',      icon: Clapperboard },
+    { key: 'search',    label: 'Search',    icon: Search },
     { key: 'mylist',    label: 'My List',   icon: Bookmark },
     { key: 'browser',   label: 'Browser',   icon: Globe },
     { key: 'downloads', label: 'Downloads', icon: ArrowDownToLine, badge: downloadBadgeCount || undefined },
@@ -142,6 +143,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
             tab={t}
             isActive={activeTab === t.key}
             onPress={() => onTabSelect(t.key)}
+            primaryColor={primaryColor}
           />
         ))}
       </View>
@@ -152,7 +154,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
 /* ─────────────────────────── Styles ─────────────────────────── */
 const styles = StyleSheet.create({
   outerWrap: {
-    backgroundColor: NAV_BG,
+    backgroundColor: Colors.navBg,
     // Strong shadow to lift the bar
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -6 },
@@ -194,9 +196,9 @@ const styles = StyleSheet.create({
     right: 4,
     height: 40,
     borderRadius: 20,
-    backgroundColor: PILL_BG,
+    backgroundColor: Colors.navActivePill,
     // Red underlay glow
-    shadowColor: RED,
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -216,7 +218,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -5,
     right: -7,
-    backgroundColor: RED,
+    backgroundColor: Colors.primary,
     borderRadius: 8,
     minWidth: 15,
     height: 15,
@@ -224,7 +226,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 2,
     borderWidth: 1.5,
-    borderColor: NAV_BG,
+    borderColor: Colors.navBg,
   },
   badgeText: {
     color: '#FFF',

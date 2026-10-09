@@ -213,13 +213,6 @@ const SearchResultCard = React.memo<SearchResultCardProps>(({
         start={{ x: 0, y: 0.2 }}
         end={{ x: 0, y: 1 }}
       >
-        {bestRes ? (
-          <View style={styles.cardBadgeRow}>
-            <View style={[styles.qualityBadgeInline, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-              <Text style={[styles.qualityText, { color: badge.text }]}>{bestRes.resolution}</Text>
-            </View>
-          </View>
-        ) : null}
         <Text style={styles.cardTitle} numberOfLines={2}>
           {cleanMovieName}
         </Text>
@@ -236,22 +229,6 @@ const SearchResultCard = React.memo<SearchResultCardProps>(({
           <Text style={styles.langText}>{item.language.slice(0, 3).toUpperCase()}</Text>
         </View>
       ) : null}
-
-      <TouchableOpacity
-        style={styles.cardBookmarkBtn}
-        onPress={(e) => {
-          e.stopPropagation?.();
-          onToggleSave?.(posterUrl);
-        }}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        activeOpacity={0.7}
-      >
-        <Bookmark
-          color={isSaved ? Colors.primary : '#FFFFFF'}
-          size={13}
-          fill={isSaved ? Colors.primary : 'transparent'}
-        />
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 });
@@ -263,7 +240,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   initialQuery = '',
 }) => {
   const insets = useSafeAreaInsets();
-  const { startDownload } = useDownloads();
+  const { startDownload, themeKey } = useDownloads();
 
   const [query, setQuery] = useState(initialQuery);
   const [searchedQuery, setSearchedQuery] = useState(initialQuery);
@@ -864,7 +841,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           data={visibleResults}
           keyExtractor={keyExtractor}
           renderItem={renderMovieCard}
-          numColumns={2}
+          numColumns={3}
           columnWrapperStyle={styles.listGridColumnWrapper}
           contentContainerStyle={[styles.listGridContent, { paddingBottom: insets.bottom + 100 }]}
           showsVerticalScrollIndicator={false}

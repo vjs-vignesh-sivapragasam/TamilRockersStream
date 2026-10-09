@@ -39,8 +39,9 @@ import {
   Upload,
   Zap,
   Gauge,
+  Palette,
 } from 'lucide-react-native';
-import { Colors } from '../constants/theme';
+import { Colors, THEME_OPTIONS, ThemeKey } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 import { formatBytes, downloadService, getStorageLocationText } from '../services/downloadService';
 import { tamilMvService, POPULAR_MIRRORS } from '../services/tamilMvService';
@@ -66,6 +67,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setBackendUrl,
     downloadMode,
     setDownloadMode,
+    themeKey,
+    setThemeKey,
     testPing,
     boostDownloads,
     isBackendConnected,
@@ -232,6 +235,50 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
               <ChevronRight color="#48484A" size={20} strokeWidth={2.5} />
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── 1.5. App Theme & Accent Color Section ── */}
+        <View style={styles.iosSection}>
+          <Text style={styles.iosSectionHeader}>APP THEME & ACCENT COLOR</Text>
+          <View style={styles.iosCard}>
+            <View style={styles.themeHeaderRow}>
+              <View style={[styles.iosIconBox, { backgroundColor: Colors.primary }]}>
+                <Palette color="#FFFFFF" size={16} strokeWidth={2.2} />
+              </View>
+              <View style={styles.iosTitleGroup}>
+                <Text style={styles.iosTitle}>App Theme</Text>
+                <Text style={styles.iosSubtitle}>Select app accent color for buttons, badges & UI</Text>
+              </View>
+              <Text style={[styles.iosValueText, { color: Colors.primary, fontWeight: '800' }]}>
+                {THEME_OPTIONS[themeKey]?.name || 'Red'}
+              </Text>
+            </View>
+
+            {/* Color Swatch Options Grid */}
+            <View style={styles.themeGrid}>
+              {Object.values(THEME_OPTIONS).map((theme) => {
+                const isSelected = themeKey === theme.key;
+                return (
+                  <TouchableOpacity
+                    key={theme.key}
+                    style={[
+                      styles.themeChip,
+                      isSelected && { borderColor: theme.primary, backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+                    ]}
+                    onPress={() => setThemeKey(theme.key as ThemeKey)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.themeDot, { backgroundColor: theme.primary }]}>
+                      {isSelected && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                    </View>
+                    <Text style={[styles.themeChipText, isSelected && { color: '#FFFFFF', fontWeight: '800' }]}>
+                      {theme.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         </View>
 
@@ -1827,5 +1874,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     flex: 1,
+  },
+  themeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#262835',
+  },
+  themeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    padding: 14,
+  },
+  themeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#161722',
+    borderWidth: 1.5,
+    borderColor: '#262835',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  themeDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  themeChipText: {
+    color: '#A09DB1',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

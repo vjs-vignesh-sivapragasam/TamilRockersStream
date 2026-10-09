@@ -9,17 +9,25 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0A0A0C"
+      "backgroundColor": "#000000"
     },
     "ios": {
+      "bundleIdentifier": "com.vflix.app",
       "supportsTablet": true,
       "icon": "./assets/icon.png",
       "infoPlist": {
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "LSApplicationQueriesSchemes": [
+          "vlc",
+          "vlc-x-callback",
+          "outplayer",
+          "infuse"
+        ]
       }
     },
     "android": {
+      "package": "com.vflix.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
@@ -35,7 +43,8 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-video"
     ],
     "scheme": "vflix",
     "extra": {

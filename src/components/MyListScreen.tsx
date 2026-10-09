@@ -64,7 +64,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
   onSelectMovie,
 }) => {
   const insets = useSafeAreaInsets();
-  const { backendUrl, testPing, startDownload } = useDownloads();
+  const { backendUrl, testPing, startDownload, themeKey } = useDownloads();
 
   const [items, setItems] = useState<MyListItem[]>([]);
   const [selectedMovie, setSelectedMovie] = useState<TamilMvMovieResult | null>(null);

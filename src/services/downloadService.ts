@@ -72,12 +72,11 @@ export function formatMovieFileName(rawName: string, fallbackExt = '.mp4'): stri
   const extMatch = str.match(/\.([a-zA-Z0-9]+)$/);
   if (extMatch) {
     const foundExt = extMatch[0].toLowerCase();
-    if (foundExt === '.torrent') {
-      ext = '.torrent';
-    } else if (foundExt === '.mp3') {
-      ext = '.mp3';
+    const validExts = ['.mkv', '.mp4', '.avi', '.mov', '.webm', '.ts', '.m4v', '.torrent', '.mp3', '.flv', '.3gp'];
+    if (validExts.includes(foundExt)) {
+      ext = foundExt;
     } else {
-      ext = '.mp4';
+      ext = fallbackExt;
     }
     str = str.slice(0, -extMatch[0].length);
   }

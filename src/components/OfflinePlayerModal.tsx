@@ -19,6 +19,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as DocumentPicker from 'expo-document-picker';
@@ -55,6 +56,7 @@ import { DownloadItem } from '../types/downloads';
 import { useDownloads } from '../context/DownloadContext';
 import { continueWatchingService } from '../services/continueWatchingService';
 import { extractInfoHashFromUrl } from '../utils/bencode';
+import { stremioService } from '../services/stremioService';
 
 interface OfflinePlayerModalProps {
   visible: boolean;
@@ -204,14 +206,20 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     (item?.status === 'completed' || fileExisted || localFileUri.startsWith('file://'));
   const fn = item?.movieFileName || item?.fileName;
   const hash = item?.infoHash || extractInfoHashFromUrl(rawUrl);
+  const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
 
-  const backendStreamUrl = isBackendConnected
-    ? fn
-      ? `${backendUrl}/downloads/${encodeURIComponent(fn)}`
-      : hash
-      ? `${backendUrl}/api/stream/${hash.toLowerCase()}?raw=1`
-      : ''
-    : '';
+  const backendStreamUrl = useMemo(() => {
+    if (hash) {
+      return `${cleanBackend}/api/stream/${hash.toLowerCase()}?raw=1`;
+    }
+    if (rawUrl && (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:'))) {
+      return `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
+    }
+    if (fn) {
+      return `${cleanBackend}/downloads/${encodeURIComponent(fn)}`;
+    }
+    return '';
+  }, [cleanBackend, hash, rawUrl, fn]);
 
   const isOnlineStream = useMemo(() => {
     return (
@@ -374,6 +382,12 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
     const checkFile = async () => {
       const rawTargetUri = item.fileUri || item.movieFileUri;
+      console.log('[VFLIX Player] Initializing checkFile:', {
+        title: item.title || item.movieFileName || item.fileName,
+        rawTargetUri,
+        status: item.status,
+      });
+
       if (rawTargetUri) {
         let cleanUri = rawTargetUri.trim();
         if (!cleanUri.startsWith('file://') && !cleanUri.startsWith('content://') && !cleanUri.startsWith('http://') && !cleanUri.startsWith('https://')) {
@@ -381,6 +395,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         }
 
         if (cleanUri.startsWith('content://')) {
+          console.log('[VFLIX Player] Detected content:// URI:', cleanUri);
           setFileExisted(true);
           setContentUri(cleanUri);
           return;
@@ -389,6 +404,11 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         if (cleanUri.startsWith('file://')) {
           try {
             const info = await FileSystem.getInfoAsync(cleanUri);
+            console.log('[VFLIX Player] FileSystem info result:', {
+              exists: info.exists,
+              uri: cleanUri,
+              size: (info as any).size,
+            });
             setFileExisted(info.exists);
 
             if (
@@ -398,19 +418,21 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             ) {
               try {
                 const cUri = await FileSystem.getContentUriAsync(cleanUri);
+                console.log('[VFLIX Player] Converted file:// to content:// URI:', cUri);
                 if (cUri) {
                   setContentUri(cUri);
                 } else {
                   setContentUri(cleanUri);
                 }
-              } catch {
+              } catch (cErr) {
+                console.warn('[VFLIX Player] getContentUriAsync failed, fallback to file://:', cErr);
                 setContentUri(cleanUri);
               }
             } else {
               setContentUri(cleanUri);
             }
           } catch (err) {
-            console.warn('Error checking file in player:', err);
+            console.warn('[VFLIX Player] Error checking file in player:', err);
             setFileExisted(true);
             setContentUri(cleanUri);
           }
@@ -468,8 +490,40 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
       } catch {}
     };
 
+    const handleAutoFetchStremioSubtitles = async () => {
+      const movieTitle = item?.title || item?.movieFileName || item?.fileName || '';
+      if (!movieTitle) return;
+
+      try {
+        const subs = await stremioService.searchSubtitles(movieTitle);
+        if (subs && subs.length > 0) {
+          const firstSub = subs[0];
+          const cues = await stremioService.fetchSubtitleCues(firstSub.url);
+          if (cues && cues.length > 0) {
+            const track: SubtitleTrack = {
+              id: firstSub.id,
+              name: firstSub.label,
+              source: 'external',
+              cues,
+              uri: firstSub.url,
+            };
+            setSubtitleTracks((prev) => {
+              const exists = prev.some((t) => t.id === track.id);
+              return exists ? prev : [...prev, track];
+            });
+            setSelectedTrackId(track.id);
+            setSubtitlesEnabled(true);
+            syncSubtitlesToPlayer(cues, true, subSize, subColor, subBg, subOffset);
+          }
+        }
+      } catch (err) {
+        console.warn('Auto Stremio subtitle error:', err);
+      }
+    };
+
     checkFile();
     tryLoadSameFolderSubtitle();
+    handleAutoFetchStremioSubtitles();
     resetHideTimer();
 
     return () => {
@@ -730,96 +784,220 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     // 1. If it's a local downloaded file
     const localUri = contentUri || localFileUri;
     if (localUri && !localUri.startsWith('http')) {
-      try {
-        const can = await Linking.canOpenURL(localUri).catch(() => false);
-        if (can) {
-          await Linking.openURL(localUri);
-          return;
-        }
-      } catch {}
-      try {
-        await Share.share({
-          title: movieTitle,
-          message: `Play movie: ${movieTitle}`,
-          url: localUri,
-        });
+      if (Platform.OS === 'ios') {
+        Alert.alert(
+          'Play Movie on iOS (iPhone)',
+          `Select your preferred media player for ${movieTitle}:`,
+          [
+            {
+              text: '🟧 Open in VLC for iOS',
+              onPress: async () => {
+                const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(localUri)}`;
+                try {
+                  const canVlc = await Linking.canOpenURL('vlc://').catch(() => false);
+                  if (canVlc) {
+                    await Linking.openURL(vlcUrl).catch(async () => {
+                      await Linking.openURL(`vlc://${localUri}`);
+                    });
+                  } else {
+                    await Linking.openURL(`vlc://${localUri}`).catch(() => {
+                      Linking.openURL('https://apps.apple.com/app/vlc-for-mobile/id650377962');
+                    });
+                  }
+                } catch {
+                  Linking.openURL('https://apps.apple.com/app/vlc-for-mobile/id650377962');
+                }
+              },
+            },
+            {
+              text: '🎬 Open in Outplayer / Infuse',
+              onPress: async () => {
+                const outplayerUrl = `outplayer://${localUri}`;
+                const infuseUrl = `infuse://x-callback-url/play?url=${encodeURIComponent(localUri)}`;
+                try {
+                  const canOut = await Linking.canOpenURL('outplayer://').catch(() => false);
+                  if (canOut) {
+                    await Linking.openURL(outplayerUrl);
+                    return;
+                  }
+                  const canInf = await Linking.canOpenURL('infuse://').catch(() => false);
+                  if (canInf) {
+                    await Linking.openURL(infuseUrl);
+                    return;
+                  }
+                  await Linking.openURL(outplayerUrl).catch(() => {
+                    Linking.openURL(infuseUrl).catch(() => {
+                      Share.share({ url: localUri, title: movieTitle });
+                    });
+                  });
+                } catch {
+                  Share.share({ url: localUri, title: movieTitle });
+                }
+              },
+            },
+            {
+              text: '📤 iOS Share Sheet (Files / System)',
+              onPress: () => {
+                Share.share({ title: movieTitle, url: localUri });
+              },
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
         return;
-      } catch (shareErr) {
-        console.warn('Could not launch external player:', shareErr);
+      } else {
+        try {
+          const can = await Linking.canOpenURL(localUri).catch(() => false);
+          if (can) {
+            await Linking.openURL(localUri);
+            return;
+          }
+        } catch {}
+        try {
+          await Share.share({
+            title: movieTitle,
+            message: `Play movie: ${movieTitle}`,
+            url: localUri,
+          });
+          return;
+        } catch (shareErr) {
+          console.warn('Could not launch external player:', shareErr);
+        }
       }
     }
 
     // 2. If it's an online stream / magnet
-    if (streamUrl) {
-      let decodedHttp = streamUrl;
-      const hashMatch = streamUrl.match(/urn:btih:([a-zA-Z0-9]{40}|[a-zA-Z0-9]{32})/i);
-      const hash = hashMatch ? hashMatch[1].toLowerCase() : '';
-      if (hash) {
-        decodedHttp = `${backendUrl}/api/stream/${hash}`;
-      } else if (streamUrl.startsWith('magnet:')) {
-        decodedHttp = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(streamUrl)}`;
-      }
+    let decodedHttp = streamUrl;
+    const hashMatch = streamUrl.match(/urn:btih:([a-zA-Z0-9]{40}|[a-zA-Z0-9]{32})/i);
+    const hash = hashMatch ? hashMatch[1].toLowerCase() : (item?.infoHash || '');
+    if (hash) {
+      decodedHttp = `${backendUrl}/api/stream/${hash}`;
+    } else if (streamUrl.startsWith('magnet:')) {
+      decodedHttp = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(streamUrl)}`;
+    }
 
-      const magnetMatch = streamUrl.match(/magnet=([^&]+)/);
-      const magnet = magnetMatch
-        ? decodeURIComponent(magnetMatch[1])
-        : (streamUrl.startsWith('magnet:') ? streamUrl : null);
+    const magnetMatch = streamUrl.match(/magnet=([^&]+)/);
+    const magnet = magnetMatch
+      ? decodeURIComponent(magnetMatch[1])
+      : (streamUrl.startsWith('magnet:') ? streamUrl : null);
 
+    const target = decodedHttp || magnet || streamUrl;
+
+    if (Platform.OS === 'ios') {
       Alert.alert(
-        'Play in External Video Player',
-        `Torrent formats (.MKV, HEVC, AC3) play best in VLC or MX Player:`,
+        'Play Movie on iOS (iPhone)',
+        `Select your preferred media player for ${movieTitle}:`,
         [
           {
-            text: '🟧 Open in VLC Player',
+            text: '🟧 Open in VLC for iOS',
             onPress: async () => {
-              const target = decodedHttp || magnet || streamUrl;
+              const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(target)}`;
               try {
-                await Linking.openURL(`vlc://${target}`);
-              } catch {
-                try {
-                  await Linking.openURL(target);
-                } catch {
-                  Alert.alert(
-                    'VLC Not Installed',
-                    'Install VLC for Android from the Play Store for direct high-speed torrent streaming.'
-                  );
+                const canVlc = await Linking.canOpenURL('vlc://').catch(() => false);
+                if (canVlc) {
+                  await Linking.openURL(vlcUrl).catch(async () => {
+                    await Linking.openURL(`vlc://${target}`);
+                  });
+                } else {
+                  await Linking.openURL(`vlc://${target}`).catch(() => {
+                    Linking.openURL('https://apps.apple.com/app/vlc-for-mobile/id650377962');
+                  });
                 }
+              } catch {
+                Linking.openURL('https://apps.apple.com/app/vlc-for-mobile/id650377962');
               }
             },
           },
           {
-            text: '▶ Open in Video Player (MX / System)',
+            text: '🎬 Open in Outplayer / Infuse',
             onPress: async () => {
-              const target = decodedHttp || streamUrl;
-              const intentUri = `intent:${target}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
+              const outplayerUrl = `outplayer://${target}`;
+              const infuseUrl = `infuse://x-callback-url/play?url=${encodeURIComponent(target)}`;
               try {
-                await Linking.openURL(intentUri);
-              } catch {
-                try {
-                  await Linking.openURL(target);
-                } catch (e: any) {
-                  Alert.alert('Notice', 'Could not open video player.');
+                const canOut = await Linking.canOpenURL('outplayer://').catch(() => false);
+                if (canOut) {
+                  await Linking.openURL(outplayerUrl);
+                  return;
                 }
+                const canInf = await Linking.canOpenURL('infuse://').catch(() => false);
+                if (canInf) {
+                  await Linking.openURL(infuseUrl);
+                  return;
+                }
+                await Linking.openURL(outplayerUrl).catch(() => {
+                  Linking.openURL(infuseUrl).catch(() => {
+                    Share.share({ message: target, title: movieTitle });
+                  });
+                });
+              } catch {
+                Share.share({ message: target, title: movieTitle });
               }
             },
           },
-          ...(magnet
-            ? [
-                {
-                  text: '🌐 Stream in Webtor (Cloud)',
-                  onPress: () => {
-                    Linking.openURL(`https://webtor.io/show?magnet=${encodeURIComponent(magnet)}`).catch(
-                      () => {}
-                    );
-                  },
-                },
-              ]
-            : []),
+          {
+            text: '📤 iOS Share Sheet (Files / System)',
+            onPress: () => {
+              Share.share({ title: movieTitle, url: target, message: target });
+            },
+          },
           { text: 'Cancel', style: 'cancel' },
         ]
       );
       return;
     }
+
+    Alert.alert(
+      'Play in External Video Player',
+      `Torrent formats (.MKV, HEVC, AC3) play best in VLC or MX Player:`,
+      [
+        {
+          text: '🟧 Open in VLC Player',
+          onPress: async () => {
+            try {
+              await Linking.openURL(`vlc://${target}`);
+            } catch {
+              try {
+                await Linking.openURL(target);
+              } catch {
+                Alert.alert(
+                  'VLC Not Installed',
+                  'Install VLC for Android from the Play Store for direct high-speed torrent streaming.'
+                );
+              }
+            }
+          },
+        },
+        {
+          text: '▶ Open in Video Player (MX / System)',
+          onPress: async () => {
+            const intentUri = `intent:${target}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
+            try {
+              await Linking.openURL(intentUri);
+            } catch {
+              try {
+                await Linking.openURL(target);
+              } catch (e: any) {
+                Alert.alert('Notice', 'Could not open video player.');
+              }
+            }
+          },
+        },
+        ...(magnet
+          ? [
+              {
+                text: '🌐 Stream in Webtor (Cloud)',
+                onPress: () => {
+                  Linking.openURL(`https://webtor.io/show?magnet=${encodeURIComponent(magnet)}`).catch(
+                    () => {}
+                  );
+                },
+              },
+            ]
+          : []),
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+    return;
   };
 
   const formatTime = (secs: number) => {
@@ -1013,33 +1191,118 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   };
 
   const effectiveVideoSrc = (() => {
-    if (isDownloadedLocalFile && localFileUri) {
-      const formattedLocal = formatFileUriForHtml(localFileUri);
-      if (formattedLocal) return formattedLocal;
-    }
-    if (contentUri && !contentUri.startsWith('content://')) {
-      return contentUri;
+    let resolved = '';
+    if (contentUri) {
+      resolved = contentUri;
+    } else if (isDownloadedLocalFile && localFileUri) {
+      let clean = localFileUri.trim();
+      if (
+        !clean.startsWith('file://') &&
+        !clean.startsWith('content://') &&
+        !clean.startsWith('http://') &&
+        !clean.startsWith('https://')
+      ) {
+        clean = 'file://' + clean;
+      }
+      resolved = clean;
+    } else {
+      const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+      if (hash) {
+        resolved = `${cleanBackend}/api/stream/${hash.toLowerCase()}`;
+      } else if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
+        resolved = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
+      } else if (fn) {
+        resolved = `${cleanBackend}/downloads/${encodeURIComponent(fn)}`;
+      } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+        resolved = rawUrl;
+      } else {
+        resolved = localFileUri || '';
+      }
     }
 
-    const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
-    let streamHttpUrl = rawUrl;
-    if (hash) {
-      streamHttpUrl = `${cleanBackend}/api/stream/${hash.toLowerCase()}`;
-    } else if (rawUrl.startsWith('magnet:') || rawUrl.includes('urn:btih:')) {
-      streamHttpUrl = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(rawUrl)}`;
-    } else if (fn) {
-      streamHttpUrl = `${cleanBackend}/downloads/${encodeURIComponent(fn)}`;
-    } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-      streamHttpUrl = rawUrl;
-    }
+    console.log('[VFLIX Player] Effective Video Source resolved:', {
+      resolved,
+      contentUri,
+      isDownloadedLocalFile,
+      localFileUri,
+      status: item?.status,
+      title: item?.title || item?.movieFileName || item?.fileName,
+    });
 
-    if (streamHttpUrl) {
-      return streamHttpUrl;
-    }
-    return formatFileUriForHtml(localFileUri) || '';
+    return resolved;
   })();
 
+  const player = useVideoPlayer(effectiveVideoSrc, (p) => {
+    console.log('[VFLIX Player] useVideoPlayer initialized with effectiveVideoSrc:', effectiveVideoSrc);
+    p.loop = false;
+    if (initialPositionSec > 0) {
+      p.currentTime = initialPositionSec;
+    }
+    p.play();
+  });
 
+  const activeSubtitleText = useMemo(() => {
+    if (!subtitlesEnabled || selectedTrackId === 'none') return '';
+    const track = subtitleTracks.find((t) => t.id === selectedTrackId);
+    if (!track || !track.cues || track.cues.length === 0) return '';
+    const adjustedTime = currentTime - subOffset;
+    const cue = track.cues.find((c) => adjustedTime >= c.start && adjustedTime <= c.end);
+    return cue ? cue.text.replace(/<br\s*\/?>/gi, '\n') : '';
+  }, [subtitlesEnabled, selectedTrackId, subtitleTracks, currentTime, subOffset]);
+
+  useEffect(() => {
+    if (!player) return;
+
+    const sub1 = player.addListener('timeUpdate', (evt) => {
+      const cur = evt.currentTime;
+      setCurrentTime(cur);
+      if (player.duration && player.duration > 0) {
+        setDuration(player.duration);
+      }
+      if (cur > 0) {
+        setIsBuffering(false);
+        if (Math.abs(cur - lastSavedTimeRef.current) >= 5) {
+          lastSavedTimeRef.current = cur;
+          saveCurrentProgress(cur, player.duration || durationRef.current);
+        }
+      }
+    });
+
+    const sub2 = player.addListener('playingChange', (evt) => {
+      console.log('[VFLIX Player] playingChange event:', evt.isPlaying);
+      setIsPlaying(evt.isPlaying);
+      if (evt.isPlaying) {
+        setIsBuffering(false);
+      }
+    });
+
+    const sub3 = player.addListener('statusChange', (evt: any) => {
+      const status = evt?.status || evt;
+      const errorMsg = (evt as any)?.error || (player as any)?.error;
+      console.log('[VFLIX Player] statusChange event:', status, 'Error details:', errorMsg);
+      if (status === 'error') {
+        console.error('[VFLIX Player Error] Video playback failed:', {
+          effectiveVideoSrc,
+          error: errorMsg,
+          item,
+        });
+        setPlayerError(true);
+        setIsBuffering(false);
+      } else if (status === 'loading') {
+        setIsBuffering(true);
+      } else if (status === 'readyToPlay') {
+        console.log('[VFLIX Player] Video ready to play successfully!');
+        setIsBuffering(false);
+        setPlayerError(false);
+      }
+    });
+
+    return () => {
+      sub1.remove();
+      sub2.remove();
+      sub3.remove();
+    };
+  }, [player, saveCurrentProgress, effectiveVideoSrc, item]);
 
   const movieTitle = item?.title || item?.movieFileName || item?.fileName || 'Movie';
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
@@ -1113,7 +1376,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         .actionBtn {
           display: inline-block;
           margin-top: 14px;
-          background-color: #FA243C;
+          background-color: #8B5CF6;
           color: #ffffff;
           padding: 10px 20px;
           border-radius: 20px;
@@ -1141,19 +1404,19 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
 
       <div id="subtitle-overlay"></div>
 
-      <div id="fallbackNotice" style="display: none; position: absolute; background: rgba(20, 20, 20, 0.95); border: 1px solid #333; border-radius: 12px; padding: 24px; text-align: center; color: #fff; max-width: 85%; z-index: 10;">
-        <div style="font-size: 16px; font-weight: 800; margin-bottom: 6px; color: #FF453A;">
-          ${isOnlineStream ? 'Server is not reachable' : 'Playback Option'}
+      <div id="fallbackNotice" style="display: none; position: absolute; background: rgba(15, 12, 27, 0.96); border: 1px solid #8B5CF6; border-radius: 16px; padding: 24px; text-align: center; color: #fff; max-width: 90%; z-index: 50;">
+        <div style="font-size: 17px; font-weight: 800; margin-bottom: 8px; color: #8B5CF6;">
+          Codec / Format Notice (iOS)
         </div>
-        <div style="font-size: 12px; color: #aaa; line-height: 1.4; margin-bottom: 12px;">
-          ${isOnlineStream ? 'The streaming server connection failed or server is not reachable.' : 'The video format (e.g. MKV/AC3) can be played directly in VLC or system player.'}
+        <div style="font-size: 12px; color: #CBD5E1; line-height: 1.5; margin-bottom: 16px;">
+          This movie file container format (.mkv / AC3 / DTS audio) is not natively playable by iOS HTML5 WebKit directly via file://.
         </div>
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <a class="actionBtn" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'OPEN_EXTERNAL'}))">
-            Open in VLC / External Player
+            🟧 Open in VLC / Outplayer
           </a>
-          <a class="actionBtn" style="background-color: #333333;" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'CLOSE_PLAYER'}))">
-            Go Back
+          <a class="actionBtn" style="background-color: #272238;" href="javascript:void(0)" onclick="window.ReactNativeWebView.postMessage(JSON.stringify({type:'CLOSE_PLAYER'}))">
+            Close Player
           </a>
         </div>
       </div>
@@ -1166,6 +1429,16 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
             window.ReactNativeWebView.postMessage(JSON.stringify(msg));
           }
+        }
+
+        function logPlayer(level, msg, detail) {
+          console.log('[iOS Player Script Log]', level, msg, detail);
+          post({
+            type: 'CONSOLE_LOG',
+            level: level,
+            message: msg,
+            detail: detail || null
+          });
         }
 
         window.setVideoScaleMode = function(mode) {
@@ -1279,32 +1552,59 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         var hasInitialSeek = false;
         var initSec = ${initialPositionSec > 0 ? Math.floor(initialPositionSec) : 0};
 
+        v.addEventListener('loadstart', function() {
+          logPlayer('info', 'Video loadstart triggered', { src: v ? v.src : '' });
+        });
+
         v.addEventListener('loadedmetadata', function() {
+          logPlayer('info', 'Video loadedmetadata', { duration: v ? v.duration : 0, w: v ? v.videoWidth : 0, h: v ? v.videoHeight : 0 });
           if (!hasInitialSeek && initSec > 0) {
             hasInitialSeek = true;
             try { v.currentTime = initSec; } catch(e) {}
           }
           emitTime();
-          v.play().catch(function() {});
+          var p = v.play();
+          if (p && typeof p.then === 'function') {
+            p.then(function() {
+              v.muted = false;
+            }).catch(function(err) {
+              logPlayer('warn', 'Autoplay unmuted rejected, retrying muted', { err: String(err) });
+              v.muted = true;
+              v.play().then(function() {
+                v.muted = false;
+              }).catch(function(e2) {
+                logPlayer('error', 'Play failed on loadedmetadata', { err: String(e2) });
+              });
+            });
+          }
         });
+
         v.addEventListener('durationchange', emitTime);
         v.addEventListener('canplay', function() {
+          logPlayer('info', 'Video canplay event ready', { readyState: v ? v.readyState : 0 });
           if (!hasInitialSeek && initSec > 0) {
             hasInitialSeek = true;
             try { v.currentTime = initSec; } catch(e) {}
           }
           emitTime();
-          v.play().catch(function() {});
+          var p = v.play();
+          if (p && typeof p.then === 'function') {
+            p.catch(function(e) {
+              v.muted = true;
+              v.play().catch(function() {});
+            });
+          }
         });
+
         v.addEventListener('timeupdate', emitTime);
         v.addEventListener('seeking', function() { emitTime(); updateSubtitle(v.currentTime); });
         v.addEventListener('seeked', function() { emitTime(); updateSubtitle(v.currentTime); });
-        v.addEventListener('play', function() { post({ type: 'PLAYING' }); });
+        v.addEventListener('play', function() { logPlayer('info', 'Video playing event'); post({ type: 'PLAYING' }); });
         v.addEventListener('playing', function() { post({ type: 'PLAYING' }); });
         v.addEventListener('pause', function() { post({ type: 'PAUSED' }); });
         v.addEventListener('ended', function() { post({ type: 'ENDED' }); });
-        v.addEventListener('waiting', function() { post({ type: 'BUFFERING' }); });
-        v.addEventListener('stalled', function() { post({ type: 'BUFFERING' }); });
+        v.addEventListener('waiting', function() { logPlayer('warn', 'Video waiting for buffer data'); post({ type: 'BUFFERING' }); });
+        v.addEventListener('stalled', function() { logPlayer('warn', 'Video network stalled'); post({ type: 'BUFFERING' }); });
 
         var currentSrc = "${effectiveVideoSrc}";
         var fallbackContentSrc = "${contentUri}";
@@ -1315,7 +1615,20 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         var triedHttpFallback = false;
 
         v.addEventListener('error', function(e) {
+          var errCode = v && v.error ? v.error.code : 0;
+          var errNames = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
+          var errName = errNames[errCode] || 'UNKNOWN_ERROR';
+          var errMsg = v && v.error ? v.error.message : 'Video element emitted error event';
+
+          logPlayer('error', 'Video element error event fired', {
+            code: errCode,
+            name: errName,
+            message: errMsg,
+            currentSrc: v ? v.src : ''
+          });
+
           if (!triedContentFallback && fallbackContentSrc && currentSrc !== fallbackContentSrc) {
+            logPlayer('warn', 'Retrying with fallbackContentSrc', { fallbackContentSrc: fallbackContentSrc });
             triedContentFallback = true;
             v.src = fallbackContentSrc;
             v.load();
@@ -1323,6 +1636,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             return;
           }
           if (!triedFileFallback && fallbackFileSrc && currentSrc !== fallbackFileSrc) {
+            logPlayer('warn', 'Retrying with fallbackFileSrc', { fallbackFileSrc: fallbackFileSrc });
             triedFileFallback = true;
             v.src = fallbackFileSrc;
             v.load();
@@ -1330,6 +1644,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             return;
           }
           if (!triedHttpFallback && fallbackHttpSrc && currentSrc !== fallbackHttpSrc) {
+            logPlayer('warn', 'Retrying with fallbackHttpSrc', { fallbackHttpSrc: fallbackHttpSrc });
             triedHttpFallback = true;
             v.src = fallbackHttpSrc;
             v.load();
@@ -1337,7 +1652,13 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
             return;
           }
           if (notice) notice.style.display = 'block';
-          post({ type: 'VIDEO_ERROR' });
+          post({
+            type: 'VIDEO_ERROR',
+            code: errCode,
+            name: errName,
+            message: errMsg,
+            currentSrc: v ? v.src : ''
+          });
         }, true);
       </script>
     </body>
@@ -1394,71 +1715,43 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     >
       <StatusBar hidden />
       <View style={styles.container}>
-        {/* WebView Video Element with gesture listener */}
+        {/* Native expo-video VideoView Element with gesture listener */}
         <View style={styles.playerContainer} {...screenPanResponder.panHandlers}>
-          <WebView
-            key={effectiveVideoSrc || 'vflix_offline_player'}
-            ref={webViewRef}
-            originWhitelist={['*']}
-            source={webViewSource}
-            allowingReadAccessToURL={FileSystem.documentDirectory || 'file:///'}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled
-            domStorageEnabled
-            allowFileAccess
-            allowFileAccessFromFileURLs
-            allowUniversalAccessFromFileURLs
-            mixedContentMode="always"
-            androidLayerType="hardware"
-            cacheEnabled={true}
-            onMessage={(event) => {
-              try {
-                const data = JSON.parse(event.nativeEvent.data);
-                if (data.type === 'TIME_UPDATE') {
-                  setCurrentTime(data.currentTime);
-                  if (data.duration && data.duration > 0) {
-                    setDuration(data.duration);
-                  }
-                  // Clear buffering once we receive a valid time update with currentTime > 0
-                  if (data.currentTime > 0) {
-                    setIsBuffering(false);
-                    if (Math.abs(data.currentTime - lastSavedTimeRef.current) >= 5) {
-                      lastSavedTimeRef.current = data.currentTime;
-                      saveCurrentProgress(data.currentTime, data.duration || durationRef.current);
-                    }
-                  }
-                } else if (data.type === 'PLAYING') {
-                  setIsPlaying(true);
-                  setIsBuffering(false);
-                } else if (data.type === 'BUFFERING') {
-                  setIsBuffering(true);
-                } else if (data.type === 'PAUSED') {
-                  setIsPlaying(false);
-                  saveCurrentProgress(currentTimeRef.current, durationRef.current);
-                } else if (data.type === 'ENDED') {
-                  setIsPlaying(false);
-                  if (item) {
-                    const id = item.url || item.fileUri || item.id || item.title;
-                    if (id) continueWatchingService.remove(id);
-                  }
-                } else if (data.type === 'OPEN_EXTERNAL') {
-                  handleOpenExternal();
-                } else if (data.type === 'CLOSE_PLAYER') {
-                  handleClosePlayer();
-                } else if (data.type === 'VIDEO_ERROR') {
-                  setPlayerError(true);
-                  if (isOnlineStream) {
-                    if (!isWakingUp && !wakeUpFailed) {
-                      wakeUpServerRoutine();
-                    }
-                  }
-                }
-              } catch {}
-            }}
-            style={styles.webView}
-          />
+          {effectiveVideoSrc ? (
+            <VideoView
+              style={styles.webView}
+              player={player}
+              allowsPictureInPicture
+              nativeControls={false}
+              contentFit={scaleMode === 'fill' ? 'cover' : scaleMode === 'stretch' ? 'fill' : 'contain'}
+            />
+          ) : null}
+
+          {/* Native High-Contrast Subtitle Overlay */}
+          {activeSubtitleText ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.subtitleContainer,
+                controlsVisible && styles.subtitleShiftUp,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.subtitleText,
+                  {
+                    fontSize: subSize === 'small' ? 16 : subSize === 'large' ? 26 : subSize === 'xlarge' ? 32 : 21,
+                    color: subColor,
+                  },
+                  subBg === 'box' && styles.subBgBox,
+                  subBg === 'solid' && styles.subBgSolid,
+                  subBg === 'outline' && styles.subBgOutline,
+                ]}
+              >
+                {activeSubtitleText}
+              </Text>
+            </View>
+          ) : null}
 
           {/* Real-time Brightness Overlay (Dim layer) */}
           <View
@@ -1470,8 +1763,8 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
           />
         </View>
 
-        {/* Render Cloud Server Wake-Up / Cold-Start Overlay */}
-        {(isWakingUp || (playerError && isOnlineStream) || wakeUpFailed) && (
+        {/* Render Cloud Server Wake-Up / Local File Codec Error Overlay */}
+        {(isWakingUp || playerError || wakeUpFailed) && (
           <View style={styles.wakeUpOverlay}>
             <View style={styles.wakeUpCard}>
               <View
@@ -1488,13 +1781,19 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
               </View>
 
               <Text style={styles.wakeUpTitle}>
-                {isWakingUp ? 'Waking Up Streaming Server...' : 'Server Connection Timed Out'}
+                {isWakingUp
+                  ? 'Waking Up Streaming Server...'
+                  : isOnlineStream
+                  ? 'Server Connection Timed Out'
+                  : 'Cannot Play File (Unsupported Codec)'}
               </Text>
 
               <Text style={styles.wakeUpSubtitle}>
                 {isWakingUp
                   ? 'On Render free tier, the streaming server goes to sleep after 15 minutes of inactivity. Please wait while the cloud container spins up...'
-                  : `The streaming server at ${backendUrl} did not respond within 45 seconds.`}
+                  : isOnlineStream
+                  ? `The streaming server at ${backendUrl} did not respond within 45 seconds.`
+                  : `iOS AVPlayer cannot decode this file (${item?.movieFileName || item?.fileName || 'Movie'}). It likely contains AC3/DTS audio or MKV video streams.`}
               </Text>
 
               {isWakingUp && (
@@ -1508,26 +1807,28 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
               )}
 
               <View style={styles.wakeUpBtnRow}>
-                <TouchableOpacity
-                  style={[styles.wakeUpBtnPrimary, isWakingUp && { opacity: 0.6 }]}
-                  onPress={wakeUpServerRoutine}
-                  disabled={isWakingUp}
-                  activeOpacity={0.8}
-                >
-                  <RefreshCw color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
-                  <Text style={styles.wakeUpBtnPrimaryText}>
-                    {isWakingUp ? 'Waking Up...' : 'Retry Connection'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.wakeUpBtnSecondary}
-                  onPress={handleOpenExternal}
-                  activeOpacity={0.8}
-                >
-                  <ExternalLink color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
-                  <Text style={styles.wakeUpBtnSecondaryText}>Open in VLC</Text>
-                </TouchableOpacity>
+                {!isOnlineStream && playerError ? (
+                  <TouchableOpacity
+                    style={[styles.wakeUpBtnPrimary, { backgroundColor: Colors.primary }]}
+                    onPress={handleOpenExternal}
+                    activeOpacity={0.8}
+                  >
+                    <ExternalLink color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
+                    <Text style={styles.wakeUpBtnPrimaryText}>Open in VLC / Outplayer</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.wakeUpBtnPrimary, isWakingUp && { opacity: 0.6 }]}
+                    onPress={wakeUpServerRoutine}
+                    disabled={isWakingUp}
+                    activeOpacity={0.8}
+                  >
+                    <RefreshCw color="#FFFFFF" size={15} style={{ marginRight: 6 }} />
+                    <Text style={styles.wakeUpBtnPrimaryText}>
+                      {isWakingUp ? 'Waking Up...' : 'Retry Connection'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <TouchableOpacity
@@ -3113,5 +3414,40 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 13,
     fontWeight: '500',
+  },
+  subtitleContainer: {
+    position: 'absolute',
+    bottom: '7%',
+    left: '5%',
+    right: '5%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 25,
+  },
+  subtitleShiftUp: {
+    bottom: '16%',
+  },
+  subtitleText: {
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 28,
+  },
+  subBgBox: {
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  subBgSolid: {
+    backgroundColor: '#000000',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  subBgOutline: {
+    backgroundColor: 'transparent',
+    textShadowColor: '#000000',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 4,
   },
 });

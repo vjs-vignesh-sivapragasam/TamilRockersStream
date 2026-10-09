@@ -26,6 +26,7 @@ workflows:
 
       - name: Prebuild iOS project
         script: |
+          set -e
           rm -rf ios android
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
@@ -38,10 +39,11 @@ workflows:
 
       - name: Patch Podfile for New Architecture
         script: |
+          set -e
           cd ios
 
           # Fix deployment target
-          sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
+          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile || sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
           # Force New Architecture in Podfile
           cat >> Podfile << 'EOF'
@@ -55,6 +57,7 @@ workflows:
 
       - name: Install CocoaPods
         script: |
+          set -e
           cd ios
           rm -rf Pods Podfile.lock
 
@@ -67,25 +70,35 @@ workflows:
 
       - name: Build and create IPA
         script: |
+          set -e
           cd ios
-          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
 
-          if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found"
+          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+          PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
+
+          if [ -n "$WORKSPACE" ]; then
+            SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
+            BUILD_FLAG="-workspace $WORKSPACE"
+            echo "🏗️ Building workspace scheme: $SCHEME_NAME using $WORKSPACE"
+          elif [ -n "$PROJECT" ]; then
+            SCHEME_NAME=$(basename "$PROJECT" .xcodeproj)
+            BUILD_FLAG="-project $PROJECT"
+            echo "🏗️ Building project scheme: $SCHEME_NAME using $PROJECT"
+          else
+            echo "❌ No .xcworkspace or .xcodeproj found in ios/ directory!"
+            echo "Directory contents:"
+            ls -la
             exit 1
           fi
 
-          SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
-
-          echo "🏗️ Building scheme: $SCHEME_NAME"
           mkdir -p build
 
           export RCT_NEW_ARCH_ENABLED=1
 
           # Build without code signing
           xcodebuild \
-            -workspace "$WORKSPACE" \
+            $BUILD_FLAG \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
