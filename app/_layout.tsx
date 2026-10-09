@@ -9,6 +9,7 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#141414' } }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="stream/player" options={{ orientation: 'landscape', presentation: 'fullScreenModal' }} />
       </Stack>
     </SafeAreaProvider>
   );

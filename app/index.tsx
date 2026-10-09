@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, Platform } from 'react-native';
 import { SplashScreen } from '../src/components/SplashScreen';
 import { BottomNavBar, TabKey } from '../src/components/BottomNavBar';
 import { MovieFinderScreen } from '../src/components/MovieFinderScreen';
@@ -17,6 +17,17 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [pendingBrowserUrl, setPendingBrowserUrl] = useState<string | null>(null);
   const { activeDownloadsCount } = useDownloads();
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      try {
+        const nodejs = require('nodejs-mobile-react-native');
+        nodejs.start('wrapper.js');
+      } catch (err: any) {
+        console.log('[nodejs-mobile] Start error:', err);
+      }
+    }
+  }, []);
 
   const handleOpenInBrowserTab = (url: string) => {
     setPendingBrowserUrl(url);

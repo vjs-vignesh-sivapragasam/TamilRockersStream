@@ -3,7 +3,7 @@
     "name": "VFlix",
     "slug": "vflix",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -18,6 +18,11 @@
       "infoPlist": {
         "UIFileSharingEnabled": true,
         "LSSupportsOpeningDocumentsInPlace": true,
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
         "LSApplicationQueriesSchemes": [
           "vlc",
           "vlc-x-callback",
@@ -43,8 +48,25 @@
       "bundler": "metro"
     },
     "plugins": [
+      "./plugins/withKSPlayer",
       "expo-router",
-      "expo-video"
+      "expo-video",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "minSdkVersion": 26,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "abiFilters": [
+              "arm64-v8a",
+              "armeabi-v7a"
+            ]
+          }
+        }
+      ]
     ],
     "scheme": "vflix",
     "extra": {
