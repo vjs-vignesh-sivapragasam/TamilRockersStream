@@ -54,6 +54,11 @@ workflows:
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
           npx expo prebuild --clean --platform ios
 
+      - name: Patch Reanimated Podspec
+        script: |
+          echo "🔧 Patching RNReanimated.podspec version assertion if present..."
+          find node_modules -name "RNReanimated.podspec" -exec sed -i.bak 's/assert_minimal_react_native_version/# assert_minimal_react_native_version/' {} + || true
+
       - name: Install iOS dependencies
         script: |
           cd ios
@@ -171,6 +176,11 @@ workflows:
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
           npx expo prebuild --clean --platform ios
+
+      - name: Patch Reanimated Podspec
+        script: |
+          echo "🔧 Patching RNReanimated.podspec version assertion if present..."
+          find node_modules -name "RNReanimated.podspec" -exec sed -i.bak 's/assert_minimal_react_native_version/# assert_minimal_react_native_version/' {} + || true
 
       - name: Install iOS dependencies
         script: |

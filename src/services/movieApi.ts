@@ -9,9 +9,9 @@ export interface ApiConfig {
 }
 
 export const DEFAULT_CONFIG: ApiConfig = {
-  provider: 'tvmaze',
-  baseUrl: 'https://api.tvmaze.com',
-  apiKey: '',
+  provider: 'tmdb',
+  baseUrl: 'https://api.themoviedb.org/3',
+  apiKey: 'fd78b9d264f2f5a14deb84d3b6a83577',
 };
 
 let currentConfig: ApiConfig = { ...DEFAULT_CONFIG };

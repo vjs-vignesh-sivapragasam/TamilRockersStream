@@ -18,7 +18,7 @@ import {
 import { Colors } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 
-export type TabKey = 'home' | 'search' | 'mylist' | 'browser' | 'downloads' | 'settings';
+export type TabKey = 'home' | 'search' | 'mylist' | 'downloads' | 'settings';
 
 interface BottomNavBarProps {
   activeTab: TabKey;
@@ -126,7 +126,6 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     { key: 'home',      label: 'Home',      icon: Clapperboard },
     { key: 'search',    label: 'Search',    icon: Search },
     { key: 'mylist',    label: 'My List',   icon: Bookmark },
-    { key: 'browser',   label: 'Browser',   icon: Globe },
     { key: 'downloads', label: 'Downloads', icon: ArrowDownToLine, badge: downloadBadgeCount || undefined },
     { key: 'settings',  label: 'Settings',  icon: SlidersHorizontal },
   ];

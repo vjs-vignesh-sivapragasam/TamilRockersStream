@@ -1,7 +1,9 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Animated, ActivityIndicator, Image, Platform } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, Animated, ActivityIndicator, Image, Platform, PanResponder, Dimensions } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import Slider from '@react-native-assets/slider';
+import { showAlert } from '@/utils/platform';
+import { parseSubtitleFile } from './subtitle';
 import { styles } from './styles';
 import { formatTime } from './utils';
 import { MediaPlayerProps } from './models';
@@ -11,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ResizeMode } from 'react-native-video';
 import { GlassView } from 'expo-glass-effect';
+import { useTheme } from '@/context/ThemeContext';
 
 // ==================== CONSTANTS ====================
 export const CONSTANTS = {
@@ -36,11 +39,22 @@ interface Stream {
     magnetLink?: string;
     description?: string;
 }
-
 export interface ExtendedMediaPlayerProps extends MediaPlayerProps {
     streams?: Stream[];
     currentStreamIndex?: number;
     onStreamChange?: (index: number) => void;
+    onForceSwitchToKSPlayer?: () => void;
+}
+
+export interface SubtitleSource {
+    fileId?: string;
+    url?: string;
+    language?: string;
+    label: string;
+}
+
+export interface DownloadResponse {
+    link: string;
 }
 
 // ==================== HOOKS ====================
@@ -62,6 +76,18 @@ export const usePlayerState = () => {
         isReady, setIsReady,
         isDragging, setIsDragging,
         dragPosition, setDragPosition
+    };
+};
+
+export const useSubtitleState = () => {
+    const [currentSubtitle, setCurrentSubtitle] = useState('');
+    const [parsedSubtitles, setParsedSubtitles] = useState<any[]>([]);
+    const [isLoadingSubtitles, setIsLoadingSubtitles] = useState(false);
+
+    return {
+        currentSubtitle, setCurrentSubtitle,
+        parsedSubtitles, setParsedSubtitles,
+        isLoadingSubtitles, setIsLoadingSubtitles
     };
 };
 
@@ -157,6 +183,66 @@ export const usePlayerAnimations = () => {
 
 // ==================== UTILITIES ====================
 
+export const loadSubtitle = async (
+    subtitle: SubtitleSource,
+    openSubtitlesClient?: any
+): Promise<any[]> => {
+    let subtitleContent = '';
+
+    if (subtitle.fileId && openSubtitlesClient) {
+        const response = await openSubtitlesClient.downloadSubtitle(String(subtitle.fileId));
+
+        if ('error' in response || ('status' in response && response.status !== 200)) {
+            throw new Error(response.message || 'Download failed');
+        }
+
+        const downloadResponse = response as DownloadResponse;
+        if (!downloadResponse.link) {
+            throw new Error('No download link');
+        }
+
+        const subResponse = await fetch(downloadResponse.link);
+        if (!subResponse.ok) {
+            throw new Error(`HTTP ${subResponse.status}`);
+        }
+        subtitleContent = await subResponse.text();
+    } else if (subtitle.url && !subtitle.url.includes('opensubtitles.org')) {
+        const response = await fetch(subtitle.url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        subtitleContent = await response.text();
+    } else {
+        throw new Error('No valid subtitle source');
+    }
+
+    return parseSubtitleFile(subtitleContent);
+};
+
+export const findActiveSubtitle = (
+    currentTime: number,
+    parsedSubtitles: any[]
+): string => {
+    if (parsedSubtitles.length === 0) return '';
+    const active = parsedSubtitles.find(
+        sub => currentTime >= sub.start && currentTime <= sub.end
+    );
+    return active?.text || '';
+};
+
+export const findActiveSubtitleWithDelay = (
+    currentTime: number,
+    parsedSubtitles: any[],
+    delay: number = 0
+): string => {
+    if (parsedSubtitles.length === 0) return '';
+    const adjustedTime = currentTime + (delay / 1000);
+    const active = parsedSubtitles.find(
+        sub => adjustedTime >= sub.start && adjustedTime <= sub.end
+    );
+    return active?.text || '';
+};
+
 export const hideControls = (
     setShowControls: (show: boolean) => void,
     controlsOpacity: Animated.Value
@@ -189,8 +275,14 @@ export const calculateProgress = (currentTime: number, duration: number): number
     return Math.min((currentTime / duration) * 100, 100);
 };
 
+export const handleSubtitleError = (error: any) => {
+    console.error('Subtitle load error:', error);
+    showAlert("Subtitle Error", `Failed to load: ${error.message}`);
+};
+
 export const handlePlaybackError = (error: any, message: string = "Unable to load the video") => {
     console.error('Playback error:', error);
+    showAlert("Playback Error", message);
 };
 
 // ==================== MENU ACTION BUILDERS ====================
@@ -215,7 +307,7 @@ export const buildSettingsActions = (currentSpeed: number): MenuAction[] => {
 };
 
 export const buildSubtitlePositionActions = (currentPosition: SubtitlePosition): MenuAction[] => {
-    const positions = [0, 1, 2, 3, 4, 5];
+    const positions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     return positions.map(pos => ({
         id: `position-${pos}`,
         title: pos === 0 ? 'Default' : `+${pos}`,
@@ -240,30 +332,108 @@ export const buildSubtitleDelayActions = (currentDelay: number): MenuAction[] =>
 };
 
 export const buildSubtitleActions = (
-    _subtitles: any[],
+    subtitles: SubtitleSource[],
+    selectedCustomIndex: number,
+    availableEmbeddedTracks: any[],
+    subtitlePosition: SubtitlePosition,
+    subtitleDelay: number,
+    selectedEmbeddedIndex: number = -1
+): MenuAction[] => {
+    const noneSelected = selectedCustomIndex === -1 && selectedEmbeddedIndex === -1;
+
+    const offAction: MenuAction = {
+        id: 'subtitle-track-off',
+        title: 'Off',
+        subtitle: 'No subtitles',
+        state: noneSelected ? ('on' as const) : undefined,
+        titleColor: noneSelected ? '#007AFF' : '#FFFFFF',
+    };
+
+    const embeddedActions: MenuAction[] = availableEmbeddedTracks.map((track, i) => ({
+        id: `subtitle-track-embedded-${i}`,
+        title: track.label || track.name || `Track ${i + 1}`,
+        subtitle: track.language ? track.language.toUpperCase() : 'Embedded',
+        state: selectedEmbeddedIndex === i ? ('on' as const) : undefined,
+        titleColor: selectedEmbeddedIndex === i ? '#007AFF' : '#FFFFFF',
+    }));
+
+    const customActions: MenuAction[] = subtitles.map((sub, i) => ({
+        id: `subtitle-track-custom-${i}`,
+        title: sub.label,
+        subtitle: sub.language ? `OpenSubtitles · ${sub.language.toUpperCase()}` : 'OpenSubtitles',
+        state: selectedCustomIndex === i && selectedEmbeddedIndex === -1 ? ('on' as const) : undefined,
+        titleColor: selectedCustomIndex === i && selectedEmbeddedIndex === -1 ? '#007AFF' : '#FFFFFF',
+    }));
+
+    const trackActions: MenuAction[] = [offAction, ...embeddedActions, ...customActions];
+    const positionActions = buildSubtitlePositionActions(subtitlePosition);
+    const delayActions = buildSubtitleDelayActions(subtitleDelay);
+
+    return [
+        {
+            id: 'subtitle-tracks',
+            title: 'Tracks',
+            image: Platform.select({ ios: 'text.bubble', default: undefined }),
+            imageColor: '#ffffff',
+            subactions: trackActions,
+        },
+        {
+            id: 'subtitle-position',
+            title: 'Position',
+            image: Platform.select({ ios: 'arrow.up.and.down', default: undefined }),
+            imageColor: '#ffffff',
+            subactions: positionActions,
+        },
+        {
+            id: 'subtitle-delay',
+            title: 'Delay',
+            image: Platform.select({ ios: 'clock', default: undefined }),
+            imageColor: '#ffffff',
+            subactions: delayActions,
+        }
+    ];
+};
+
+export const buildSubtitleActionsLegacy = (
+    subtitles: SubtitleSource[],
     selectedIndex: number,
-    _useCustomSubtitles: boolean,
-    availableTextTracks: any[],
+    useCustomSubtitles: boolean,
+    availableSubtitleTracks: any[],
     subtitlePosition: SubtitlePosition,
     subtitleDelay: number,
     selectedTextTrackId: number = -1
 ): MenuAction[] => {
+    const noneSelected = selectedIndex === -1 && selectedTextTrackId === -1;
+
     const offAction: MenuAction = {
         id: 'subtitle-track-off',
         title: 'Off',
-        state: selectedIndex === -1 ? ('on' as const) : undefined,
-        titleColor: selectedIndex === -1 ? '#007AFF' : '#FFFFFF',
+        state: noneSelected ? ('on' as const) : undefined,
+        titleColor: noneSelected ? '#007AFF' : '#FFFFFF',
     };
 
-    const embeddedTrackActions: MenuAction[] = availableTextTracks.map((track, i) => ({
-        id: `subtitle-track-${i}`,
-        title: track.label || track.name || `Track ${i + 1}`,
-        subtitle: track.language ? track.language.toUpperCase() : undefined,
-        state: selectedTextTrackId === i ? ('on' as const) : undefined,
-        titleColor: selectedTextTrackId === i ? '#007AFF' : '#FFFFFF',
-    }));
+    const customActions: MenuAction[] = useCustomSubtitles
+        ? subtitles.map((sub, i) => ({
+            id: `subtitle-track-${i}`,
+            title: sub.label,
+            subtitle: sub.language ? `OpenSubtitles · ${sub.language.toUpperCase()}` : 'OpenSubtitles',
+            state: selectedIndex === i && selectedTextTrackId === -1 ? ('on' as const) : undefined,
+            titleColor: selectedIndex === i && selectedTextTrackId === -1 ? '#007AFF' : '#FFFFFF',
+        }))
+        : [];
 
-    const trackActions: MenuAction[] = [offAction, ...embeddedTrackActions];
+    const embeddedActions: MenuAction[] = availableSubtitleTracks.map((track, i) => {
+        const offsetIndex = subtitles.length + i;
+        return {
+            id: `subtitle-track-${offsetIndex}`,
+            title: track.label || track.name || `Track ${i + 1}`,
+            subtitle: track.language ? track.language.toUpperCase() : undefined,
+            state: selectedTextTrackId === i ? ('on' as const) : undefined,
+            titleColor: selectedTextTrackId === i ? '#007AFF' : '#FFFFFF',
+        };
+    });
+
+    const trackActions: MenuAction[] = [offAction, ...customActions, ...embeddedActions];
     const positionActions = buildSubtitlePositionActions(subtitlePosition);
     const delayActions = buildSubtitleDelayActions(subtitleDelay);
 
@@ -302,12 +472,14 @@ export const buildStreamActions = (streams: Stream[], currentIndex: number): Men
         const videoCodec = extractVideoCodec(title);
         const audioCodec = extractAudioCodec(title);
         const hdr = extractHDR(title);
+        const audioChannels = extractAudioCodec(title);
 
         const parts: string[] = [];
         if (quality) parts.push(quality);
         if (size) parts.push(size);
         if (hdr) parts.push(hdr);
         if (audioCodec) parts.push(audioCodec);
+        if (audioChannels) parts.push(audioChannels);
         if (source) parts.push(source);
         if (videoCodec) parts.push(videoCodec);
 
@@ -342,10 +514,11 @@ export const WaitingLobby: React.FC<{
     opacity: Animated.Value;
     error?: boolean;
 }> = ({ hasStartedPlaying, opacity, error }) => {
+    const { colors } = useTheme();
     if (hasStartedPlaying || error) return null;
     return (
         <Animated.View style={[styles.bufferingContainer, { opacity }]} pointerEvents="none">
-            <ActivityIndicator size="large" color="#535aff" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.bufferingText}>{"Loading..."}</Text>
         </Animated.View>
     );
@@ -357,6 +530,7 @@ export const ArtworkBackground: React.FC<{
     hasStartedPlaying?: boolean;
     error?: boolean;
 }> = ({ artwork, isBuffering, hasStartedPlaying = true, error }) => {
+    const { colors } = useTheme();
     if (!artwork || hasStartedPlaying || error) return null;
     return (
         <View style={styles.artworkContainer}>
@@ -364,7 +538,7 @@ export const ArtworkBackground: React.FC<{
             <View style={styles.artworkOverlay} />
             {isBuffering && (
                 <View style={styles.artworkLoadingOverlay}>
-                    <ActivityIndicator size="large" color="#535aff" />
+                    <ActivityIndicator size="large" color={colors.primary} />
                     <Text style={styles.bufferingText}>Loading...</Text>
                 </View>
             )}
@@ -455,6 +629,7 @@ export const ProgressBar: React.FC<{
     showSpeed?: boolean;
     playbackSpeed?: number;
 }> = ({ currentTime, duration, sliderValue, isReady, onValueChange, onSlidingStart, onSlidingComplete }) => {
+    const { colors } = useTheme();
     return (
         <View style={styles.bottomControls}>
             <View style={styles.progressContainerWithMargin}>
@@ -469,7 +644,7 @@ export const ProgressBar: React.FC<{
                             onValueChange={onValueChange}
                             onSlidingStart={onSlidingStart}
                             onSlidingComplete={onSlidingComplete}
-                            minimumTrackTintColor="rgba(83, 90, 255, 0.9)"
+                            minimumTrackTintColor={colors.primary}
                             maximumTrackTintColor="rgba(255, 255, 255, 0.3)"
                             thumbTintColor="#fff"
                             thumbSize={20}
@@ -484,30 +659,246 @@ export const ProgressBar: React.FC<{
     );
 };
 
-export const ContentFitLabel: React.FC<{
+export const SeekFeedback: React.FC<{
     show: boolean;
-    contentFit: string;
-    opacity: Animated.Value;
-}> = ({ show, contentFit, opacity }) => {
+    direction: 'forward' | 'backward';
+    seconds: number;
+}> = React.memo(({ show, direction, seconds }) => {
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const scaleAnim = useRef(new Animated.Value(0.8)).current;
+
+    useEffect(() => {
+        if (show) {
+            Animated.parallel([
+                Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+                Animated.spring(scaleAnim, { toValue: 1, tension: 100, friction: 8, useNativeDriver: true })
+            ]).start(() => {
+                setTimeout(() => {
+                    Animated.parallel([
+                        Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+                        Animated.timing(scaleAnim, { toValue: 0.8, duration: 300, useNativeDriver: true })
+                    ]).start();
+                }, 800);
+            });
+        }
+    }, [show, fadeAnim, scaleAnim]);
+
     if (!show) return null;
+
     return (
-        <Animated.View style={[styles.contentFitLabelContainer, { opacity }]} pointerEvents="none">
-            <Text style={styles.contentFitLabelText}>{contentFit.toUpperCase()}</Text>
+        <Animated.View
+            style={[
+                styles.seekFeedback,
+                {
+                    opacity: fadeAnim,
+                    transform: [{ scale: scaleAnim }],
+                    left: direction === 'backward' ? '20%' : undefined,
+                    right: direction === 'forward' ? '20%' : undefined,
+                }
+            ]}
+            pointerEvents="none"
+        >
+            <View style={styles.seekFeedbackContent}>
+                <Ionicons name={direction === 'forward' ? 'play-forward' : 'play-back'} size={32} color="white" />
+                <Text style={styles.seekFeedbackText}>{seconds}s</Text>
+            </View>
         </Animated.View>
     );
-};
+});
 
 export const ErrorDisplay: React.FC<{
     error: string | null;
     onBack: () => void;
     onRetry?: () => void;
-}> = ({ error, onBack, onRetry }) => {
+    onOpenExternal?: () => void;
+}> = ({ error, onBack, onRetry, onOpenExternal }) => {
     if (!error) return null;
     return (
         <View style={styles.errorContainer}>
+            <TouchableOpacity style={styles.errorBackButton} onPress={onBack}>
+                <Ionicons name="chevron-back" size={28} color="white" />
+            </TouchableOpacity>
             <MaterialIcons name="error-outline" size={64} color="#ff6b6b" />
             <Text style={styles.errorTitle}>Playback Error</Text>
             <Text style={styles.errorText}>{error}</Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {onRetry && (
+                    <TouchableOpacity style={styles.retryButton} onPress={onRetry}>
+                        <Text style={styles.retryButtonText}>Retry</Text>
+                    </TouchableOpacity>
+                )}
+                {onOpenExternal && (
+                    <TouchableOpacity style={[styles.retryButton, { backgroundColor: '#E50914' }]} onPress={onOpenExternal}>
+                        <Text style={styles.retryButtonText}>Open in VLC</Text>
+                    </TouchableOpacity>
+                )}
+                <TouchableOpacity style={[styles.retryButton, { backgroundColor: '#333' }]} onPress={onBack}>
+                    <Text style={styles.retryButtonText}>Go Back</Text>
+                </TouchableOpacity>
+            </View>
         </View>
+    );
+};
+
+// ==================== BRIGHTNESS / VOLUME OVERLAY ====================
+
+const GESTURE_SENSITIVITY = 250;
+
+export const BrightnessVolumeOverlay: React.FC<{
+    brightness: number;
+    volume: number;
+    onBrightnessChange: (value: number) => void;
+    onVolumeChange: (value: number) => void;
+}> = ({ brightness, volume, onBrightnessChange, onVolumeChange }) => {
+    const leftPillOpacity = useRef(new Animated.Value(0)).current;
+    const rightPillOpacity = useRef(new Animated.Value(0)).current;
+
+    const brightnessAnim = useRef(new Animated.Value(brightness)).current;
+    const volumeAnim = useRef(new Animated.Value(volume)).current;
+
+    const brightnessRef = useRef(brightness);
+    const volumeRef = useRef(volume);
+    brightnessRef.current = brightness;
+    volumeRef.current = volume;
+
+    // ── State for displaying percentage text ─────────────────────────────────
+    const [brightnessPercent, setBrightnessPercent] = useState(Math.round(brightness * 100));
+    const [volumePercent, setVolumePercent] = useState(Math.round(volume * 100));
+
+    const leftLastDy = useRef(0);
+    const rightLastDy = useRef(0);
+
+    const hideLeftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hideRightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const showPill = (pillOpacity: Animated.Value) => {
+        Animated.timing(pillOpacity, {
+            toValue: 1,
+            duration: 150,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const schedulePillHide = (
+        pillOpacity: Animated.Value,
+        timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
+    ) => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+            Animated.timing(pillOpacity, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+            }).start();
+        }, 800);
+    };
+
+    // ── Left zone: brightness ────────────────────────────────────────────────
+    const leftPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: () => true,
+            onPanResponderGrant: () => {
+                leftLastDy.current = 0;
+                showPill(leftPillOpacity);
+            },
+            onPanResponderMove: (_, g) => {
+                const deltaDy = g.dy - leftLastDy.current;
+                leftLastDy.current = g.dy;
+
+                const delta = -(deltaDy / GESTURE_SENSITIVITY);
+                const next = Math.max(0, Math.min(1, brightnessRef.current + delta));
+                brightnessAnim.setValue(next);
+                onBrightnessChange(next);
+                setBrightnessPercent(Math.round(next * 100));
+                showPill(leftPillOpacity);
+                if (hideLeftTimer.current) clearTimeout(hideLeftTimer.current);
+            },
+            onPanResponderRelease: () => {
+                schedulePillHide(leftPillOpacity, hideLeftTimer);
+            },
+            onPanResponderTerminate: () => {
+                schedulePillHide(leftPillOpacity, hideLeftTimer);
+            },
+        })
+    ).current;
+
+    // ── Right zone: volume ───────────────────────────────────────────────────
+    const rightPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: () => true,
+            onPanResponderGrant: () => {
+                rightLastDy.current = 0;
+                showPill(rightPillOpacity);
+            },
+            onPanResponderMove: (_, g) => {
+                const deltaDy = g.dy - rightLastDy.current;
+                rightLastDy.current = g.dy;
+
+                const delta = -(deltaDy / GESTURE_SENSITIVITY);
+                const next = Math.max(0, Math.min(1, volumeRef.current + delta));
+                volumeAnim.setValue(next);
+                onVolumeChange(next);
+                setVolumePercent(Math.round(next * 100));
+                showPill(rightPillOpacity);
+                if (hideRightTimer.current) clearTimeout(hideRightTimer.current);
+            },
+            onPanResponderRelease: () => {
+                schedulePillHide(rightPillOpacity, hideRightTimer);
+            },
+            onPanResponderTerminate: () => {
+                schedulePillHide(rightPillOpacity, hideRightTimer);
+            },
+        })
+    ).current;
+
+    useEffect(() => {
+        brightnessAnim.setValue(brightness);
+        setBrightnessPercent(Math.round(brightness * 100));
+    }, [brightness]);
+
+    useEffect(() => {
+        volumeAnim.setValue(volume);
+        setVolumePercent(Math.round(volume * 100));
+    }, [volume]);
+
+    const barFill = (anim: Animated.Value) =>
+        anim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+
+    return (
+        <>
+            {/* ── Left touch zone: brightness ── */}
+            <View style={styles.gestureZoneLeft} {...leftPanResponder.panHandlers}>
+                <Animated.View style={[styles.gesturePill, { opacity: leftPillOpacity }]}>
+                    <Ionicons
+                        name={brightness < 0.15 ? 'sunny-outline' : 'sunny'}
+                        size={16}
+                        color="#fff"
+                        style={styles.pillIcon}
+                    />
+                    <View style={styles.pillTrack}>
+                        <Animated.View style={[styles.pillFill, { height: barFill(brightnessAnim) }]} />
+                    </View>
+                    <Text style={styles.pillPercent}>{brightnessPercent}%</Text>
+                </Animated.View>
+            </View>
+
+            {/* ── Right touch zone: volume ── */}
+            <View style={styles.gestureZoneRight} {...rightPanResponder.panHandlers}>
+                <Animated.View style={[styles.gesturePill, { opacity: rightPillOpacity }]}>
+                    <Ionicons
+                        name={volume === 0 ? 'volume-mute' : volume < 0.4 ? 'volume-low' : 'volume-high'}
+                        size={16}
+                        color="#fff"
+                        style={styles.pillIcon}
+                    />
+                    <View style={styles.pillTrack}>
+                        <Animated.View style={[styles.pillFill, { height: barFill(volumeAnim) }]} />
+                    </View>
+                    <Text style={styles.pillPercent}>{volumePercent}%</Text>
+                </Animated.View>
+            </View>
+        </>
     );
 };

@@ -1,9 +1,18 @@
+/**
+ * Movie Database Service — Powered by TMDB (The Movie Database)
+ * API Key: fd78b9d264f2f5a14deb84d3b6a83577
+ * Replaces OMDb completely with high-fidelity TMDB poster, backdrop, rating, and metadata.
+ */
+
+import * as FileSystem from 'expo-file-system/legacy';
+import { useState, useEffect } from 'react';
+
 export interface RealMovieMetadata {
   title: string;
   originalTitle?: string;
   tagline?: string;
   synopsis: string;
-  rating: number; // e.g. 8.4
+  rating: number; // e.g. 7.4
   voteCount?: number;
   matchScore: number; // e.g. 92%
   contentRating: string; // e.g. '13+'
@@ -15,34 +24,72 @@ export interface RealMovieMetadata {
   director?: string;
   backdropUrl?: string;
   posterUrl?: string;
-  source: 'tmdb' | 'itunes' | 'omdb';
+  source: 'tmdb' | 'itunes';
 }
 
-const TMDB_API_KEYS = [
-  '15d2ee50754e5961b46f56728e0a5996',
-  'b02660d13bc7520e5c8e312e75344445',
-  '0172e27b9c65691d17d59a850e058c42',
-];
+export const TMDB_API_KEY = 'fd78b9d264f2f5a14deb84d3b6a83577';
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-export async function fetchMovieDatabaseMetadata(
-  title: string,
-  yearHint?: string
-): Promise<RealMovieMetadata | null> {
-  if (!title || title.trim().length < 2) return null;
+// In-memory cache for instant 0ms lookups
+const metadataCache = new Map<string, RealMovieMetadata | null>();
 
-  // Clean title for search (remove boilerplate prefixes, quality tags, year)
+// Persistent disk cache file
+const CACHE_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}tmdb_metadata_cache_v2.json`
+  : '';
+
+let isCacheLoaded = false;
+let saveTimer: any = null;
+
+export async function loadMetadataCacheFromDisk() {
+  if (isCacheLoaded || !CACHE_FILE) return;
+  try {
+    const content = await FileSystem.readAsStringAsync(CACHE_FILE);
+    if (content) {
+      const parsed: [string, RealMovieMetadata | null][] = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(([key, val]) => {
+          if (key) metadataCache.set(key, val);
+        });
+      }
+    }
+    isCacheLoaded = true;
+  } catch {}
+}
+
+// Automatically load cached TMDB entries on module load
+loadMetadataCacheFromDisk();
+
+function saveMetadataCacheToDisk() {
+  if (!CACHE_FILE) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const entries = Array.from(metadataCache.entries());
+      FileSystem.writeAsStringAsync(CACHE_FILE, JSON.stringify(entries)).catch(() => {});
+    } catch {}
+  }, 1200);
+}
+
+/**
+ * Sanitizes forum and torrent titles to extract clean movie title and year
+ */
+export function cleanMovieSearchTitle(title: string, yearHint?: string): { clean: string; year: string } {
+  if (!title) return { clean: '', year: '' };
+
   let clean = title
     .replace(/^(?:view\s+(?:the\s+)?topic|go\s+to\s+(?:the\s+)?topic)[\s:'"‘“\-]*/i, '')
+    .replace(/^view\s+the\s+topic\s*/i, '')
     .replace(/\[[^\]]*\]/g, '')
     .replace(/\([^)]*\)/g, '')
     .replace(
-      /\b(1080p|720p|480p|2160p|4k|bluray|webrip|brrip|x264|x265|hevc|aac|dvdrip|hdrip|hq|esub|sub|550mb|700mb|900mb|1\.4gb|2gb|2\.8gb|5\.4gb|tamil|telugu|hindi|malayalam|kannada|english)\b/gi,
+      /\b(1080p|720p|480p|2160p|4k|bluray|webrip|brrip|x264|x265|hevc|aac|dvdrip|hdrip|hq|esub|sub|550mb|700mb|900mb|1\.4gb|2gb|2\.8gb|5\.4gb|tamil|telugu|hindi|malayalam|kannada|english|true|uncompressed)\b/gi,
       ''
     )
     .replace(/[_.-]+/g, ' ')
     .trim();
 
-  // Extract year if present
+  // Extract 4-digit release year if present
   const yearMatch = (yearHint || title).match(/\b(19\d\d|20\d\d)\b/);
   const year = yearMatch ? yearMatch[1] : '';
 
@@ -50,75 +97,149 @@ export async function fetchMovieDatabaseMetadata(
     clean = clean.replace(new RegExp(`\\b${year}\\b`, 'g'), '').trim();
   }
 
-  // 1. Try TMDB Search API
-  for (const apiKey of TMDB_API_KEYS) {
-    try {
-      const yearQuery = year ? `&year=${year}` : '';
-      const searchUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(clean)}${yearQuery}&include_adult=false`;
-      const res = await fetch(searchUrl);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-          const m = data.results[0];
+  // Remove trailing punctuation
+  clean = clean.replace(/[-–—:]+$/g, '').trim();
 
-          // Fetch full details with credits
-          try {
-            const detailRes = await fetch(
-              `https://api.themoviedb.org/3/movie/${m.id}?api_key=${apiKey}&append_to_response=credits`
-            );
-            if (detailRes.ok) {
-              const d = await detailRes.json();
-              const castList = (d.credits?.cast || []).slice(0, 5).map((c: any) => c.name);
-              const directorObj = (d.credits?.crew || []).find((c: any) => c.job === 'Director');
-              const runtimeMins = d.runtime || 0;
-              const runtimeStr =
-                runtimeMins > 0
-                  ? `${Math.floor(runtimeMins / 60)}h ${runtimeMins % 60}m`
-                  : '';
+  return { clean, year };
+}
 
-              return {
-                title: d.title || m.title,
-                originalTitle: d.original_title !== d.title ? d.original_title : undefined,
-                tagline: d.tagline || undefined,
-                synopsis: d.overview || m.overview || '',
-                rating: Number((d.vote_average || m.vote_average || 0).toFixed(1)),
-                voteCount: d.vote_count || m.vote_count,
-                matchScore: Math.min(99, Math.max(70, Math.round((d.vote_average || 7.5) * 10))),
-                contentRating: d.adult ? '18+' : '13+',
-                year: (d.release_date || m.release_date || year || '').substring(0, 4),
-                releaseDate: d.release_date || m.release_date,
-                runtime: runtimeStr,
-                genres: (d.genres || []).map((g: any) => g.name),
-                cast: castList,
-                director: directorObj?.name,
-                backdropUrl: d.backdrop_path ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}` : undefined,
-                posterUrl: d.poster_path ? `https://image.tmdb.org/t/p/w780${d.poster_path}` : undefined,
-                source: 'tmdb',
-              };
-            }
-          } catch {}
+function getCacheKey(cleanTitle: string, year: string): string {
+  return `${cleanTitle.toLowerCase().trim()}_${year || ''}`;
+}
 
-          return {
-            title: m.title,
-            synopsis: m.overview || '',
-            rating: Number((m.vote_average || 0).toFixed(1)),
-            voteCount: m.vote_count,
-            matchScore: Math.min(99, Math.max(70, Math.round((m.vote_average || 7.5) * 10))),
-            contentRating: m.adult ? '18+' : '13+',
-            year: (m.release_date || year || '').substring(0, 4),
-            releaseDate: m.release_date,
-            genres: [],
-            cast: [],
-            backdropUrl: m.backdrop_path ? `https://image.tmdb.org/t/p/w1280${m.backdrop_path}` : undefined,
-            posterUrl: m.poster_path ? `https://image.tmdb.org/t/p/w780${m.poster_path}` : undefined,
-            source: 'tmdb',
-          };
-        }
-      }
-    } catch {}
+/**
+ * Synchronous cache lookup
+ */
+export function getCachedMovieMetadata(title: string, yearHint?: string): RealMovieMetadata | null | undefined {
+  const { clean, year } = cleanMovieSearchTitle(title, yearHint);
+  if (!clean) return undefined;
+  return metadataCache.get(getCacheKey(clean, year));
+}
+
+/**
+ * Primary Movie Metadata fetcher via TMDB API
+ */
+export async function fetchMovieDatabaseMetadata(
+  title: string,
+  yearHint?: string
+): Promise<RealMovieMetadata | null> {
+  if (!title || title.trim().length < 2) return null;
+
+  const { clean, year } = cleanMovieSearchTitle(title, yearHint);
+  if (!clean || clean.length < 2) return null;
+
+  const cacheKey = getCacheKey(clean, year);
+  if (metadataCache.has(cacheKey)) {
+    return metadataCache.get(cacheKey) ?? null;
   }
 
-  // 2. Try iTunes Movie API Fallback
+  // 1. Search TMDB with query + optional year
+  try {
+    let searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(clean)}&include_adult=false`;
+    if (year) {
+      searchUrl += `&year=${year}`;
+    }
+
+    let res = await fetch(searchUrl);
+    let data = res.ok ? await res.json() : null;
+
+    // If no results with year, retry without year restriction (year might differ between festival/theatrical/digital)
+    if ((!data || !data.results || data.results.length === 0) && year) {
+      const fallbackSearchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(clean)}&include_adult=false`;
+      const fallbackRes = await fetch(fallbackSearchUrl);
+      if (fallbackRes.ok) {
+        data = await fallbackRes.json();
+      }
+    }
+
+    // If still no results and title has a subtitle separator (" - " or ": "), try prefix
+    if (!data || !data.results || data.results.length === 0) {
+      const subParts = clean.split(/[-:]/);
+      if (subParts.length > 1 && subParts[0].trim().length >= 3) {
+        const prefixClean = subParts[0].trim();
+        const prefixUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(prefixClean)}&include_adult=false`;
+        const prefixRes = await fetch(prefixUrl);
+        if (prefixRes.ok) {
+          data = await prefixRes.json();
+        }
+      }
+    }
+
+    if (data && data.results && data.results.length > 0) {
+      const m = data.results[0];
+
+      // Fetch full TMDB movie details and cast credits
+      try {
+        const detailRes = await fetch(
+          `${TMDB_BASE_URL}/movie/${m.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`
+        );
+        if (detailRes.ok) {
+          const d = await detailRes.json();
+          const castList = (d.credits?.cast || []).slice(0, 6).map((c: any) => c.name);
+          const directorObj = (d.credits?.crew || []).find((c: any) => c.job === 'Director');
+          const runtimeMins = d.runtime || 0;
+          const runtimeStr =
+            runtimeMins > 0
+              ? `${Math.floor(runtimeMins / 60)}h ${runtimeMins % 60}m`
+              : '';
+
+          const voteAvg = Number((d.vote_average || m.vote_average || 0).toFixed(1));
+          const relYear = (d.release_date || m.release_date || year || '').substring(0, 4);
+
+          const result: RealMovieMetadata = {
+            title: d.title || m.title,
+            originalTitle: d.original_title !== d.title ? d.original_title : undefined,
+            tagline: d.tagline || undefined,
+            synopsis: d.overview || m.overview || '',
+            rating: voteAvg,
+            voteCount: d.vote_count || m.vote_count,
+            matchScore: Math.min(99, Math.max(65, Math.round((voteAvg || 7.2) * 10))),
+            contentRating: d.adult ? '18+' : '13+',
+            year: relYear,
+            releaseDate: d.release_date || m.release_date,
+            runtime: runtimeStr,
+            genres: (d.genres || []).map((g: any) => g.name),
+            cast: castList,
+            director: directorObj?.name,
+            backdropUrl: d.backdrop_path ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}` : undefined,
+            posterUrl: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : undefined,
+            source: 'tmdb',
+          };
+
+          metadataCache.set(cacheKey, result);
+          saveMetadataCacheToDisk();
+          return result;
+        }
+      } catch {}
+
+      // Fallback to basic search result if detail endpoint had an issue
+      const voteAvg = Number((m.vote_average || 0).toFixed(1));
+      const relYear = (m.release_date || year || '').substring(0, 4);
+      const basicResult: RealMovieMetadata = {
+        title: m.title,
+        synopsis: m.overview || '',
+        rating: voteAvg,
+        voteCount: m.vote_count,
+        matchScore: Math.min(99, Math.max(65, Math.round((voteAvg || 7.2) * 10))),
+        contentRating: m.adult ? '18+' : '13+',
+        year: relYear,
+        releaseDate: m.release_date,
+        genres: [],
+        cast: [],
+        backdropUrl: m.backdrop_path ? `https://image.tmdb.org/t/p/w1280${m.backdrop_path}` : undefined,
+        posterUrl: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : undefined,
+        source: 'tmdb',
+      };
+
+      metadataCache.set(cacheKey, basicResult);
+      saveMetadataCacheToDisk();
+      return basicResult;
+    }
+  } catch (err) {
+    console.warn('[TMDB] Search error for:', clean, err);
+  }
+
+  // 2. iTunes Movie Search Fallback (Only if TMDB returned no match)
   try {
     const iTunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(clean)}&entity=movie&limit=1`;
     const res = await fetch(iTunesUrl);
@@ -127,11 +248,11 @@ export async function fetchMovieDatabaseMetadata(
       if (data.results && data.results.length > 0) {
         const item = data.results[0];
         const artwork = item.artworkUrl100 ? item.artworkUrl100.replace('100x100bb', '600x600bb') : undefined;
-        return {
+        const result: RealMovieMetadata = {
           title: item.trackName || item.collectionName || clean,
           synopsis: item.longDescription || item.shortDescription || '',
-          rating: 8.0,
-          matchScore: 88,
+          rating: 7.5,
+          matchScore: 85,
           contentRating: item.contentAdvisoryRating || '13+',
           year: (item.releaseDate || year || '').substring(0, 4),
           releaseDate: item.releaseDate,
@@ -142,36 +263,67 @@ export async function fetchMovieDatabaseMetadata(
           backdropUrl: artwork,
           source: 'itunes',
         };
+
+        metadataCache.set(cacheKey, result);
+        saveMetadataCacheToDisk();
+        return result;
       }
     }
   } catch {}
 
-  // 3. Try OMDb API Fallback
-  try {
-    const omdbUrl = `https://www.omdbapi.com/?t=${encodeURIComponent(clean)}&apikey=trilogy`;
-    const res = await fetch(omdbUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.Response === 'True') {
-        const ratingNum = parseFloat(data.imdbRating) || 7.5;
-        return {
-          title: data.Title || clean,
-          synopsis: data.Plot && data.Plot !== 'N/A' ? data.Plot : '',
-          rating: ratingNum,
-          matchScore: Math.min(99, Math.max(70, Math.round(ratingNum * 10))),
-          contentRating: data.Rated && data.Rated !== 'N/A' ? data.Rated : '13+',
-          year: data.Year || year,
-          releaseDate: data.Released,
-          runtime: data.Runtime && data.Runtime !== 'N/A' ? data.Runtime : undefined,
-          genres: data.Genre ? data.Genre.split(',').map((s: string) => s.trim()) : [],
-          cast: data.Actors ? data.Actors.split(',').map((s: string) => s.trim()) : [],
-          director: data.Director && data.Director !== 'N/A' ? data.Director : undefined,
-          posterUrl: data.Poster && data.Poster !== 'N/A' ? data.Poster : undefined,
-          source: 'omdb',
-        };
-      }
-    }
-  } catch {}
-
+  // Cache null so we do not repeatedly spam the network for unlisted titles
+  metadataCache.set(cacheKey, null);
+  saveMetadataCacheToDisk();
   return null;
+}
+
+/**
+ * Reactive React hook to fetch & cache TMDB metadata for any movie component
+ */
+export function useMovieMetadata(title?: string, yearHint?: string): {
+  metadata: RealMovieMetadata | null;
+  loading: boolean;
+} {
+  const [data, setData] = useState<{ metadata: RealMovieMetadata | null; loading: boolean }>(() => {
+    if (!title) return { metadata: null, loading: false };
+    const cached = getCachedMovieMetadata(title, yearHint);
+    if (cached !== undefined) {
+      return { metadata: cached, loading: false };
+    }
+    return { metadata: null, loading: true };
+  });
+
+  useEffect(() => {
+    if (!title || title.trim().length < 2) {
+      setData({ metadata: null, loading: false });
+      return;
+    }
+
+    const cached = getCachedMovieMetadata(title, yearHint);
+    if (cached !== undefined) {
+      setData({ metadata: cached, loading: false });
+      return;
+    }
+
+    let isMounted = true;
+    setData((prev) => (prev.loading ? prev : { ...prev, loading: true }));
+
+    fetchMovieDatabaseMetadata(title, yearHint)
+      .then((meta) => {
+        if (isMounted) {
+          setData({ metadata: meta, loading: false });
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setData({ metadata: null, loading: false });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [title, yearHint]);
+
+  return data;
 }

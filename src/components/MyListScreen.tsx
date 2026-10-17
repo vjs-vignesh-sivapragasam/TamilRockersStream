@@ -29,7 +29,7 @@ import { myListService, MyListItem } from '../services/myListService';
 import { MovieResolutionItem, TamilMvMovieResult, tamilMvService, posterCache } from '../services/tamilMvService';
 import { TabKey } from './BottomNavBar';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
-import { MovieDetailSheet } from './MovieFinderScreen';
+import { MovieDetailSheet } from './HomeScreen';
 import { useDownloads } from '../context/DownloadContext';
 import { DownloadItem } from '../types/downloads';
 import { extractInfoHashFromUrl } from '../utils/bencode';

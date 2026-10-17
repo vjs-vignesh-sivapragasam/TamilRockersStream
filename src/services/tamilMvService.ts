@@ -23,6 +23,7 @@ export interface TamilMvMovieResult {
   year?: string;
   language?: string;
   posterUrl?: string;
+  rating?: number;
   topicTitle: string;
   topicUrl: string;
   resolutions: MovieResolutionItem[];

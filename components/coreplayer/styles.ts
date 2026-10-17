@@ -1,3 +1,4 @@
+import { Colors } from "@/constants/theme";
 import { StyleSheet } from "react-native";
 
 export const styles = StyleSheet.create({
@@ -9,8 +10,8 @@ export const styles = StyleSheet.create({
 
     // Video
     video: {
-        flex: 1,
-        alignSelf: 'stretch',
+        width: '100%',
+        height: '100%',
     },
 
     // Touch Area
@@ -166,7 +167,7 @@ export const styles = StyleSheet.create({
     },
 
     speedText: {
-        color: '#535aff',
+        color: Colors.text,
         fontSize: 14,
         fontWeight: '500',
         marginLeft: 12,
@@ -289,7 +290,7 @@ export const styles = StyleSheet.create({
     subtitleText: {
         color: '#fff',
         fontSize: 16,
-        letterSpacing: 0.1,
+        letterSpacing: 0.3,
         textAlign: 'center',
     },
     // Error Display
@@ -319,7 +320,7 @@ export const styles = StyleSheet.create({
     },
 
     retryButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: Colors.primary,
         paddingHorizontal: 24,
         paddingVertical: 12,
         borderRadius: 8,
@@ -374,7 +375,7 @@ export const styles = StyleSheet.create({
     },
 
     glassPanel: {
-        backgroundColor: '#1a1a1af2',
+        backgroundColor: Colors.backgroundCard,
         borderRadius: 12,
         padding: 24,
         minWidth: 500,
@@ -418,8 +419,8 @@ export const styles = StyleSheet.create({
     },
 
     settingOptionSelected: {
-        backgroundColor: 'rgba(0, 122, 255, 0.2)',
-        borderColor: 'rgba(0, 122, 255, 0.4)',
+        backgroundColor: Colors.primaryMuted,
+        borderColor: Colors.primaryBorder,
     },
 
     settingOptionText: {
@@ -447,8 +448,8 @@ export const styles = StyleSheet.create({
     },
 
     speedOptionSelected: {
-        backgroundColor: 'rgba(0, 122, 255, 0.3)',
-        borderColor: 'rgba(0, 122, 255, 0.5)',
+        backgroundColor: Colors.primaryMuted,
+        borderColor: Colors.primaryBorder,
     },
 
     speedOptionText: {
@@ -459,7 +460,7 @@ export const styles = StyleSheet.create({
 
     speedOptionTextSelected: {
         fontWeight: '700',
-        color: '#007AFF',
+        color: Colors.primary,
     },
 
     loadingContainer: {
@@ -491,5 +492,59 @@ export const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.5)',
         fontSize: 12,
         marginTop: 2,
+    },
+
+    gestureZoneLeft: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: '25%',
+        zIndex: 10,
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        paddingLeft: '5%',
+    },
+    gestureZoneRight: {
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: '25%',
+        zIndex: 10,
+        justifyContent: 'center',
+        alignItems: 'flex-end',
+        paddingRight: '5%',
+    },
+    gesturePill: {
+        width: 40,
+        height: 150,
+        borderRadius: 24,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        paddingVertical: 10,
+        gap: 8,
+    },
+    pillIcon: {
+        marginTop: 2,
+    },
+    pillTrack: {
+        flex: 1,
+        width: 4,
+        borderRadius: 2,
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        overflow: 'hidden',
+        justifyContent: 'flex-end',
+    },
+    pillFill: {
+        width: '100%',
+        borderRadius: 2,
+        backgroundColor: '#ffffff',
+    },
+    pillPercent: {
+        color: '#ffffff',
+        fontSize: 10,
+        marginBottom: 2,
+        opacity: 0.85,
     },
 });

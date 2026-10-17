@@ -74,4 +74,32 @@ class KSPlayerViewManager: RCTViewManager {
             view.exitFullscreen()
         }
     }
+
+    @objc func enterPictureInPicture(_ node: NSNumber) {
+        DispatchQueue.main.async {
+            guard let view = self.bridge.uiManager.view(forReactTag: node) as? KSPlayerRNView else { return }
+            view.enterPictureInPicture()
+        }
+    }
+
+    @objc func exitPictureInPicture(_ node: NSNumber) {
+        DispatchQueue.main.async {
+            guard let view = self.bridge.uiManager.view(forReactTag: node) as? KSPlayerRNView else { return }
+            view.exitPictureInPicture()
+        }
+    }
+
+    @objc func setBrightness(_ node: NSNumber, value: NSNumber) {
+        DispatchQueue.main.async {
+            guard let view = self.bridge.uiManager.view(forReactTag: node) as? KSPlayerRNView else { return }
+            view.setBrightness(CGFloat(value.floatValue))
+        }
+    }
+
+    @objc func setVolume(_ node: NSNumber, value: NSNumber) {
+        DispatchQueue.main.async {
+            guard let view = self.bridge.uiManager.view(forReactTag: node) as? KSPlayerRNView else { return }
+            view.setVolume(value.floatValue)
+        }
+    }
 }

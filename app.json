@@ -49,6 +49,13 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
+      [
+        "react-native-video",
+        {
+          "enableAndroidPictureInPicture": true,
+          "enableBackgroundAudio": true
+        }
+      ],
       "expo-router",
       "expo-video",
       "expo-font",

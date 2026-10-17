@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { SplashScreen } from '../src/components/SplashScreen';
 import { BottomNavBar, TabKey } from '../src/components/BottomNavBar';
-import { MovieFinderScreen } from '../src/components/MovieFinderScreen';
+import { HomeScreen } from '../src/components/HomeScreen';
 import { SearchScreen } from '../src/components/SearchScreen';
 import { MyListScreen } from '../src/components/MyListScreen';
-import { BrowserScreen } from '../src/components/BrowserScreen';
 import { DownloadsScreen } from '../src/components/DownloadsScreen';
 import { SettingsScreen } from '../src/components/SettingsScreen';
 import { DownloadProvider, useDownloads } from '../src/context/DownloadContext';
@@ -22,16 +21,18 @@ function AppContent() {
     if (Platform.OS !== 'web') {
       try {
         const nodejs = require('nodejs-mobile-react-native');
-        nodejs.start('wrapper.js');
+        if (nodejs && typeof nodejs.start === 'function') {
+          nodejs.start('wrapper.js');
+        }
       } catch (err: any) {
-        console.log('[nodejs-mobile] Start error:', err);
+        console.warn('[nodejs-mobile] Background node service not available in current runtime:', err?.message || err);
       }
     }
   }, []);
 
   const handleOpenInBrowserTab = (url: string) => {
     setPendingBrowserUrl(url);
-    setActiveTab('browser');
+    setActiveTab('search');
   };
 
   return (
@@ -43,10 +44,9 @@ function AppContent() {
 
       {/* Screen area — fills all space above the nav bar */}
       <View style={styles.screenArea}>
-        {/* All screens stay mounted; only the active one is shown via display flex/none
-            to preserve WebView state (browser keeps its current page) */}
+        {/* All screens stay mounted; only the active one is shown via display flex/none */}
         <View style={[styles.screen, activeTab === 'home' ? styles.screenVisible : styles.screenHidden]}>
-          <MovieFinderScreen 
+          <HomeScreen 
             onNavigateToTab={setActiveTab}
             onOpenInBrowserTab={handleOpenInBrowserTab}
           />
@@ -55,20 +55,13 @@ function AppContent() {
         <View style={[styles.screen, activeTab === 'search' ? styles.screenVisible : styles.screenHidden]}>
           <SearchScreen 
             onNavigateToTab={setActiveTab}
-            onOpenInBrowserTab={handleOpenInBrowserTab}
+            pendingBrowserUrl={pendingBrowserUrl}
+            onClearPendingUrl={() => setPendingBrowserUrl(null)}
           />
         </View>
 
         <View style={[styles.screen, activeTab === 'mylist' ? styles.screenVisible : styles.screenHidden]}>
           <MyListScreen onNavigateToTab={setActiveTab} />
-        </View>
-
-        <View style={[styles.screen, activeTab === 'browser' ? styles.screenVisible : styles.screenHidden]}>
-          <BrowserScreen 
-            onNavigateToDownloads={() => setActiveTab('downloads')}
-            pendingUrlToOpen={pendingBrowserUrl}
-            onClearPendingUrl={() => setPendingBrowserUrl(null)}
-          />
         </View>
 
         <View style={[styles.screen, activeTab === 'downloads' ? styles.screenVisible : styles.screenHidden]}>

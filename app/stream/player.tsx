@@ -1,4 +1,4 @@
-import { getPlatformSpecificPlayers, Players } from "@/utils/MediaPlayer";
+import { getPlatformSpecificPlayers, Players, isKSPlayerSupported } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -10,8 +10,9 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
 
-interface UpdateProgressEvent {
-  progress: number;
+interface PlaybackPositionEvent {
+  positionSeconds: number;
+  durationSeconds: number;
 }
 
 interface PlaybackErrorEvent {
@@ -21,7 +22,8 @@ interface PlaybackErrorEvent {
 interface BackEvent {
   message: string;
   code?: string;
-  progress: number;
+  positionSeconds: number;
+  durationSeconds: number;
   player: "native" | "ksplayer";
 }
 
@@ -30,6 +32,8 @@ interface WatchHistoryItem {
   videoUrl: string;
   poster: string;
   progress: number;
+  positionSeconds?: number;
+  durationSeconds?: number;
   timestamp: number;
   isTorrent: boolean;
   allItems: TorrentItem[];
@@ -61,6 +65,7 @@ const MediaPlayerScreen: React.FC = () => {
     title,
     poster,
     progress: watchHistoryProgress,
+    positionSeconds: watchHistoryPositionSeconds,
     allItems: allItemsParam,
   } = useLocalSearchParams();
 
@@ -76,9 +81,14 @@ const MediaPlayerScreen: React.FC = () => {
 
   const isTorrentFlow = parsedAllItems.length > 0;
 
-  const [progress, setProgress] = useState<number>(
-    watchHistoryProgress ? parseInt(watchHistoryProgress as string, 10) : 0
-  );
+  const resumePositionSeconds = (() => {
+    if (watchHistoryPositionSeconds) {
+      const pos = Number(watchHistoryPositionSeconds);
+      if (Number.isFinite(pos) && pos > 0) return pos;
+    }
+    return 0;
+  })();
+
   const [streams, setStreams] = useState<Stream[]>([]);
   const [currentStreamIndex, setCurrentStreamIndex] = useState<number>(0);
   const [videoUrl, setVideoUrl] = useState<string>('');
@@ -92,7 +102,9 @@ const MediaPlayerScreen: React.FC = () => {
   const [stremioClient, setStremioClient] = useState<StreamingServerClient | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">("native");
+  const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">(
+    isKSPlayerSupported() ? "ksplayer" : "native"
+  );
   const [hasTriedNative, setHasTriedNative] = useState(false);
 
   useEffect(() => {
@@ -261,7 +273,7 @@ const MediaPlayerScreen: React.FC = () => {
 
     setIsLoadingStream(true);
     setStreamError('');
-    setCurrentPlayerType("native");
+    setCurrentPlayerType(Platform.OS === "ios" ? "ksplayer" : "native");
     setHasTriedNative(false);
 
     const stream = list[streamIndex];
@@ -347,26 +359,36 @@ const MediaPlayerScreen: React.FC = () => {
   };
 
   const handlePlaybackError = (event: PlaybackErrorEvent) => {
-    if (currentPlayerType === "native" && !hasTriedNative && Platform.OS !== "web") {
+    console.log('Playback error:', event);
+    if (Platform.OS === "ios" && currentPlayerType === "ksplayer" && !hasTriedNative) {
+      console.log('KSPlayer failed, falling back to native player');
       setHasTriedNative(true);
       setStreamError('');
-      setCurrentPlayerType("ksplayer");
+      setCurrentPlayerType("native");
     } else {
-      setStreamError(
-        currentPlayerType === "ksplayer"
-          ? 'KSPlayer was unable to play this format.'
-          : (event.error || 'Playback failed')
-      );
+      const errorMessage = event.error || 'Playback failed';
+      console.log('Final playback error:', errorMessage);
+      setStreamError(errorMessage);
       setIsLoadingStream(false);
     }
   };
 
-  const saveToWatchHistory = (currentProgress: number) => {
+  const saveToWatchHistory = ({ positionSeconds, durationSeconds }: PlaybackPositionEvent) => {
+    if (!Number.isFinite(positionSeconds) || !Number.isFinite(durationSeconds)) return;
+
+    const elapsedSeconds = Math.max(0, Math.floor(positionSeconds));
+    const totalSeconds = Math.max(0, Math.floor(durationSeconds));
+    if (elapsedSeconds <= 1 || totalSeconds <= 0) return;
+
+    const savedPositionSeconds = Math.min(elapsedSeconds, totalSeconds);
+    const isCompleted = savedPositionSeconds >= totalSeconds * 0.95;
+    const currentProgress = Math.round((savedPositionSeconds / totalSeconds) * 100);
+
     try {
       const existingJson = storageService.getItem(WATCH_HISTORY_KEY);
       let history: WatchHistoryItem[] = existingJson ? JSON.parse(existingJson) : [];
 
-      if (currentProgress >= MIN_PROGRESS_TO_REMOVE) {
+      if (isCompleted || currentProgress >= MIN_PROGRESS_TO_REMOVE) {
         history = history.filter(item => item.videoUrl !== videoUrl);
         storageService.setItem(WATCH_HISTORY_KEY, JSON.stringify(history));
         return;
@@ -377,6 +399,8 @@ const MediaPlayerScreen: React.FC = () => {
         videoUrl: videoUrl as string,
         poster: artwork,
         progress: currentProgress,
+        positionSeconds: savedPositionSeconds,
+        durationSeconds: totalSeconds,
         timestamp: Date.now(),
         isTorrent: isTorrentFlow,
         allItems: parsedAllItems,
@@ -385,7 +409,7 @@ const MediaPlayerScreen: React.FC = () => {
       const existingIndex = history.findIndex(item => item.videoUrl === videoUrl);
 
       if (existingIndex !== -1) {
-        history[existingIndex] = { ...history[existingIndex], progress: currentProgress, timestamp: Date.now() };
+        history[existingIndex] = { ...history[existingIndex], progress: currentProgress, positionSeconds: savedPositionSeconds, durationSeconds: totalSeconds, timestamp: Date.now() };
         const [updated] = history.splice(existingIndex, 1);
         history.unshift(updated);
       } else {
@@ -405,27 +429,26 @@ const MediaPlayerScreen: React.FC = () => {
   // ── Playback callbacks ───────────────────────────────────────────────────────
 
   const handleBack = async (event: BackEvent): Promise<void> => {
-    saveToWatchHistory(Math.floor(event.progress));
+    saveToWatchHistory(event);
     router.back();
   };
 
-  const handleUpdateProgress = async (event: UpdateProgressEvent): Promise<void> => {
-    if (event.progress <= 1) return;
-    const pct = Math.floor(event.progress);
-    setProgress(pct);
-    saveToWatchHistory(pct);
+  const handleUpdateProgress = async (event: PlaybackPositionEvent): Promise<void> => {
+    saveToWatchHistory(event);
   };
 
   // ── Player selection ─────────────────────────────────────────────────────────
-  // Default: react-native-video (ExoPlayer on Android, AVPlayer on iOS)
-  // Fallback: KSPlayer (FFmpeg-based, better format support)
+  // iOS Default (when KSPlayer native module available): KSPlayer (FFmpeg-based, hardware Metal, MKV/AC3/EAC3/DTS/ASS support)
+  // Fallback: react-native-video (ExoPlayer on Android, AVPlayer on iOS)
 
   function getPlayer() {
-    if (Platform.OS === "ios") {
-      return require("../../components/ksplayer").MediaPlayer;
-    }
-    if (currentPlayerType === "ksplayer") {
-      return require("../../components/ksplayer").MediaPlayer;
+    if (isKSPlayerSupported() && currentPlayerType === "ksplayer") {
+      try {
+        const ks = require("../../components/ksplayer");
+        if (ks && ks.MediaPlayer) return ks.MediaPlayer;
+      } catch (e) {
+        console.warn('[StreamPlayer] Failed to load KSPlayer, falling back to NativePlayer:', e);
+      }
     }
     return require("../../components/nativeplayer").MediaPlayer;
   }
@@ -457,13 +480,18 @@ const MediaPlayerScreen: React.FC = () => {
         isTorrent={isTorrent}
         title={title as string}
         back={handleBack}
-        progress={progress}
+        resumePositionSeconds={resumePositionSeconds}
         artwork={artwork}
         updateProgress={handleUpdateProgress}
         onPlaybackError={handlePlaybackError}
         streams={streams}
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
+        pictureInPictureEnabled={true}
+        onForceSwitchToKSPlayer={isKSPlayerSupported() ? () => {
+          setCurrentPlayerType("ksplayer");
+          setHasTriedNative(true);
+        } : undefined}
       />
     </GestureHandlerRootView>
   );
