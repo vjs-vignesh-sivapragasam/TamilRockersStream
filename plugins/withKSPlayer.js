@@ -26,10 +26,10 @@ const withKSPlayerPod = (config) => {
       // use_frameworks! :linkage => :static satisfies both — confirmed by tapframe/KSPNUVIO.
       const ksplayerPods = `
   # KSPlayer — iOS video player with FFmpeg/AVPlayer support
-  pod 'KSPlayer', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'main'
-  pod 'DisplayCriteria', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'main', :modular_headers => true
-  pod 'FFmpegKit', :git => 'https://github.com/kingslay/FFmpegKit.git', :branch => 'main', :modular_headers => true
-  pod 'Libass', :git => 'https://github.com/kingslay/FFmpegKit.git', :branch => 'main', :modular_headers => true
+  pod 'KSPlayer', :git => 'https://github.com/kingslay/KSPlayer.git', :tag => '2.3.4'
+  pod 'DisplayCriteria', :git => 'https://github.com/kingslay/KSPlayer.git', :tag => '2.3.4', :modular_headers => true
+  pod 'FFmpegKit', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4', :modular_headers => true
+  pod 'Libass', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4', :modular_headers => true
 `;
 
       if (!podfile.includes('use_react_native!')) {
