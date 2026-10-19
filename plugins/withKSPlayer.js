@@ -56,7 +56,7 @@ const withKSPlayerPod = (config) => {
   end
 `;
 
-      if (!podfile.includes('[withKSPlayer] Force React Native targets')) {
+      if (!podfile.includes('[withKSPlayer] Allow non-modular includes')) {
         if (podfile.includes('post_install do |installer|')) {
           podfile = podfile.replace(
             'post_install do |installer|',

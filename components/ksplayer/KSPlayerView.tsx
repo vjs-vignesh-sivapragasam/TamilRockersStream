@@ -1,4 +1,4 @@
-import React, { useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
+import React, { useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import {
   requireNativeComponent,
   UIManager,
@@ -7,9 +7,7 @@ import {
   ViewStyle,
   StyleSheet,
   View,
-  Platform,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,29 +84,12 @@ export interface KSPlayerRef {
 
 // ─── Native component ─────────────────────────────────────────────────────────
 
-let isKSPlayerAvailable = false;
-let KSPlayerNative: any = null;
-
-if (Platform.OS === 'ios') {
-  try {
-    const hasConfig = typeof (UIManager as any)?.hasViewManagerConfig === 'function'
-      ? Boolean((UIManager as any).hasViewManagerConfig('KSPlayerView'))
-      : Boolean(UIManager?.getViewManagerConfig?.('KSPlayerView'));
-    if (hasConfig) {
-      KSPlayerNative = requireNativeComponent<any>('KSPlayerView');
-      isKSPlayerAvailable = true;
-    }
-  } catch (e) {
-    KSPlayerNative = null;
-    isKSPlayerAvailable = false;
-  }
-}
+const KSPlayerNative = requireNativeComponent<any>('KSPlayerView');
 
 function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[] = []) {
-  if (!isKSPlayerAvailable) return;
   const node = findNodeHandle(ref.current);
   if (!node) return;
-  const commands = UIManager.getViewManagerConfig?.('KSPlayerView')?.Commands;
+  const commands = UIManager.getViewManagerConfig('KSPlayerView')?.Commands;
   if (!commands || commands[command] === undefined) {
     console.warn(`[KSPlayerView] Command "${command}" not found`);
     return;
@@ -120,45 +101,20 @@ function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[]
 
 export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, ref) => {
   const nativeRef = useRef<any>(null);
-  const webViewRef = useRef<WebView>(null);
 
   useImperativeHandle(ref, () => ({
-    seek(time) {
-      if (isKSPlayerAvailable) {
-        dispatchCommand(nativeRef, 'seekTo', [time]);
-      } else {
-        webViewRef.current?.injectJavaScript(`(function(){ const v = document.getElementById('v'); if(v) v.currentTime = ${time}; })(); true;`);
-      }
-    },
-    play() {
-      if (isKSPlayerAvailable) {
-        dispatchCommand(nativeRef, 'play');
-      } else {
-        webViewRef.current?.injectJavaScript(`(function(){ const v = document.getElementById('v'); if(v) v.play(); })(); true;`);
-      }
-    },
-    pause() {
-      if (isKSPlayerAvailable) {
-        dispatchCommand(nativeRef, 'pause');
-      } else {
-        webViewRef.current?.injectJavaScript(`(function(){ const v = document.getElementById('v'); if(v) v.pause(); })(); true;`);
-      }
-    },
-    selectAudioTrack(idx) { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'selectAudioTrack', [idx]); },
-    selectTextTrack(idx) { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'selectTextTrack', [idx]); },
-    disableTextTrack() { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'disableTextTrack'); },
-    enterFullscreen() {
-      if (isKSPlayerAvailable) {
-        dispatchCommand(nativeRef, 'enterFullscreen');
-      } else {
-        webViewRef.current?.injectJavaScript(`(function(){ const v = document.getElementById('v'); if(v && v.requestFullscreen) v.requestFullscreen(); })(); true;`);
-      }
-    },
-    exitFullscreen() { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'exitFullscreen'); },
-    enterPictureInPicture() { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'enterPictureInPicture'); },
-    exitPictureInPicture() { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'exitPictureInPicture'); },
-    setBrightness(value) { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'setBrightness', [value]); },
-    setVolume(value) { if (isKSPlayerAvailable) dispatchCommand(nativeRef, 'setVolume', [value]); },
+    seek(time) { dispatchCommand(nativeRef, 'seekTo', [time]); },
+    play() { dispatchCommand(nativeRef, 'play'); },
+    pause() { dispatchCommand(nativeRef, 'pause'); },
+    selectAudioTrack(idx) { dispatchCommand(nativeRef, 'selectAudioTrack', [idx]); },
+    selectTextTrack(idx) { dispatchCommand(nativeRef, 'selectTextTrack', [idx]); },
+    disableTextTrack() { dispatchCommand(nativeRef, 'disableTextTrack'); },
+    enterFullscreen() { dispatchCommand(nativeRef, 'enterFullscreen'); },
+    exitFullscreen() { dispatchCommand(nativeRef, 'exitFullscreen'); },
+    enterPictureInPicture() { dispatchCommand(nativeRef, 'enterPictureInPicture'); },
+    exitPictureInPicture() { dispatchCommand(nativeRef, 'exitPictureInPicture'); },
+    setBrightness(value) { dispatchCommand(nativeRef, 'setBrightness', [value]); },
+    setVolume(value) { dispatchCommand(nativeRef, 'setVolume', [value]); },
   }));
 
   // ─── Event adapters ───────────────────────────────────────────────────────
@@ -194,110 +150,6 @@ export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, r
     (e: NativeSyntheticEvent<KSOnSubtitleTextData>) => props.onSubtitleText?.(e.nativeEvent),
     [props.onSubtitleText]
   );
-
-  const html5Source = useMemo(() => {
-    const safeUrl = (props.url || '').replace(/"/g, '&quot;');
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-    video { width: 100%; height: 100%; max-height: 100vh; object-fit: contain; }
-  </style>
-</head>
-<body>
-  <video id="v" src="${safeUrl}" playsinline webkit-playsinline controls autoplay></video>
-  <script>
-    const v = document.getElementById('v');
-    const send = (data) => {
-      try {
-        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-          window.ReactNativeWebView.postMessage(JSON.stringify(data));
-        }
-      } catch (e) {}
-    };
-    v.addEventListener('loadedmetadata', () => {
-      send({ type: 'load', duration: v.duration || 0, width: v.videoWidth || 0, height: v.videoHeight || 0 });
-    });
-    v.addEventListener('timeupdate', () => {
-      send({ type: 'progress', currentTime: v.currentTime || 0, duration: v.duration || 0 });
-    });
-    v.addEventListener('waiting', () => {
-      send({ type: 'buffer', isBuffering: true });
-    });
-    v.addEventListener('playing', () => {
-      send({ type: 'buffer', isBuffering: false });
-    });
-    v.addEventListener('ended', () => {
-      send({ type: 'end' });
-    });
-    v.addEventListener('error', () => {
-      send({ type: 'error', message: 'Playback error in embedded player' });
-    });
-  </script>
-</body>
-</html>`;
-    return { html };
-  }, [props.url]);
-
-  const handleWebViewMessage = useCallback((event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      switch (data.type) {
-        case 'load':
-          props.onLoad?.({
-            duration: data.duration,
-            currentTime: 0,
-            naturalSize: { width: data.width, height: data.height, orientation: 'landscape' },
-            audioTracks: [],
-            textTracks: [],
-          });
-          props.onReadyForDisplay?.();
-          break;
-        case 'progress':
-          props.onProgress?.({
-            currentTime: data.currentTime,
-            duration: data.duration,
-            playableDuration: data.currentTime,
-            seekableDuration: data.duration,
-          });
-          break;
-        case 'buffer':
-          props.onBuffer?.({ isBuffering: data.isBuffering });
-          break;
-        case 'end':
-          props.onEnd?.();
-          break;
-        case 'error':
-          props.onError?.({ error: { message: data.message, code: -1 } });
-          break;
-      }
-    } catch {}
-  }, [props]);
-
-  if (!isKSPlayerAvailable || !KSPlayerNative) {
-    return (
-      <View style={[styles.container, props.style]}>
-        <WebView
-          ref={webViewRef}
-          style={StyleSheet.absoluteFill}
-          source={html5Source}
-          originWhitelist={['*']}
-          allowsInlineMediaPlayback={true}
-          mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          scrollEnabled={false}
-          bounces={false}
-          onMessage={handleWebViewMessage}
-          onError={() => props.onError?.({ error: { message: 'Failed to load video stream', code: -1 } })}
-        />
-      </View>
-    );
-  }
 
   return (
     <View style={[styles.container, props.style]}>

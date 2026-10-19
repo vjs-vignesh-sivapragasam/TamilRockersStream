@@ -55,6 +55,14 @@ const MIN_PROGRESS_TO_REMOVE = 95;
 const DEFAULT_MEDIA_PLAYER_KEY = StorageKeys.DEFAULT_MEDIA_PLAYER_KEY;
 const SERVERS_KEY = StorageKeys.SERVERS_KEY;
 
+const DEFAULT_LOCAL_SERVER: ServerConfig = {
+  serverId: 'default-localhost',
+  serverType: 'stremio',
+  serverName: 'Local Engine',
+  serverUrl: 'http://127.0.0.1:11470',
+  current: true,
+};
+
 const MediaPlayerScreen: React.FC = () => {
   const router = useRouter();
 
@@ -103,7 +111,7 @@ const MediaPlayerScreen: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">(
-    isKSPlayerSupported() ? "ksplayer" : "native"
+    Platform.OS === "ios" ? "ksplayer" : "native"
   );
   const [hasTriedNative, setHasTriedNative] = useState(false);
 
@@ -224,10 +232,22 @@ const MediaPlayerScreen: React.FC = () => {
   const fetchServerConfigs = (): { servers: ServerConfig[]; selectedId: string | null } => {
     try {
       const stored = storageService.getItem(SERVERS_KEY);
-      if (!stored) { setStremioClient(null); return { servers: [], selectedId: null }; }
+      if (!stored) {
+        setStremioServers([DEFAULT_LOCAL_SERVER]);
+        setSelectedServerId(DEFAULT_LOCAL_SERVER.serverId);
+        const client = new StreamingServerClient(DEFAULT_LOCAL_SERVER.serverUrl);
+        setStremioClient(client);
+        return { servers: [DEFAULT_LOCAL_SERVER], selectedId: DEFAULT_LOCAL_SERVER.serverId };
+      }
       const all: ServerConfig[] = JSON.parse(stored);
       const stremio = all.filter(s => s.serverType === 'stremio');
-      if (!stremio.length) { setStremioClient(null); return { servers: [], selectedId: null }; }
+      if (!stremio.length) {
+        setStremioServers([DEFAULT_LOCAL_SERVER]);
+        setSelectedServerId(DEFAULT_LOCAL_SERVER.serverId);
+        const client = new StreamingServerClient(DEFAULT_LOCAL_SERVER.serverUrl);
+        setStremioClient(client);
+        return { servers: [DEFAULT_LOCAL_SERVER], selectedId: DEFAULT_LOCAL_SERVER.serverId };
+      }
       const current = stremio.find(s => s.current) ?? stremio[0];
       setStremioServers(stremio);
       setSelectedServerId(current.serverId);
@@ -235,8 +255,11 @@ const MediaPlayerScreen: React.FC = () => {
       setStremioClient(client);
       return { servers: stremio, selectedId: current.serverId };
     } catch {
-      setStremioClient(null);
-      return { servers: [], selectedId: null };
+      setStremioServers([DEFAULT_LOCAL_SERVER]);
+      setSelectedServerId(DEFAULT_LOCAL_SERVER.serverId);
+      const client = new StreamingServerClient(DEFAULT_LOCAL_SERVER.serverUrl);
+      setStremioClient(client);
+      return { servers: [DEFAULT_LOCAL_SERVER], selectedId: DEFAULT_LOCAL_SERVER.serverId };
     }
   };
 
@@ -284,11 +307,9 @@ const MediaPlayerScreen: React.FC = () => {
       let finalUrl = stream.url ?? '';
 
       if (isTorrentStream) {
-        const servers = serverList ?? stremioServers;
-        const sid = serverId !== undefined ? serverId : selectedServerId;
-        if (!sid || !servers.length) throw new Error('No Stremio server configured. Please add one in Settings.');
-        const server = servers.find(s => s.serverId === sid);
-        if (!server) throw new Error('Stremio server not found.');
+        const servers = (serverList && serverList.length > 0) ? serverList : (stremioServers.length > 0 ? stremioServers : [DEFAULT_LOCAL_SERVER]);
+        const sid = serverId !== undefined ? serverId : (selectedServerId || DEFAULT_LOCAL_SERVER.serverId);
+        const server = servers.find(s => s.serverId === sid) || DEFAULT_LOCAL_SERVER;
         setIsTorrent(true);
         finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, stremioClient ?? undefined);
       } else {
@@ -350,7 +371,7 @@ const MediaPlayerScreen: React.FC = () => {
     if (selectedPlayer === Players.Default) {
       if (s.url) {
         setVideoUrl(s.url);
-        setCurrentPlayerType("native");
+        setCurrentPlayerType(Platform.OS === "ios" ? "ksplayer" : "native");
         setHasTriedNative(false);
       } else {
         loadStream(newIndex);
@@ -442,7 +463,7 @@ const MediaPlayerScreen: React.FC = () => {
   // Fallback: react-native-video (ExoPlayer on Android, AVPlayer on iOS)
 
   function getPlayer() {
-    if (isKSPlayerSupported() && currentPlayerType === "ksplayer") {
+    if (Platform.OS === "ios" && currentPlayerType === "ksplayer") {
       try {
         const ks = require("../../components/ksplayer");
         if (ks && ks.MediaPlayer) return ks.MediaPlayer;
@@ -488,7 +509,7 @@ const MediaPlayerScreen: React.FC = () => {
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
         pictureInPictureEnabled={true}
-        onForceSwitchToKSPlayer={isKSPlayerSupported() ? () => {
+        onForceSwitchToKSPlayer={Platform.OS === "ios" ? () => {
           setCurrentPlayerType("ksplayer");
           setHasTriedNative(true);
         } : undefined}

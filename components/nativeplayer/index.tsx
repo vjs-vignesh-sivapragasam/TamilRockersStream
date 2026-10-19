@@ -7,21 +7,7 @@ import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
 import { WebMenu } from "@/components/WebMenuView";
 import { styles } from "../coreplayer/styles";
 
-const isRCTVideoAvailable = (() => {
-    if (Platform.OS === 'web') return false;
-    try {
-        if (!UIManager) return false;
-        const { requireNativeComponent } = require('react-native');
-        const hasConfig = typeof (UIManager as any).hasViewManagerConfig === 'function'
-            ? Boolean((UIManager as any).hasViewManagerConfig('RCTVideo') || (UIManager as any).hasViewManagerConfig('RNVVideo'))
-            : Boolean(UIManager.getViewManagerConfig && (UIManager.getViewManagerConfig('RCTVideo') || UIManager.getViewManagerConfig('RNVVideo')));
-        if (!hasConfig) return false;
-        requireNativeComponent('RCTVideo');
-        return true;
-    } catch {
-        return false;
-    }
-})();
+const isRCTVideoAvailable = Platform.OS !== 'web';
 import {
     usePlayerState,
     useSubtitleState,

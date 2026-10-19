@@ -2,35 +2,11 @@ import { Platform } from "react-native";
 import { getOriginalPlatform } from "./platform";
 
 export const isKSPlayerSupported = (): boolean => {
-    if (Platform.OS !== 'ios') return false;
-    try {
-        const { UIManager, requireNativeComponent } = require('react-native');
-        if (!UIManager) return false;
-        const hasConfig = typeof (UIManager as any).hasViewManagerConfig === 'function'
-            ? Boolean((UIManager as any).hasViewManagerConfig('KSPlayerView'))
-            : Boolean(UIManager.getViewManagerConfig && UIManager.getViewManagerConfig('KSPlayerView'));
-        if (!hasConfig) return false;
-        requireNativeComponent('KSPlayerView');
-        return true;
-    } catch {
-        return false;
-    }
+    return Platform.OS === 'ios';
 };
 
 export const isNativeVideoSupported = (): boolean => {
-    if (Platform.OS === 'web') return false;
-    try {
-        const { UIManager, requireNativeComponent } = require('react-native');
-        if (!UIManager) return false;
-        const hasConfig = typeof (UIManager as any).hasViewManagerConfig === 'function'
-            ? Boolean((UIManager as any).hasViewManagerConfig('RCTVideo') || (UIManager as any).hasViewManagerConfig('RNVVideo'))
-            : Boolean(UIManager.getViewManagerConfig && (UIManager.getViewManagerConfig('RCTVideo') || UIManager.getViewManagerConfig('RNVVideo')));
-        if (!hasConfig) return false;
-        requireNativeComponent('RCTVideo');
-        return true;
-    } catch {
-        return false;
-    }
+    return Platform.OS !== 'web';
 };
 
 export const isPictureInPictureSupported = (): boolean => {
