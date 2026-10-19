@@ -633,32 +633,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* ──────────────────────── Top Mode Switcher Bar ──────────────────────── */}
-      <View style={styles.modeSwitcherRow}>
-        <TouchableOpacity
-          style={[styles.modeTab, activeMode === 'movies' && styles.modeTabActive]}
-          onPress={() => setActiveMode('movies')}
-          activeOpacity={0.8}
-        >
-          <Film color={activeMode === 'movies' ? '#FFF' : '#8A8D9B'} size={15} />
-          <Text style={[styles.modeTabText, activeMode === 'movies' && styles.modeTabTextActive]}>
-            Movies & Torrents
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.modeTab, activeMode === 'browser' && styles.modeTabActive]}
-          onPress={() => setActiveMode('browser')}
-          activeOpacity={0.8}
-        >
-          <Globe color={activeMode === 'browser' ? '#FFF' : '#8A8D9B'} size={15} />
-          <Text style={[styles.modeTabText, activeMode === 'browser' && styles.modeTabTextActive]}>
-            Web Browser
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ──────────────────────── MODE 1: MOVIES SEARCH ──────────────────────── */}
+      {/* ──────────────────────── SEARCH OR BROWSER ──────────────────────── */}
       {activeMode === 'movies' ? (
         <View style={styles.flex1}>
           {/* Main Search Input Capsule */}
@@ -847,10 +822,20 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           )}
         </View>
       ) : (
-        /* ──────────────────────── MODE 2: WEB BROWSER ──────────────────────── */
+        /* ──────────────────────── WEB BROWSER VIEW ──────────────────────── */
         <View style={styles.flex1}>
           {/* Browser Address Bar */}
           <View style={styles.browserAddressBar}>
+            {/* Back to Search Button */}
+            <TouchableOpacity
+              style={styles.exitBrowserBtn}
+              onPress={() => setActiveMode('movies')}
+              activeOpacity={0.8}
+            >
+              <ArrowLeft color="#FFF" size={15} />
+              <Text style={styles.exitBrowserText}>Search</Text>
+            </TouchableOpacity>
+
             <View style={styles.browserInputCapsule}>
               <Globe color="#8A8D9B" size={16} />
               <TextInput
@@ -871,16 +856,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                 </TouchableOpacity>
               )}
             </View>
-
-            {/* Back to Movie Search Pill */}
-            <TouchableOpacity
-              style={styles.exitBrowserBtn}
-              onPress={() => setActiveMode('movies')}
-              activeOpacity={0.8}
-            >
-              <Film color="#FFF" size={14} />
-              <Text style={styles.exitBrowserText}>Movies</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Browser Status Sub-bar */}
@@ -1130,45 +1105,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  /* Mode Switcher */
-  modeSwitcherRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  modeTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#14151C',
-    borderWidth: 1,
-    borderColor: '#242735',
-  },
-  modeTabActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  modeTabText: {
-    color: '#8A8D9B',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modeTabTextActive: {
-    color: '#FFFFFF',
-  },
-
   /* Search Bar */
   searchBarWrapper: {
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 6,
     gap: 8,
   },
