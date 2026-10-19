@@ -73,6 +73,7 @@ workflows:
       
       - name: Build with Xcode (unsigned)
         script: |
+          set -eo pipefail
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           if [ -z "$WORKSPACE" ]; then
@@ -92,13 +93,22 @@ workflows:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            SWIFT_VERSION=5.0
+            DEVELOPMENT_TEAM=""
 
+          rm -rf "build/Payload"
           mkdir -p "build/Payload"
-          cp -r "build/$SCHEME_NAME.xcarchive/Products/Applications/"*.app "build/Payload/"
 
-          APP_BUNDLE=$(ls "build/Payload/" | head -1)
+          APP_SOURCE=$(find "build/$SCHEME_NAME.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+          if [ -z "$APP_SOURCE" ] || [ ! -d "$APP_SOURCE" ]; then
+            echo "❌ Error: No .app bundle found in build/$SCHEME_NAME.xcarchive/Products/Applications/"
+            echo "📁 Contents of archive (if created):"
+            ls -la "build/$SCHEME_NAME.xcarchive" 2>/dev/null || echo "Archive does not exist"
+            exit 1
+          fi
+
+          cp -r "$APP_SOURCE" "build/Payload/"
+
+          APP_BUNDLE=$(basename "$APP_SOURCE")
           BASE_NAME="${APP_BUNDLE%.app}"
           echo "📱 App bundle: $APP_BUNDLE"
 
@@ -107,7 +117,7 @@ workflows:
 
           EXECUTABLE=$(plutil -extract CFBundleExecutable raw "build/Payload/$APP_BUNDLE/Info.plist" 2>/dev/null || echo "$BASE_NAME")
           if [ ! -f "build/Payload/$APP_BUNDLE/$EXECUTABLE" ]; then
-            echo "⚠️  Warning: Executable $EXECUTABLE not found"
+            echo "⚠️  Warning: Executable $EXECUTABLE not found in bundle"
           else
             echo "✅ Executable found: $EXECUTABLE"
           fi
@@ -197,6 +207,7 @@ workflows:
 
       - name: Build with Xcode (Debug, unsigned)
         script: |
+          set -eo pipefail
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
@@ -212,13 +223,22 @@ workflows:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            SWIFT_VERSION=5.0
+            DEVELOPMENT_TEAM=""
 
+          rm -rf build/Payload
           mkdir -p build/Payload
-          cp -r build/$SCHEME_NAME-dev.xcarchive/Products/Applications/*.app build/Payload/
 
-          APP_BUNDLE=$(ls build/Payload/ | head -1)
+          APP_SOURCE=$(find "build/$SCHEME_NAME-dev.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+          if [ -z "$APP_SOURCE" ] || [ ! -d "$APP_SOURCE" ]; then
+            echo "❌ Error: No .app bundle found in build/$SCHEME_NAME-dev.xcarchive/Products/Applications/"
+            echo "📁 Contents of archive (if created):"
+            ls -la "build/$SCHEME_NAME-dev.xcarchive" 2>/dev/null || echo "Archive does not exist"
+            exit 1
+          fi
+
+          cp -r "$APP_SOURCE" build/Payload/
+
+          APP_BUNDLE=$(basename "$APP_SOURCE")
           IPA_NAME="${APP_NAME}_Dev_v${APP_VERSION}"
 
           cd build
