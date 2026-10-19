@@ -11,6 +11,7 @@ workflows:
     scripts:
       - name: Install dependencies
         script: |
+          rm -rf node_modules
           npm install --force
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
@@ -137,6 +138,7 @@ workflows:
     scripts:
       - name: Install dependencies
         script: |
+          rm -rf node_modules
           npm install --force
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
@@ -248,6 +250,7 @@ workflows:
     scripts:
       - name: Install dependencies
         script: |
+          rm -rf node_modules
           npm install --force
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true
@@ -368,6 +371,7 @@ workflows:
     scripts:
       - name: Install dependencies
         script: |
+          rm -rf node_modules
           npm install --force
           chmod -R +x node_modules/.bin || true
           find node_modules -type f -name "hermesc*" -exec chmod +x {} + || true

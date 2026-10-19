@@ -37,7 +37,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "largeHeap": true,
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
