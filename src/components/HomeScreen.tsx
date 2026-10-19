@@ -2074,6 +2074,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
   const [urlModalVisible, setUrlModalVisible] = useState(false);
   const [customUrlInput, setCustomUrlInput] = useState(currentBaseUrl);
 
+  // Keep mirror state synced with global changes
+  useEffect(() => {
+    const unsub = tamilMvService.subscribe((newUrl) => {
+      setCurrentBaseUrl(newUrl);
+      setCustomUrlInput(newUrl);
+    });
+    return unsub;
+  }, []);
+
   const handleClearSearchRef = useRef<() => void>(() => {});
 
   // Hardware Back Button handler for Modals & Search Mode
@@ -2428,12 +2437,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
     }
   }, []);
 
-  const handleSaveBaseUrl = (newUrl: string) => {
+  const handleSaveBaseUrl = async (newUrl: string) => {
+    if (!newUrl || !newUrl.trim()) return;
     tamilMvService.setBaseUrl(newUrl);
     const cleaned = tamilMvService.getBaseUrl();
     setCurrentBaseUrl(cleaned);
     setCustomUrlInput(cleaned);
     setUrlModalVisible(false);
+    // Immediately reload search / home feed with the newly selected mirror
+    await handlePerformSearch(searchedQuery || 'Recent Upload');
   };
 
   // 1. Movie Direct Download (In-App Download Manager)
@@ -3287,7 +3299,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                 style={styles.modalInput}
                 value={customUrlInput}
                 onChangeText={setCustomUrlInput}
-                placeholder="https://www.1tamilmv.lease"
+                placeholder="https://www.1tamilmv.solar"
                 placeholderTextColor="#636366"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -3314,7 +3326,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.presetRowText, isActive && styles.presetRowTextActive]}>
-                      {mirror.replace(/^https?:\/\//, '')}
+                      {mirror.replace(/^https?:\/\/(www\.)?/, '')}
                     </Text>
                     {isActive && <Check color={Colors.netflixRed} size={14} />}
                   </TouchableOpacity>

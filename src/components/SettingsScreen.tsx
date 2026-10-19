@@ -255,11 +255,54 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   // TamilMV Source URL State
   const [tamilMvUrl, setTamilMvUrl] = useState(tamilMvService.getBaseUrl());
   const [customMirrorInput, setCustomMirrorInput] = useState(tamilMvService.getBaseUrl());
+  const [testingMirror, setTestingMirror] = useState(false);
+  const [mirrorStatus, setMirrorStatus] = useState<{ ok: boolean; latency: number; error?: string } | null>(null);
+  const [presetTestResults, setPresetTestResults] = useState<Record<string, { ok: boolean; latency: number; error?: string }>>({});
+  const [customMirrors, setCustomMirrors] = useState<string[]>(tamilMvService.getCustomMirrors());
+
+  // Subscribe to mirror changes across app
+  useEffect(() => {
+    const unsub = tamilMvService.subscribe((newUrl) => {
+      setTamilMvUrl(newUrl);
+      setCustomMirrorInput(newUrl);
+      setMirrorStatus(null);
+    });
+    return unsub;
+  }, []);
 
   const handleUpdateTamilMvUrl = (url: string) => {
+    if (!url || !url.trim()) return;
     tamilMvService.setBaseUrl(url);
-    setTamilMvUrl(tamilMvService.getBaseUrl());
-    setCustomMirrorInput(tamilMvService.getBaseUrl());
+    const updated = tamilMvService.getBaseUrl();
+    setTamilMvUrl(updated);
+    setCustomMirrorInput(updated);
+    setMirrorStatus(null);
+    Alert.alert('Mirror Activated 🌐', `Active 1TamilMV search & scraper mirror set to:\n\n${updated}`);
+  };
+
+  const handleTestActiveMirror = async () => {
+    setTestingMirror(true);
+    const res = await tamilMvService.testMirror(tamilMvUrl);
+    setMirrorStatus(res);
+    setTestingMirror(false);
+  };
+
+  const handleTestPreset = async (url: string) => {
+    setPresetTestResults((prev) => ({ ...prev, [url]: { ok: false, latency: 0, error: 'Testing...' } }));
+    const res = await tamilMvService.testMirror(url);
+    setPresetTestResults((prev) => ({ ...prev, [url]: res }));
+  };
+
+  const handleAddCustomMirror = (url: string) => {
+    if (!url.trim()) return;
+    const updated = tamilMvService.addCustomMirror(url);
+    setCustomMirrors(updated);
+    handleUpdateTamilMvUrl(url);
+  };
+
+  const handleRemoveCustomMirror = (url: string) => {
+    const updated = tamilMvService.removeCustomMirror(url);
+    setCustomMirrors(updated);
   };
 
   // Storage Stats & Actions
@@ -1151,17 +1194,39 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <View style={styles.cardContainer}>
               <View style={styles.cardPadding}>
                 <View style={styles.activeMirrorBanner}>
-                  <View style={{ flex: 1 }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
                     <Text style={styles.activeMirrorLabel}>CURRENT ACTIVE MIRROR</Text>
                     <Text style={styles.activeMirrorUrl}>{displayDomain}</Text>
+                    {mirrorStatus && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 5 }}>
+                        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: mirrorStatus.ok ? '#30D158' : '#FF453A' }} />
+                        <Text style={{ fontSize: 11, color: mirrorStatus.ok ? '#30D158' : '#FF453A', fontWeight: '600' }}>
+                          {mirrorStatus.ok ? `Online (${mirrorStatus.latency}ms)` : `Offline / Blocked (${mirrorStatus.error})`}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                  <TouchableOpacity
-                    style={styles.changeMirrorBtn}
-                    onPress={() => setMirrorModalVisible(true)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.changeMirrorText}>Switch Mirror</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <TouchableOpacity
+                      style={[styles.pingBadgeBtn, { paddingHorizontal: 10, paddingVertical: 6, minWidth: 48 }]}
+                      onPress={handleTestActiveMirror}
+                      disabled={testingMirror}
+                      activeOpacity={0.75}
+                    >
+                      {testingMirror ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={[styles.pingBadgeText, { fontSize: 11 }]}>Ping</Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.changeMirrorBtn}
+                      onPress={() => setMirrorModalVisible(true)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.changeMirrorText}>Switch Mirror</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Popular Mirror Chips */}
@@ -1550,7 +1615,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       >
         <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
           <View style={styles.subModalHeader}>
-            <Text style={styles.subModalHeaderTitle}>Search Mirror Domains</Text>
+            <View>
+              <Text style={styles.subModalHeaderTitle}>Search Mirror Domains</Text>
+              <Text style={{ fontSize: 11.5, color: '#A09DB1', marginTop: 2 }}>
+                Switch to an active domain for fast scraping
+              </Text>
+            </View>
             <TouchableOpacity
               style={styles.subModalCloseBtn}
               onPress={() => setMirrorModalVisible(false)}
@@ -1567,7 +1637,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <View style={styles.inputWithActionRow}>
                   <TextInput
                     style={styles.urlTextInput}
-                    placeholder="https://www.1tamilmv.lease"
+                    placeholder="https://www.1tamilmv.solar"
                     placeholderTextColor="#6B677E"
                     value={customMirrorInput}
                     onChangeText={setCustomMirrorInput}
@@ -1578,7 +1648,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     style={styles.applyBtn}
                     onPress={() => {
                       if (customMirrorInput.trim()) {
-                        handleUpdateTamilMvUrl(customMirrorInput.trim());
+                        handleAddCustomMirror(customMirrorInput.trim());
                         setMirrorModalVisible(false);
                       }
                     }}
@@ -1591,28 +1661,88 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
             </View>
 
+            {/* Custom User Mirrors if any */}
+            {customMirrors.length > 0 && (
+              <View style={{ marginTop: 18 }}>
+                <Text style={styles.sectionHeaderTitle}>SAVED CUSTOM MIRRORS</Text>
+                <View style={styles.cardContainer}>
+                  {customMirrors.map((mirror, idx) => {
+                    const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
+                    return (
+                      <React.Fragment key={mirror}>
+                        {idx > 0 && <View style={styles.cardDivider} />}
+                        <View style={[styles.presetRow, { justifyContent: 'space-between' }]}>
+                          <TouchableOpacity
+                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              handleUpdateTamilMvUrl(mirror);
+                              setMirrorModalVisible(false);
+                            }}
+                          >
+                            <Globe size={16} color={isActive ? '#32D74B' : '#A09DB1'} />
+                            <Text style={[styles.presetRowTitle, { flex: 1, marginLeft: 10 }, isActive && { color: '#32D74B', fontWeight: '700' }]}>
+                              {mirror.replace(/^https?:\/\/(www\.)?/, '')}
+                            </Text>
+                            {isActive && <Check size={18} color="#32D74B" strokeWidth={2.5} />}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => handleRemoveCustomMirror(mirror)}
+                            style={{ padding: 6, marginLeft: 8 }}
+                          >
+                            <Trash2 size={14} color="#8E8E93" />
+                          </TouchableOpacity>
+                        </View>
+                      </React.Fragment>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
             <View style={{ marginTop: 20 }}>
-              <Text style={styles.sectionHeaderTitle}>POPULAR MIRRORS</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 4 }}>
+                <Text style={styles.sectionHeaderTitle}>POPULAR MIRRORS</Text>
+                <Text style={{ fontSize: 11, color: '#A09DB1' }}>Tap to activate</Text>
+              </View>
               <View style={styles.cardContainer}>
                 {POPULAR_MIRRORS.map((mirror, idx) => {
                   const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
+                  const testRes = presetTestResults[mirror];
                   return (
                     <React.Fragment key={mirror}>
                       {idx > 0 && <View style={styles.cardDivider} />}
-                      <TouchableOpacity
-                        style={styles.presetRow}
-                        activeOpacity={0.7}
-                        onPress={() => {
-                          handleUpdateTamilMvUrl(mirror);
-                          setMirrorModalVisible(false);
-                        }}
-                      >
-                        <Globe size={16} color={isActive ? Colors.primary : '#A09DB1'} />
-                        <Text style={[styles.presetRowTitle, { flex: 1, marginLeft: 10 }, isActive && { color: Colors.primary, fontWeight: '700' }]}>
-                          {mirror.replace(/^https?:\/\/(www\.)?/, '')}
-                        </Text>
-                        {isActive && <Check size={18} color={Colors.primary} strokeWidth={2.5} />}
-                      </TouchableOpacity>
+                      <View style={[styles.presetRow, { justifyContent: 'space-between' }]}>
+                        <TouchableOpacity
+                          style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            handleUpdateTamilMvUrl(mirror);
+                            setMirrorModalVisible(false);
+                          }}
+                        >
+                          <Globe size={16} color={isActive ? '#32D74B' : '#A09DB1'} />
+                          <View style={{ flex: 1, marginLeft: 10 }}>
+                            <Text style={[styles.presetRowTitle, isActive && { color: '#32D74B', fontWeight: '700' }]}>
+                              {mirror.replace(/^https?:\/\/(www\.)?/, '')}
+                            </Text>
+                            {testRes && (
+                              <Text style={{ fontSize: 10.5, color: testRes.ok ? '#30D158' : '#FF453A', marginTop: 2 }}>
+                                {testRes.error === 'Testing...' ? 'Pinging...' : testRes.ok ? `Online (${testRes.latency}ms)` : `Offline (${testRes.error})`}
+                              </Text>
+                            )}
+                          </View>
+                          {isActive && <Check size={18} color="#32D74B" strokeWidth={2.5} />}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#262438', marginLeft: 8 }}
+                          onPress={() => handleTestPreset(mirror)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ fontSize: 11, color: '#A09DB1', fontWeight: '600' }}>Ping</Text>
+                        </TouchableOpacity>
+                      </View>
                     </React.Fragment>
                   );
                 })}

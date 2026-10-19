@@ -1,12 +1,13 @@
 import { MagnetParser } from '@/utils/MagnetParser';
 import { storageService } from '@/utils/StorageService';
 import { useEffect, useState, useCallback } from 'react';
+import { tamilMvService } from '@/src/services/tamilMvService';
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TAMILMV_BASE_URL = 'https://www.1tamilmv.capital';
+const getTamilMvBaseUrl = () => tamilMvService.getBaseUrl();
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
 export type Category = 'webhd' | 'hdrip' | 'hdtv' | 'series' | 'multiaudio';
@@ -195,7 +196,7 @@ function parseRSSFeed(xmlString: string, language: Language, category: Category)
 function getRssUrl(language: Language, category: Category): string | null {
   const forumId = FORUM_IDS[language]?.[category];
   if (!forumId) return null;
-  return `${TAMILMV_BASE_URL}/index.php?/forums/forum/${forumId}/all.xml`;
+  return `${getTamilMvBaseUrl()}/index.php?/forums/forum/${forumId}/all.xml`;
 }
 
 function getCacheKey(language: Language, category: Category): string {

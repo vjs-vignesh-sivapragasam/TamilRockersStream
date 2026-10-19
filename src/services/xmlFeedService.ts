@@ -8,7 +8,13 @@
  * - 4K Movies
  */
 
-import { TamilMvMovieResult, MovieResolutionItem, posterCache } from './tamilMvService';
+import {
+  TamilMvMovieResult,
+  MovieResolutionItem,
+  posterCache,
+  tamilMvService,
+  POPULAR_MIRRORS,
+} from './tamilMvService';
 import { storageService } from '@/utils/StorageService';
 
 export type FeedCategoryKey = 'tamil' | 'hollywood' | 'hdtv' | 'series' | '4k';
@@ -19,44 +25,57 @@ export interface FeedCategoryConfig {
   urls: string[];
 }
 
-export const FEED_CATEGORIES: FeedCategoryConfig[] = [
-  {
-    key: 'tamil',
+export const FEED_CATEGORY_PATHS: Record<FeedCategoryKey, { label: string; paths: string[] }> = {
+  tamil: {
     label: 'Tamil Movies',
-    urls: [
-      'https://www.1tamilmv.solar/index.php?/forums/forum/10-predvd-dvdscr-cam-tc/all.xml',
-      'https://www.1tamilmv.solar/index.php?/forums/forum/12-hd-rips-dvd-rips-br-rips/all.xml',
+    paths: [
+      '/index.php?/forums/forum/10-predvd-dvdscr-cam-tc/all.xml',
+      '/index.php?/forums/forum/12-hd-rips-dvd-rips-br-rips/all.xml',
     ],
   },
-  {
-    key: 'hollywood',
+  hollywood: {
     label: 'Hollywood',
-    urls: [
-      'https://www.1tamilmv.solar/index.php?/forums/forum/17-hollywood-movies-in-multi-audios/all.xml',
+    paths: [
+      '/index.php?/forums/forum/17-hollywood-movies-in-multi-audios/all.xml',
     ],
   },
-  {
-    key: 'hdtv',
+  hdtv: {
     label: 'HDTV',
-    urls: [
-      'https://www.1tamilmv.solar/index.php?/forums/forum/14-hdtv-sdtv-hdtv-rips/all.xml',
+    paths: [
+      '/index.php?/forums/forum/14-hdtv-sdtv-hdtv-rips/all.xml',
     ],
   },
-  {
-    key: 'series',
+  series: {
     label: 'Web Series',
-    urls: [
-      'https://www.1tamilmv.solar/index.php?/forums/forum/19-web-series-tv-shows/all.xml',
+    paths: [
+      '/index.php?/forums/forum/19-web-series-tv-shows/all.xml',
     ],
   },
-  {
-    key: '4k',
+  '4k': {
     label: '4K Movies',
-    urls: [
-      'https://www.1tamilmv.solar/index.php?/forums/forum/13-dvd9-dvd5/all.xml',
+    paths: [
+      '/index.php?/forums/forum/13-dvd9-dvd5/all.xml',
     ],
   },
-];
+};
+
+export const getCategoryUrls = (categoryKey: FeedCategoryKey, baseUrl?: string): string[] => {
+  const base = (baseUrl || tamilMvService.getBaseUrl()).replace(/\/+$/, '');
+  const config = FEED_CATEGORY_PATHS[categoryKey];
+  if (!config) return [];
+  return config.paths.map((p) => `${base}${p}`);
+};
+
+export const getFeedCategories = (): FeedCategoryConfig[] => {
+  const base = tamilMvService.getBaseUrl().replace(/\/+$/, '');
+  return (Object.keys(FEED_CATEGORY_PATHS) as FeedCategoryKey[]).map((key) => ({
+    key,
+    label: FEED_CATEGORY_PATHS[key].label,
+    urls: FEED_CATEGORY_PATHS[key].paths.map((p) => `${base}${p}`),
+  }));
+};
+
+export const FEED_CATEGORIES: FeedCategoryConfig[] = getFeedCategories();
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const inMemoryFeedCache = new Map<string, { data: TamilMvMovieResult[]; timestamp: number }>();
@@ -175,48 +194,46 @@ function parseItem(itemContent: string): TamilMvMovieResult | null {
 }
 
 async function fetchSingleXmlUrl(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const tryFetch = async (targetUrl: string, timeoutMs = 10000): Promise<string> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'application/rss+xml, application/xml, text/xml, */*',
+          'Cache-Control': 'no-cache',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.text();
+    } catch (e) {
+      clearTimeout(timeoutId);
+      throw e;
+    }
+  };
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Accept: 'application/rss+xml, application/xml, text/xml, */*',
-        'Cache-Control': 'no-cache',
-      },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} from ${url}`);
-    }
-
-    return await response.text();
+    return await tryFetch(url, 12000);
   } catch (err) {
-    clearTimeout(timeoutId);
-    // If solar failed, attempt mirror fallback
-    if (url.includes('1tamilmv.solar')) {
-      const fallbackUrl = url.replace('1tamilmv.solar', '1tamilmv.lease');
-      const fallbackController = new AbortController();
-      const fbTimeout = setTimeout(() => fallbackController.abort(), 10000);
+    // Attempt fallback across other popular mirrors
+    const currentBase = tamilMvService.getBaseUrl();
+    for (const mirror of POPULAR_MIRRORS) {
+      if (mirror.toLowerCase() === currentBase.toLowerCase()) continue;
       try {
-        const fbRes = await fetch(fallbackUrl, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            Accept: 'application/rss+xml, application/xml, text/xml, */*',
-          },
-          signal: fallbackController.signal,
-        });
-        clearTimeout(fbTimeout);
-        if (fbRes.ok) return await fbRes.text();
-      } catch {
-        clearTimeout(fbTimeout);
-      }
+        const parsed = new URL(url);
+        const alt = new URL(mirror);
+        parsed.protocol = alt.protocol;
+        parsed.host = alt.host;
+        const fallbackUrl = parsed.toString();
+        const text = await tryFetch(fallbackUrl, 8000);
+        if (text && text.includes('<rss')) {
+          return text;
+        }
+      } catch {}
     }
     throw err;
   }
@@ -249,13 +266,13 @@ export const xmlFeedService = {
       } catch {}
     }
 
-    const config = FEED_CATEGORIES.find((c) => c.key === categoryKey);
-    if (!config) return [];
+    const urls = getCategoryUrls(categoryKey);
+    if (!urls.length) return [];
 
     const movieMap = new Map<string, TamilMvMovieResult>();
 
     // Fetch all URLs for this category
-    for (const feedUrl of config.urls) {
+    for (const feedUrl of urls) {
       try {
         const xml = await fetchSingleXmlUrl(feedUrl);
         const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
@@ -288,9 +305,20 @@ export const xmlFeedService = {
   },
 
   /**
-   * Clear cached feeds
+   * Clear cached feeds completely from memory and disk
    */
   clearCache() {
     inMemoryFeedCache.clear();
+    const categories: FeedCategoryKey[] = ['tamil', 'hollywood', 'hdtv', 'series', '4k'];
+    categories.forEach((k) => {
+      try {
+        storageService.removeItem(`xml_feed_${k}`);
+      } catch {}
+    });
   },
 };
+
+// Automatically clear XML feed cache when the mirror is changed
+tamilMvService.subscribe(() => {
+  xmlFeedService.clearCache();
+});

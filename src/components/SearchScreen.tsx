@@ -318,6 +318,15 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     }
   }, [pendingBrowserUrl, onClearPendingUrl]);
 
+  // Keep currentBaseUrl in sync whenever mirror changes globally
+  useEffect(() => {
+    const unsub = tamilMvService.subscribe((newUrl) => {
+      setCurrentBaseUrl(newUrl);
+      setCustomUrlInput(newUrl);
+    });
+    return unsub;
+  }, []);
+
   // Check if current search query looks like a web address or magnet URL
   const isQueryUrl = useMemo(() => {
     const q = query.trim().toLowerCase();

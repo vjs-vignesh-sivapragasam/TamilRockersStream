@@ -4,6 +4,7 @@
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
+import { storageService, StorageKeys } from '@/utils/StorageService';
 
 export interface MovieResolutionItem {
   id: string;
@@ -29,13 +30,17 @@ export interface TamilMvMovieResult {
   resolutions: MovieResolutionItem[];
 }
 
-export const DEFAULT_TAMILMV_URL = 'https://www.1tamilmv.lease';
+export const DEFAULT_TAMILMV_URL = 'https://www.1tamilmv.solar';
 
 export const POPULAR_MIRRORS = [
+  'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.click',
   'https://www.1tamilmv.lease',
   'https://www.1tamilmv.meme',
   'https://www.1tamilmv.rocks',
   'https://www.1tamilmv.li',
+  'https://www.1tamilmv.wf',
+  'https://www.1tamilmv.tf',
 ];
 
 export const posterCache = new Map<string, string | null>();
@@ -77,7 +82,32 @@ export function savePosterCacheToDisk() {
   }, 1000);
 }
 
-let configuredBaseUrl = DEFAULT_TAMILMV_URL;
+const loadSavedMirror = (): string => {
+  try {
+    const saved = storageService.getItem(StorageKeys.TAMILMV_MIRROR_KEY);
+    if (saved && saved.trim()) {
+      let clean = saved.trim().replace(/\/+$/, '');
+      if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+        clean = 'https://' + clean;
+      }
+      return clean;
+    }
+  } catch {}
+  return DEFAULT_TAMILMV_URL;
+};
+
+let configuredBaseUrl = loadSavedMirror();
+const mirrorListeners = new Set<(newUrl: string) => void>();
+
+function notifyMirrorListeners(url: string) {
+  mirrorListeners.forEach((fn) => {
+    try {
+      fn(url);
+    } catch (e) {
+      console.warn('[tamilMvService] Mirror listener error:', e);
+    }
+  });
+}
 
 export const tamilMvService = {
   getBaseUrl(): string {
@@ -92,6 +122,88 @@ export const tamilMvService = {
     // Remove trailing slash
     clean = clean.replace(/\/+$/, '');
     configuredBaseUrl = clean;
+    try {
+      storageService.setItem(StorageKeys.TAMILMV_MIRROR_KEY, clean);
+    } catch {}
+    notifyMirrorListeners(clean);
+  },
+
+  subscribe(callback: (newUrl: string) => void): () => void {
+    mirrorListeners.add(callback);
+    return () => mirrorListeners.delete(callback);
+  },
+
+  getCustomMirrors(): string[] {
+    try {
+      const list = storageService.getObject<string[]>(StorageKeys.TAMILMV_CUSTOM_MIRRORS_KEY);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  },
+
+  addCustomMirror(url: string): string[] {
+    let clean = url.trim().replace(/\/+$/, '');
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'https://' + clean;
+    }
+    const current = this.getCustomMirrors();
+    if (!current.includes(clean)) {
+      const updated = [clean, ...current];
+      storageService.setObject(StorageKeys.TAMILMV_CUSTOM_MIRRORS_KEY, updated);
+      return updated;
+    }
+    return current;
+  },
+
+  removeCustomMirror(url: string): string[] {
+    const current = this.getCustomMirrors();
+    const updated = current.filter((m) => m.toLowerCase() !== url.trim().toLowerCase());
+    storageService.setObject(StorageKeys.TAMILMV_CUSTOM_MIRRORS_KEY, updated);
+    return updated;
+  },
+
+  normalizeUrlToActiveMirror(targetUrl: string): string {
+    if (!targetUrl) return targetUrl;
+    try {
+      const parsed = new URL(targetUrl);
+      if (/1tamilmv/i.test(parsed.hostname)) {
+        const active = new URL(configuredBaseUrl);
+        parsed.protocol = active.protocol;
+        parsed.host = active.host;
+        return parsed.toString();
+      }
+    } catch {}
+    return targetUrl;
+  },
+
+  async testMirror(url: string, timeoutMs: number = 6000): Promise<{ ok: boolean; latency: number; error?: string }> {
+    let clean = url.trim();
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'https://' + clean;
+    }
+    clean = clean.replace(/\/+$/, '');
+    const startTime = Date.now();
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${clean}/?_t=${Date.now()}`, {
+        method: 'HEAD',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const latency = Date.now() - startTime;
+      if (res.ok || res.status === 301 || res.status === 302 || res.status === 200) {
+        return { ok: true, latency };
+      }
+      return { ok: false, latency, error: `HTTP ${res.status}` };
+    } catch (e: any) {
+      const latency = Date.now() - startTime;
+      return { ok: false, latency, error: e?.message || 'Connection failed' };
+    }
   },
 
   /**
@@ -476,11 +588,12 @@ export const tamilMvService = {
     targetResolution?: string
   ): Promise<{ magnetUrl?: string; torrentUrl?: string }> {
     if (!topicUrl) return {};
+    const finalTopicUrl = this.normalizeUrlToActiveMirror(topicUrl);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
-      const response = await fetch(topicUrl, {
+      const response = await fetch(finalTopicUrl, {
         signal: controller.signal,
         headers: {
           'User-Agent':
@@ -804,11 +917,12 @@ export const tamilMvService = {
    */
   async extractPosterFromTopic(topicUrl: string): Promise<string | undefined> {
     if (!topicUrl) return undefined;
+    const finalTopicUrl = this.normalizeUrlToActiveMirror(topicUrl);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
 
-      const response = await fetch(topicUrl, {
+      const response = await fetch(finalTopicUrl, {
         signal: controller.signal,
         headers: {
           'User-Agent':
