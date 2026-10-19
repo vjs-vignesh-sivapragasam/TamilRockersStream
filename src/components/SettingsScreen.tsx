@@ -16,6 +16,7 @@ import {
   Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Trash2,
@@ -843,7 +844,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   {[
                     { label: 'Render Cloud (Production)', url: 'https://vflix-backend.onrender.com', icon: Globe },
                     { label: 'Dev Server IP (Port 3002)', url: 'http://192.168.1.6:3002', icon: Cpu },
-                    { label: 'Localhost Bridge', url: Platform.OS === 'android' ? 'http://10.0.2.2:3002' : 'http://localhost:3002', icon: Smartphone },
+                    {
+                      label: 'Localhost Bridge',
+                      url: Platform.OS === 'android'
+                        ? (Constants.isDevice ? 'http://127.0.0.1:3002' : 'http://10.0.2.2:3002')
+                        : 'http://localhost:3002',
+                      icon: Smartphone
+                    },
                   ].map((preset) => {
                     const isSelected = customServerUrl.trim() === preset.url.trim();
                     const IconComp = preset.icon;

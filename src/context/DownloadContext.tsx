@@ -45,7 +45,11 @@ export const resolveBackendUrlForDevice = (rawUrl: string): string => {
     } catch {}
 
     if (Platform.OS === 'android') {
-      return clean.replace(/localhost|127\.0\.0\.1/g, '10.0.2.2');
+      if (!Constants.isDevice) {
+        return clean.replace(/localhost|127\.0\.0\.1/g, '10.0.2.2');
+      } else {
+        return clean.replace(/localhost/g, '127.0.0.1');
+      }
     }
   }
 

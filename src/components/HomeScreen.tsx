@@ -1827,7 +1827,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenInBrowserTab }) => {
   const insets = useSafeAreaInsets();
-  const { downloads, isBackendConnected, startDownload, backendUrl, testPing, themeKey } = useDownloads();
+  const { downloads, isBackendConnected, startDownload, backendUrl, themeKey } = useDownloads();
 
   const [query, setQuery] = useState(globalCachedFinderState.query);
   const [loading, setLoading] = useState(false);
@@ -2526,7 +2526,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
     [startDownload, onNavigateToTab]
   );
 
-  // 3. Online Stream (Plays directly inside built-in Video Player Modal)
+  // 3. Online Stream (Plays directly inside built-in Video Player Modal without awaiting server)
   const handleStreamResolution = useCallback(
     async (resItem: MovieResolutionItem, movie: TamilMvMovieResult) => {
       const title = `${movie.movieTitle} (${resItem.resolution})`;
@@ -2534,28 +2534,47 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
 
       setStreamingResId(resItem.id);
 
-      try {
-        // Fast backend server reachability pre-check
-        const pingResult = await Promise.race([
-          testPing(backendUrl),
-          new Promise<{ ok: boolean; latency: number; message: string }>((resolve) =>
-            setTimeout(() => resolve({ ok: false, latency: 3000, message: 'Server connection timed out' }), 3000)
-          ),
-        ]);
+      const launchPlayerWithMagnet = (resolvedMagnet: string) => {
+        const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+        // Silent non-blocking background pre-warm to initiate peer discovery without awaiting
+        fetch(`${cleanBackend}/api/stream/warmup?magnet=${encodeURIComponent(resolvedMagnet)}`).catch(() => {});
 
-        if (!pingResult.ok) {
-          setStreamingResId(null);
-          Alert.alert(
-            'Server is not reachable',
-            `Unable to connect to the streaming server.\n\nServer: ${backendUrl}\n\nPlease check if your streaming server is running or configure the server URL in Settings.`,
-            [
-              { text: 'OK', style: 'cancel' },
-              { text: 'Server Settings', onPress: () => onNavigateToTab?.('settings') },
-            ]
-          );
+        // Always use /api/stream/play?magnet= so the backend gets the full magnet
+        // (includes all embedded trackers for faster peer discovery)
+        const streamUrl = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(resolvedMagnet)}`;
+
+        // Directly launch internal player — no intermediate modal, zero server delay
+        const streamDownloadItem: DownloadItem = {
+          id: `stream_${Date.now()}`,
+          title,
+          fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+          fileUri: '',
+          url: streamUrl,
+          status: 'completed',
+          progress: 1,
+          totalBytes: 0,
+          downloadedBytes: 0,
+          speed: 'VFlix Internal Stream',
+          isTorrent: false,
+          createdAt: Date.now(),
+        };
+
+        const topic = movie.topicUrl || resItem.topicUrl || '';
+        const poster = (topic && posterCache.get(topic)) || null;
+        setStreamPlayerPosterUrl(poster || undefined);
+        setStreamPlayerInitialPos(0);
+        setActiveStreamItem(streamDownloadItem);
+        setStreamPlayerVisible(true);
+      };
+
+      try {
+        // Fast launch if magnet is already known (immediate playback with zero delay)
+        if (magnet) {
+          launchPlayerWithMagnet(magnet);
           return;
         }
 
+        // Asynchronously extract magnet from topic page if needed
         if (!magnet && resItem.topicUrl) {
           const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
           if (extracted.magnetUrl) {
@@ -2588,33 +2607,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
         }
 
         if (magnet) {
-          const finalMagnet = magnet;
-          // Always use /api/stream/play?magnet= so the backend gets the full magnet
-          // (includes all embedded trackers for faster peer discovery)
-          const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(finalMagnet)}`;
-
-          // Directly launch internal player — no intermediate modal
-          const streamDownloadItem: DownloadItem = {
-            id: `stream_${Date.now()}`,
-            title,
-            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-            fileUri: '',
-            url: streamUrl,
-            status: 'completed',
-            progress: 1,
-            totalBytes: 0,
-            downloadedBytes: 0,
-            speed: 'VFlix Internal Stream',
-            isTorrent: false,
-            createdAt: Date.now(),
-          };
-
-          const topic = movie.topicUrl || resItem.topicUrl || '';
-          const poster = (topic && posterCache.get(topic)) || null;
-          setStreamPlayerPosterUrl(poster || undefined);
-          setStreamPlayerInitialPos(0);
-          setActiveStreamItem(streamDownloadItem);
-          setStreamPlayerVisible(true);
+          launchPlayerWithMagnet(magnet);
         } else {
           Alert.alert(
             'Stream Unavailable',
@@ -2631,7 +2624,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
         setStreamingResId(null);
       }
     },
-    [backendUrl, testPing, onNavigateToTab]
+    [backendUrl]
   );
 
   const handleLaunchInternalPlayer = useCallback((data: StreamModalData) => {

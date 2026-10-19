@@ -81,7 +81,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
   onSelectMovie,
 }) => {
   const insets = useSafeAreaInsets();
-  const { backendUrl, testPing, startDownload, themeKey } = useDownloads();
+  const { backendUrl, startDownload, themeKey } = useDownloads();
 
   const [items, setItems] = useState<MyListItem[]>([]);
   const [selectedMovie, setSelectedMovie] = useState<TamilMvMovieResult | null>(null);
@@ -189,27 +189,35 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
       let magnet = resItem.magnetUrl;
       setStreamingResId(resItem.id);
 
-      try {
-        const pingResult = await Promise.race([
-          testPing(backendUrl),
-          new Promise<{ ok: boolean; latency: number; message: string }>((resolve) =>
-            setTimeout(
-              () => resolve({ ok: false, latency: 3000, message: 'Server connection timed out' }),
-              3000
-            )
-          ),
-        ]);
+      const launchPlayerWithMagnet = (resolvedMagnet: string) => {
+        const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+        // Silent non-blocking background pre-warm
+        fetch(`${cleanBackend}/api/stream/warmup?magnet=${encodeURIComponent(resolvedMagnet)}`).catch(() => {});
 
-        if (!pingResult.ok) {
-          setStreamingResId(null);
-          Alert.alert(
-            'Streaming Server Offline',
-            `Unable to connect to the backend server (${backendUrl}).\n\nPlease verify your server settings.`,
-            [
-              { text: 'OK', style: 'cancel' },
-              { text: 'Server Settings', onPress: () => onNavigateToTab?.('settings') },
-            ]
-          );
+        const streamUrl = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(resolvedMagnet)}`;
+        const streamDownloadItem: DownloadItem = {
+          id: `stream_${Date.now()}`,
+          title,
+          fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
+          fileUri: '',
+          url: streamUrl,
+          status: 'completed',
+          progress: 1,
+          totalBytes: 0,
+          downloadedBytes: 0,
+          speed: 'VFLEX Stream Engine',
+          isTorrent: false,
+          createdAt: Date.now(),
+        };
+
+        setStreamItem(streamDownloadItem);
+        setPlayerVisible(true);
+      };
+
+      try {
+        // Fast launch if magnet is already known (immediate playback with zero delay)
+        if (magnet) {
+          launchPlayerWithMagnet(magnet);
           return;
         }
 
@@ -225,24 +233,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
         }
 
         if (magnet) {
-          const streamUrl = `${backendUrl}/api/stream/play?magnet=${encodeURIComponent(magnet)}`;
-          const streamDownloadItem: DownloadItem = {
-            id: `stream_${Date.now()}`,
-            title,
-            fileName: `${movie.movieTitle}_${resItem.resolution}.mp4`,
-            fileUri: '',
-            url: streamUrl,
-            status: 'completed',
-            progress: 1,
-            totalBytes: 0,
-            downloadedBytes: 0,
-            speed: 'VFLEX Stream Engine',
-            isTorrent: false,
-            createdAt: Date.now(),
-          };
-
-          setStreamItem(streamDownloadItem);
-          setPlayerVisible(true);
+          launchPlayerWithMagnet(magnet);
         } else {
           Alert.alert('Notice', 'Direct magnet stream unavailable for this resolution.');
         }
@@ -252,7 +243,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
         setStreamingResId(null);
       }
     },
-    [backendUrl, testPing, onNavigateToTab]
+    [backendUrl]
   );
 
   const handleDownloadMovie = useCallback(
