@@ -1394,9 +1394,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
         {/* ── App Version & Footer Badge ── */}
         <View style={styles.footerBranding}>
-          <View style={styles.footerLogoWrap}>
-            <Film size={20} color={Colors.primary} strokeWidth={2} />
-          </View>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={{ width: 44, height: 58, marginBottom: 10 }}
+            resizeMode="contain"
+          />
           <Text style={styles.footerAppName}>VFlix Stream Pro</Text>
           <Text style={styles.footerVersion}>Version 2.4.0 (Build 57.0) • Node.js Embedded</Text>
           <Text style={styles.footerCopyright}>Designed & Engineered with ❤️ by Vignesh S</Text>
@@ -1425,9 +1427,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
           <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
             <View style={styles.specHeroBox}>
-              <View style={[styles.specHeroIcon, { backgroundColor: Colors.primary }]}>
-                <Film color="#FFFFFF" size={28} strokeWidth={2.2} />
-              </View>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={{ width: 48, height: 64, marginBottom: 12 }}
+                resizeMode="contain"
+              />
               <Text style={styles.specHeroName}>VFlix Pro Streamer</Text>
               <Text style={styles.specHeroTag}>High-Performance Decentralized Torrent Stream Engine</Text>
             </View>

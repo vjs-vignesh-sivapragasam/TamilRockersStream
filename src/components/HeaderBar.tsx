@@ -23,7 +23,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       <View style={styles.topRow}>
         <View style={styles.leftGroup}>
           <Image
-            source={require('../../assets/adaptive-icon.png')}
+            source={require('../../assets/logo.png')}
             style={styles.netflixVLogo}
             resizeMode="contain"
           />
@@ -87,8 +87,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   netflixVLogo: {
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 38,
   },
   rightGroup: {
     flexDirection: 'row',

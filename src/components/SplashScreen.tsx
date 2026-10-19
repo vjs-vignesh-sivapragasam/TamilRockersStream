@@ -217,7 +217,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
 
       {/* Center Cinematic Logo Container */}
       <View style={styles.centerStage}>
-        {/* Animated Brand "VFLIX" */}
+        {/* Animated Brand Logo */}
         <Animated.View
           style={[
             styles.logoWrap,
@@ -227,9 +227,13 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
             },
           ]}
         >
-          <Text style={styles.vflixText}>VFLIX</Text>
+          <Animated.Image
+            source={require('../../assets/logo.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
 
-          {/* Glowing Light Sweep Across VFLIX */}
+          {/* Glowing Light Sweep Across Logo */}
           <Animated.View
             style={[
               styles.lightSweepBar,
@@ -317,6 +321,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 24,
     paddingVertical: 10,
+  },
+  logoImage: {
+    width: 130,
+    height: 174,
   },
   vflixText: {
     color: '#E50914',
