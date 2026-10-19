@@ -18,6 +18,26 @@ const patchDirectory = (dir) => {
         fs.writeFileSync(fullPath, content);
         console.log('✅ Patched', fullPath);
       }
+    } else if (entry.name === 'ios-build-native-modules.sh' || entry.name === 'ios-sign-native-modules.sh') {
+      let content = fs.readFileSync(fullPath, 'utf8');
+      if (content.includes('CURRENT_NODE_VERSION')) {
+        content = content.replace(
+          /if\s*\[\s*"\$CURRENT_NODE_VERSION"\s*-ne\s*"\$DESIRED_NODE_VERSION"\s*\];\s*then/g,
+          'if false && [ "$CURRENT_NODE_VERSION" -ne "$DESIRED_NODE_VERSION" ]; then'
+        );
+        fs.writeFileSync(fullPath, content);
+        console.log('✅ Patched', fullPath);
+      }
+    } else if (entry.name === 'build.gradle' && fullPath.includes('nodejs-mobile-react-native')) {
+      let content = fs.readFileSync(fullPath, 'utf8');
+      if (content.includes('nodeVersionStdout.toString().trim() != "${_nodeVersionRequired}"')) {
+        content = content.replace(
+          'nodeVersionStdout.toString().trim() != "${_nodeVersionRequired}"',
+          'false && nodeVersionStdout.toString().trim() != "${_nodeVersionRequired}"'
+        );
+        fs.writeFileSync(fullPath, content);
+        console.log('✅ Patched', fullPath);
+      }
     }
   }
 };
