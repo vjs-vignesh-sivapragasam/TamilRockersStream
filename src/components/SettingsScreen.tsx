@@ -56,6 +56,11 @@ import {
   Smartphone,
   Flame,
   Search,
+  Sliders,
+  Database,
+  Lock,
+  Volume2,
+  Sparkle,
 } from 'lucide-react-native';
 import { Colors, THEME_OPTIONS, ThemeKey } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
@@ -68,6 +73,35 @@ import { Players, getPlatformSpecificPlayers, isKSPlayerSupported } from '@/util
 import { continueWatchingService } from '../services/continueWatchingService';
 import { browserHistoryService } from '../services/browserHistoryService';
 import { SUBTITLE_LANGUAGES } from '@/utils/Subtitles';
+import * as FileSystem from 'expo-file-system/legacy';
+
+const THEME_TAGLINES: Record<ThemeKey, string> = {
+  red: 'Signature Cinematic',
+  purple: 'Cyberpunk Neon',
+  blue: 'Deep Oceanic Sci-Fi',
+  emerald: 'Matrix Velvet',
+  amber: 'Golden Horizon',
+  pink: 'Synthwave Glow',
+};
+
+const getPlayerDescription = (name: string): string => {
+  switch (name) {
+    case Players.Default:
+      return 'Native embedded player with PiP & subtitle track controls';
+    case Players.VLC:
+      return 'External VLC Media Player app with universal codec support';
+    case Players.External:
+      return 'System default app chooser or third-party video player';
+    case Players.Infuse:
+      return 'High-performance Apple playback engine with spatial audio';
+    case Players.VidHub:
+      return 'Modern multimedia player for Apple devices';
+    case Players.Outplayer:
+      return 'Minimalist video player powered by libmpv';
+    default:
+      return 'High quality video player engine';
+  }
+};
 
 interface SettingsScreenProps {
   onOpenAbout?: () => void;
@@ -75,6 +109,18 @@ interface SettingsScreenProps {
 }
 
 const POPULAR_LANG_CODES = ['en', 'ta', 'te', 'hi', 'ml', 'kn', 'es', 'fr', 'de', 'ja', 'ko'];
+
+type ActiveModalType =
+  | null
+  | 'theme'
+  | 'player'
+  | 'subtitles'
+  | 'server'
+  | 'engine'
+  | 'mirror'
+  | 'security'
+  | 'storage'
+  | 'support';
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onOpenAbout,
@@ -97,18 +143,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     isBackendConnected,
   } = useDownloads();
 
-  // Navigation Modals
+  // Active Bottom Sheet Modal
+  const [activeModal, setActiveModal] = useState<ActiveModalType>(null);
+
+  // Full Screen Navigation Modals
   const [aboutModalVisible, setAboutModalVisible] = useState(false);
   const [donateModalVisible, setDonateModalVisible] = useState(false);
-  const [specsModalVisible, setSpecsModalVisible] = useState(false);
-  const [subtitlesModalVisible, setSubtitlesModalVisible] = useState(false);
-  const [mirrorModalVisible, setMirrorModalVisible] = useState(false);
 
-  // Active Category Section (for high-level quick jump or filter if desired, or all visible)
-  const [activeCategory, setActiveCategory] = useState<'all' | 'playback' | 'engine' | 'storage' | 'system'>('all');
-
-  // Media Player Configuration
+  // 1. Media Player Configuration
   const [selectedPlayer, setSelectedPlayer] = useState<string>(Players.Default);
+  const [preferExternalPlayer, setPreferExternalPlayer] = useState(false);
+  const [hardwareAccel, setHardwareAccel] = useState(true);
+  const [audioPassthrough, setAudioPassthrough] = useState(false);
   const availablePlayers = useMemo(() => getPlatformSpecificPlayers(), []);
 
   useEffect(() => {
@@ -128,11 +174,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     } catch {}
   };
 
-  // OpenSubtitles Configuration
+  // 2. OpenSubtitles Configuration
   const [useDefaultSubKey, setUseDefaultSubKey] = useState(true);
   const [customSubKey, setCustomSubKey] = useState('');
   const [showSubKey, setShowSubKey] = useState(false);
   const [selectedSubLangs, setSelectedSubLangs] = useState<string[]>(['en', 'ta']);
+  const [subSearchQuery, setSubSearchQuery] = useState('');
 
   useEffect(() => {
     try {
@@ -160,6 +207,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       if (key.trim()) {
         storageService.setItem(StorageKeys.OPENSUBTITLES_API_KEY, key.trim());
         setUseDefaultSubKey(false);
+        Alert.alert('Subtitles API Key Saved', 'Custom OpenSubtitles API key has been registered.');
       } else {
         storageService.removeItem(StorageKeys.OPENSUBTITLES_API_KEY);
         setUseDefaultSubKey(true);
@@ -195,7 +243,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     } catch {}
   };
 
-  // Speed Booster States
+  const filteredSubLanguages = useMemo(() => {
+    const q = subSearchQuery.trim().toLowerCase();
+    if (!q) return SUBTITLE_LANGUAGES;
+    return SUBTITLE_LANGUAGES.filter(
+      (lang) => lang.name.toLowerCase().includes(q) || lang.code.toLowerCase().includes(q)
+    );
+  }, [subSearchQuery]);
+
+  // 3. Speed Booster States
   const [autoTurbo, setAutoTurbo] = useState(true);
   const [maxConnsBoost, setMaxConnsBoost] = useState(true);
   const [boosting, setBoosting] = useState(false);
@@ -214,15 +270,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     }
   };
 
-  // App Preferences
+  // 4. App Preferences & Security
   const [wifiOnly, setWifiOnly] = useState(true);
   const [adBlockEnabled, setAdBlockEnabled] = useState(true);
   const [strictRedirectBlock, setStrictRedirectBlock] = useState(true);
   const [autoInterceptTorrents, setAutoInterceptTorrents] = useState(true);
-  const [preferExternalPlayer, setPreferExternalPlayer] = useState(false);
   const [scanning, setScanning] = useState(false);
 
-  // Backend Torrent Server State
+  // 5. Backend Torrent Server State
   const [customServerUrl, setCustomServerUrl] = useState(backendUrl);
   const [pingLoading, setPingLoading] = useState(false);
   const [pingResult, setPingResult] = useState<{ ok: boolean; latency: number; message: string } | null>(null);
@@ -249,10 +304,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setBackendUrl(url);
     setCustomServerUrl(url);
     setPingResult(null);
-    handleTestPing(url);
+    Alert.alert('Server Configured', `Streaming server set to:\n\n${url}`);
   };
 
-  // TamilMV Source URL State
+  // 6. TamilMV Source Mirror State & Testing
   const [tamilMvUrl, setTamilMvUrl] = useState(tamilMvService.getBaseUrl());
   const [customMirrorInput, setCustomMirrorInput] = useState(tamilMvService.getBaseUrl());
   const [testingMirror, setTestingMirror] = useState(false);
@@ -260,7 +315,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [presetTestResults, setPresetTestResults] = useState<Record<string, { ok: boolean; latency: number; error?: string }>>({});
   const [customMirrors, setCustomMirrors] = useState<string[]>(tamilMvService.getCustomMirrors());
 
-  // Subscribe to mirror changes across app
   useEffect(() => {
     const unsub = tamilMvService.subscribe((newUrl) => {
       setTamilMvUrl(newUrl);
@@ -305,7 +359,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setCustomMirrors(updated);
   };
 
-  // Storage Stats & Actions
+  const displayDomain = tamilMvUrl.replace(/^https?:\/\/(www\.)?/, '');
+
+  // 7. Storage Stats & Actions
   const completedCount = downloads.filter((d) => d.status === 'completed').length;
   const activeDownloads = downloads.filter((d) => d.status === 'downloading').length;
   const appDownloads = storageStats.appDownloadsBytes || 0;
@@ -316,57 +372,46 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const otherPercent = Math.min(100, Math.max(1, ((usedDisk - appDownloads) / totalDisk) * 100));
   const freePercent = Math.max(0, 100 - (appPercent + otherPercent));
 
-  const displayDomain = tamilMvUrl.replace(/^https?:\/\/(www\.)?/, '');
-  const currentDownloadsDir = downloadService.getDownloadsDirectory();
-  const locationLabel = getStorageLocationText(currentDownloadsDir);
-
-  const handleClearDownloads = () => {
-    if (completedCount === 0) {
-      Alert.alert('No Downloads', 'There are no completed downloads to remove.');
-      return;
-    }
-
+  const handleClearCompletedDownloads = () => {
     Alert.alert(
-      'Delete Downloaded Movies',
-      `Are you sure you want to delete all ${completedCount} downloaded movie file(s)? This will permanently free ${formatBytes(appDownloads)}.`,
+      'Clear Completed Downloads',
+      `Are you sure you want to remove ${completedCount} finished download record(s) from the history? Downloaded files on disk remain safe.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All',
-          style: 'destructive',
-          onPress: async () => {
-            await clearCompleted();
-            Alert.alert('Cleaned', 'All downloaded movies have been removed.');
-          },
-        },
+        { text: 'Clear History', style: 'destructive', onPress: clearCompleted },
       ]
     );
   };
 
-  const handleRescan = async () => {
-    setScanning(true);
+  const handleClearMediaCache = async () => {
     try {
-      const count = await rescanStorage();
-      Alert.alert('Storage Synced', `Scanned and synchronized ${count} movie file(s) in device storage.`);
-    } catch {
-      Alert.alert('Scan Failed', 'Could not scan internal storage directory.');
-    } finally {
-      setScanning(false);
+      if (FileSystem.cacheDirectory) {
+        const files = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory);
+        for (const file of files) {
+          try {
+            await FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${file}`, { idempotent: true });
+          } catch {}
+        }
+      }
+      await rescanStorage();
+      Alert.alert('Cache Cleared', 'Temporary movie metadata, thumbnails, and cache chunks purged.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not clean cache files');
     }
   };
 
-  const handleClearContinueWatching = () => {
+  const handleResetContinueWatching = () => {
     Alert.alert(
-      'Clear Watch History',
-      'Remove all movies from "Continue Watching" row on the Home tab?',
+      'Reset Continue Watching',
+      'This will erase all playback timestamps and resume positions from your home screen feed.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear All',
+          text: 'Reset History',
           style: 'destructive',
           onPress: async () => {
             await continueWatchingService.clear();
-            Alert.alert('History Cleared', 'Continue Watching list has been reset.');
+            Alert.alert('Reset Complete', 'Continue Watching feed has been cleared.');
           },
         },
       ]
@@ -375,461 +420,752 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   const handleClearBrowserHistory = () => {
     Alert.alert(
-      'Clear Browser Cache',
-      'Clear all saved search and web browser navigation logs?',
+      'Clear In-App Browser History',
+      'Purge all visited forum URLs and navigation logs from the embedded browser.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear',
+          text: 'Clear History',
           style: 'destructive',
           onPress: async () => {
             await browserHistoryService.clearHistory();
-            Alert.alert('Cache Cleared', 'Browser history has been wiped.');
+            Alert.alert('Browser Cleared', 'Visited web pages have been erased.');
           },
         },
       ]
     );
   };
 
-  // Subtitle Language Search Modal state
-  const [subSearchQuery, setSubSearchQuery] = useState('');
-  const filteredSubLanguages = useMemo(() => {
-    if (!subSearchQuery.trim()) return SUBTITLE_LANGUAGES;
-    const q = subSearchQuery.toLowerCase();
-    return SUBTITLE_LANGUAGES.filter(
-      (l) => l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q)
-    );
-  }, [subSearchQuery]);
+  const handleRescanStorage = async () => {
+    setScanning(true);
+    try {
+      await rescanStorage();
+      Alert.alert('Storage Synced', 'Storage disk metrics and download directory refreshed.');
+    } finally {
+      setScanning(false);
+    }
+  };
 
-  const ksPlayerAvailable = isKSPlayerSupported();
+  // 8. Sharing & External
+  const handleShareApp = async () => {
+    try {
+      await Share.share({
+        message: 'Stream & download high-res movies with VFLEX Stream: https://github.com/vjs-vignesh-sivapragasam/TamilRockersStream',
+        title: 'VFLEX Stream App',
+      });
+    } catch {}
+  };
+
+  const handleOpenGitHub = () => {
+    Linking.openURL('https://github.com/vjs-vignesh-sivapragasam/TamilRockersStream');
+  };
+
+  const handleOpenTelegram = () => {
+    Linking.openURL('https://t.me/tamiltorrentstream');
+  };
+
+  const handleOpenDiscord = () => {
+    Linking.openURL('https://discord.gg/vflex');
+  };
+
+  const activeThemeName = THEME_OPTIONS[themeKey]?.name || 'Netflix Red';
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* ── Gradient Background Aura ── */}
-      <LinearGradient
-        colors={['rgba(250, 36, 60, 0.08)', 'rgba(20, 15, 38, 0.95)', '#0A0815']}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.45 }}
-      />
-
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: insets.bottom + 80 },
-        ]}
-      >
-        {/* ── Header Title Row ── */}
-        <View style={styles.headerRow}>
-          <View>
-            <View style={styles.titleBadge}>
-              <Sparkles size={11} color={Colors.primary} />
-              <Text style={styles.titleBadgeText}>SYSTEM & PREFERENCES</Text>
-            </View>
-            <Text style={styles.mainTitle}>Settings</Text>
-            <Text style={styles.mainSubtitle}>Configure player, streaming engine, servers & storage</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.infoIconButton}
-            activeOpacity={0.7}
-            onPress={() => setSpecsModalVisible(true)}
+    <View style={styles.container}>
+      {/* ── Top Header Bar ── */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.headerLeft}>
+          <LinearGradient
+            colors={['#FA243C', '#B30E22']}
+            style={styles.logoBadge}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
           >
-            <Info color="#A09DB1" size={20} strokeWidth={2.2} />
+            <Sparkles size={16} color="#FFFFFF" />
+          </LinearGradient>
+          <View>
+            <Text style={styles.headerTitle}>Settings & Hub</Text>
+            <Text style={styles.headerSubtitle}>Customize player, network & download engine</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.headerActionBtn}
+          onPress={handleShareApp}
+          activeOpacity={0.7}
+        >
+          <Share2 size={16} color="#A09DB1" />
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Main Menu List (Tapping any row opens bottom modal) ── */}
+      <ScrollView
+        style={styles.menuScrollView}
+        contentContainerStyle={[styles.menuScrollContent, { paddingBottom: insets.bottom + 100 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Quick Engine Status Bar */}
+        <View style={styles.quickStatusCard}>
+          <View style={styles.statusPillItem}>
+            <View style={[styles.statusDot, { backgroundColor: '#30D158' }]} />
+            <Text style={styles.statusPillLabel}>Mirror:</Text>
+            <Text style={styles.statusPillVal} numberOfLines={1}>{displayDomain}</Text>
+          </View>
+          <View style={styles.statusPillDivider} />
+          <View style={styles.statusPillItem}>
+            <View style={[styles.statusDot, { backgroundColor: isBackendConnected ? '#30D158' : '#FF9500' }]} />
+            <Text style={styles.statusPillLabel}>Server:</Text>
+            <Text style={styles.statusPillVal}>{isBackendConnected ? 'Online' : 'Relay'}</Text>
+          </View>
+          <View style={styles.statusPillDivider} />
+          <View style={styles.statusPillItem}>
+            <Text style={styles.statusPillLabel}>Free:</Text>
+            <Text style={styles.statusPillVal}>{formatBytes(freeDisk)}</Text>
+          </View>
+        </View>
+
+        {/* ═══════════════════════════════════════════════════════════════
+            SECTION 1: PLAYBACK & MEDIA
+        ═══════════════════════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <Text style={styles.sectionHeaderText}>PLAYBACK & MEDIA</Text>
+        </View>
+
+        <View style={styles.menuGroupCard}>
+          {/* Menu 1: Appearance & Themes */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('theme')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
+              <Palette size={19} color="#FA243C" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Appearance & Themes</Text>
+              <Text style={styles.menuSub}>Customize cyber palette, accents & OLED darkness</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>{activeThemeName}</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          {/* Menu 2: Video Player & Decoders */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('player')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
+              <Play size={19} color="#0A84FF" strokeWidth={2.2} fill="#0A84FF" />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Video Player & Decoders</Text>
+              <Text style={styles.menuSub}>Select native player engine, PiP & hardware codec</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={[styles.menuPillBadge, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
+                <Text style={[styles.menuPillText, { color: '#0A84FF' }]}>{selectedPlayer}</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          {/* Menu 3: Subtitles & Audio Engine */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('subtitles')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
+              <Languages size={19} color="#FF9500" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Subtitles & Audio Engine</Text>
+              <Text style={styles.menuSub}>OpenSubtitles API key, auto-sync & preferred tracks</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>{selectedSubLangs.length} Langs</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
           </TouchableOpacity>
         </View>
 
-        {/* ── Hero Profile & Creator Showcase Card ── */}
-        <View style={styles.heroCard}>
-          <LinearGradient
-            colors={['rgba(255, 255, 255, 0.07)', 'rgba(255, 255, 255, 0.02)']}
-            style={styles.heroCardGradient}
-          >
-            <View style={styles.heroTopRow}>
-              <View style={styles.avatarBorderWrapper}>
-                <Image
-                  source={require('../../assets/vignesh.jpg')}
-                  style={styles.heroAvatar}
-                />
-                <View style={styles.onlineStatusDot} />
-              </View>
-
-              <View style={styles.heroInfoColumn}>
-                <View style={styles.heroNameRow}>
-                  <Text style={styles.heroNameText}>Vignesh S</Text>
-                  <View style={styles.proPill}>
-                    <Text style={styles.proPillText}>CREATOR</Text>
-                  </View>
-                </View>
-                <Text style={styles.heroRoleText}>Lead Architect & Core Engineer</Text>
-                
-                {/* Live Server Indicator Pill */}
-                <View style={styles.serverStatusPill}>
-                  <View
-                    style={[
-                      styles.serverStatusDot,
-                      { backgroundColor: isBackendConnected ? '#30D158' : '#FF453A' },
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      styles.serverStatusLabel,
-                      { color: isBackendConnected ? '#30D158' : '#FF453A' },
-                    ]}
-                  >
-                    {isBackendConnected ? 'Backend Connected' : 'Backend Offline'}
-                  </Text>
-                  <Text style={styles.serverStatusDivider}>•</Text>
-                  <Text style={styles.serverStatusEngine}>
-                    {downloadMode === 'direct_http' ? 'Direct HTTP' : downloadMode === 'local_p2p' ? 'P2P Bridge' : 'Cloud Relay'}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Quick Actions Row on Hero Card */}
-            <View style={styles.heroActionsRow}>
-              <TouchableOpacity
-                style={styles.heroActionBtn}
-                activeOpacity={0.75}
-                onPress={() => {
-                  if (onOpenAbout) onOpenAbout();
-                  else setAboutModalVisible(true);
-                }}
-              >
-                <Info color="#FFFFFF" size={14} strokeWidth={2.2} />
-                <Text style={styles.heroActionText}>About VFlix</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.heroActionBtn, styles.heroDonateBtn]}
-                activeOpacity={0.75}
-                onPress={() => {
-                  if (onOpenDonate) onOpenDonate();
-                  else setDonateModalVisible(true);
-                }}
-              >
-                <Heart color="#FFFFFF" fill="#FA243C" size={14} />
-                <Text style={styles.heroActionText}>Support & Donate</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.heroActionBtn}
-                activeOpacity={0.75}
-                onPress={() => setSpecsModalVisible(true)}
-              >
-                <Cpu color="#FFFFFF" size={14} strokeWidth={2.2} />
-                <Text style={styles.heroActionText}>Specs</Text>
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
+        {/* ═══════════════════════════════════════════════════════════════
+            SECTION 2: NETWORK & ENGINE
+        ═══════════════════════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <Text style={styles.sectionHeaderText}>NETWORK & TORRENT ENGINE</Text>
         </View>
 
-        {/* ── Category Quick Jump Filter Tabs ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoryFilterRow}
-        >
-          {[
-            { id: 'all', label: 'All Settings', icon: Sparkles },
-            { id: 'playback', label: 'Playback & Subtitles', icon: Play },
-            { id: 'engine', label: 'Streaming & Servers', icon: Radio },
-            { id: 'storage', label: 'Storage & Cache', icon: HardDrive },
-            { id: 'system', label: 'Theme & Security', icon: Palette },
-          ].map((cat) => {
-            const isActive = activeCategory === cat.id;
-            const IconComp = cat.icon;
-            return (
-              <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.categoryFilterChip,
-                  isActive && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                ]}
-                activeOpacity={0.8}
-                onPress={() => setActiveCategory(cat.id as any)}
-              >
-                <IconComp color={isActive ? '#FFFFFF' : '#A09DB1'} size={13} strokeWidth={2.2} />
-                <Text style={[styles.categoryFilterText, isActive && { color: '#FFFFFF', fontWeight: '700' }]}>
-                  {cat.label}
+        <View style={styles.menuGroupCard}>
+          {/* Menu 4: Streaming & Backend Server */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('server')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
+              <Server size={19} color="#30D158" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Streaming & Backend Server</Text>
+              <Text style={styles.menuSub}>WebTorrent byte-range relay for video seeking</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={[styles.menuPillBadge, { backgroundColor: isBackendConnected ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 149, 0, 0.15)' }]}>
+                <Text style={[styles.menuPillText, { color: isBackendConnected ? '#30D158' : '#FF9500' }]}>
+                  {isBackendConnected ? 'Connected' : 'Configure'}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 1: THEME & VISUAL ACCENT (Category: all or system)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'system') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(236, 72, 153, 0.15)' }]}>
-                <Palette size={16} color="#EC4899" strokeWidth={2.2} />
+          <View style={styles.menuDivider} />
+
+          {/* Menu 5: Download Engine & Turbo Booster */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('engine')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
+              <Zap size={19} color="#FF2D55" strokeWidth={2.2} fill="#FF2D55" />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Download Engine & Booster</Text>
+              <Text style={styles.menuSub}>Direct HTTP, P2P WebTorrent & turbo acceleration</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>
+                  {downloadMode === 'direct_http' ? 'Direct HTTP' : downloadMode === 'local_p2p' ? 'P2P Bridge' : 'Cloud Relay'}
+                </Text>
               </View>
-              <View>
-                <Text style={styles.sectionTitle}>App Theme & Accent Color</Text>
-                <Text style={styles.sectionSubtitle}>Select your signature interface accent palette</Text>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          {/* Menu 6: Search Mirror Domain */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('mirror')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(50, 215, 75, 0.15)' }]}>
+              <Globe size={19} color="#32D74B" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Search Mirror Domain</Text>
+              <Text style={styles.menuSub}>Switch active scraping domain & ping proxy nodes</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={[styles.menuPillBadge, { backgroundColor: 'rgba(50, 215, 75, 0.15)' }]}>
+                <Text style={[styles.menuPillText, { color: '#32D74B' }]} numberOfLines={1}>
+                  {displayDomain}
+                </Text>
               </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* ═══════════════════════════════════════════════════════════════
+            SECTION 3: SYSTEM & STORAGE
+        ═══════════════════════════════════════════════════════════════ */}
+        <View style={styles.sectionHeaderWrap}>
+          <Text style={styles.sectionHeaderText}>SYSTEM & STORAGE</Text>
+        </View>
+
+        <View style={styles.menuGroupCard}>
+          {/* Menu 7: Security & Ad Shield */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('security')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
+              <ShieldCheck size={19} color="#30D158" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Security & Ad Shield</Text>
+              <Text style={styles.menuSub}>Block popups, redirect hijackers & telemetry trackers</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>{adBlockEnabled ? 'Shield ON' : 'Off'}</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          {/* Menu 8: Storage & Cache Manager */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('storage')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(191, 90, 242, 0.15)' }]}>
+              <HardDrive size={19} color="#BF5AF2" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>Storage & Cache Manager</Text>
+              <Text style={styles.menuSub}>Disk usage metrics, clear cache & reset history</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>{formatBytes(freeDisk)} Free</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          {/* Menu 9: Community & Support */}
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setActiveModal('support')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
+              <Info size={19} color="#FF9F0A" strokeWidth={2.2} />
+            </View>
+            <View style={styles.menuTextWrap}>
+              <Text style={styles.menuTitle}>About & Community</Text>
+              <Text style={styles.menuSub}>App specifications, donate & developer links</Text>
+            </View>
+            <View style={styles.menuRightWrap}>
+              <View style={styles.menuPillBadge}>
+                <Text style={styles.menuPillText}>v2.4.0</Text>
+              </View>
+              <ChevronRight size={16} color="#7E7A94" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Footer Brand Logo */}
+        <View style={styles.footerWrap}>
+          <Text style={styles.footerTitle}>VFLEX STREAM</Text>
+          <Text style={styles.footerSub}>High Performance P2P Cinema Engine • Build 2026.10</Text>
+        </View>
+      </ScrollView>
+
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 1: APPEARANCE & THEMES
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'theme'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(250, 36, 60, 0.18)' }]}>
+                  <Palette size={18} color="#FA243C" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Appearance & Themes</Text>
+                  <Text style={styles.sheetHeaderSub}>Select high-contrast cyber theme & accent colors</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.cardContainer}>
-              <View style={styles.themeSwatchesGrid}>
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.cardInnerLabel}>CYBER CINEMA PALETTES</Text>
+              <View style={styles.themeGrid}>
                 {Object.values(THEME_OPTIONS).map((theme) => {
                   const isSelected = themeKey === theme.key;
                   return (
                     <TouchableOpacity
                       key={theme.key}
                       style={[
-                        styles.themeOptionCard,
-                        isSelected && { borderColor: theme.primary, backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+                        styles.themeCard,
+                        isSelected && { borderColor: theme.primary, backgroundColor: 'rgba(255, 255, 255, 0.06)' },
                       ]}
-                      onPress={() => setThemeKey(theme.key as ThemeKey)}
-                      activeOpacity={0.75}
+                      onPress={() => setThemeKey(theme.key)}
+                      activeOpacity={0.8}
                     >
-                      <View style={[styles.themeColorOrb, { backgroundColor: theme.primary }]}>
-                        {isSelected && <Check color="#FFFFFF" size={13} strokeWidth={3} />}
+                      <View style={styles.themeCardTop}>
+                        <View style={[styles.themeSwatchBig, { backgroundColor: theme.primary }]} />
+                        {isSelected && (
+                          <View style={[styles.themeActiveCheck, { backgroundColor: theme.primary }]}>
+                            <Check size={12} color="#FFFFFF" strokeWidth={3} />
+                          </View>
+                        )}
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.themeOptionName, isSelected && { color: '#FFFFFF', fontWeight: '700' }]}>
-                          {theme.name}
-                        </Text>
-                      </View>
-                      {isSelected && (
-                        <View style={[styles.activeDotPill, { backgroundColor: theme.primary }]} />
-                      )}
+                      <Text style={[styles.themeName, isSelected && { color: '#FFFFFF', fontWeight: '700' }]}>
+                        {theme.name}
+                      </Text>
+                      <Text style={styles.themeTag}>{THEME_TAGLINES[theme.key] || theme.primary}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
-            </View>
+              <View style={{ height: 20 }} />
+            </ScrollView>
           </View>
-        )}
+        </View>
+      </Modal>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 2: PLAYBACK & MEDIA PLAYER ENGINE (Category: all or playback)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'playback') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-                <Play size={16} color={Colors.primary} strokeWidth={2.4} />
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 2: VIDEO PLAYER ENGINE
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'player'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(10, 132, 255, 0.18)' }]}>
+                  <Play size={18} color="#0A84FF" strokeWidth={2.2} fill="#0A84FF" />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Video Player Engine</Text>
+                  <Text style={styles.sheetHeaderSub}>Choose hardware decoders & container handlers</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.sectionTitle}>Default Media Player</Text>
-                <Text style={styles.sectionSubtitle}>Choose engine for streaming & offline video playback</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.cardContainer}>
-              {/* KSPlayer Engine Card (Native iOS FFmpeg + Metal) */}
-              <TouchableOpacity
-                style={[
-                  styles.playerOptionItem,
-                  selectedPlayer === Players.Default && styles.playerOptionItemActive,
-                ]}
-                activeOpacity={0.75}
-                onPress={() => handleSelectPlayer(Players.Default)}
-              >
-                <View style={styles.playerOptionLeft}>
-                  <View style={[styles.playerIconBox, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-                    <Tv color={Colors.primary} size={18} strokeWidth={2.2} />
-                  </View>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <Text style={styles.playerOptionTitle}>Built-in Video Engine</Text>
-                      <View style={styles.featureBadge}>
-                        <Text style={styles.featureBadgeText}>RECOMMENDED</Text>
-                      </View>
-                      {Platform.OS === 'ios' && (
-                        <View style={[styles.featureBadge, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
-                          <Text style={[styles.featureBadgeText, { color: '#30D158' }]}>
-                            {ksPlayerAvailable ? 'KSPLAYER ACTIVE' : 'EXOPLAYER/AV'}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.playerOptionSub}>
-                      Seamless in-app player with hardware acceleration, audio track switching, subtitles, gesture brightness & volume controls.
-                    </Text>
-                  </View>
-                </View>
-                <View style={[styles.radioCircle, selectedPlayer === Players.Default && { borderColor: Colors.primary, backgroundColor: Colors.primary }]}>
-                  {selectedPlayer === Players.Default && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.cardInnerLabel}>AVAILABLE MEDIA ENGINES</Text>
 
-              {/* External / Third-Party Players */}
-              {availablePlayers
-                .filter((p) => p.name !== Players.Default)
-                .map((player) => {
+              <View style={styles.playerCardsList}>
+                {availablePlayers.map((player) => {
                   const isSelected = selectedPlayer === player.name;
+                  const isKSPlayer = (player.name as string) === 'KSPlayer';
+                  const isAvailableOnPlatform = !isKSPlayer || isKSPlayerSupported();
+
                   return (
-                    <React.Fragment key={player.name}>
-                      <View style={styles.cardDivider} />
-                      <TouchableOpacity
-                        style={[styles.playerOptionItem, isSelected && styles.playerOptionItemActive]}
-                        activeOpacity={0.75}
-                        onPress={() => handleSelectPlayer(player.name)}
-                      >
-                        <View style={styles.playerOptionLeft}>
-                          <View style={[styles.playerIconBox, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                            <ExternalLink color="#FF9500" size={17} strokeWidth={2.2} />
-                          </View>
-                          <View style={{ flex: 1, paddingRight: 8 }}>
-                            <Text style={styles.playerOptionTitle}>{player.name} App</Text>
-                            <Text style={styles.playerOptionSub}>
-                              Open stream links automatically in external {player.name} player.
+                    <TouchableOpacity
+                      key={player.name}
+                      style={[
+                        styles.playerSelectCard,
+                        isSelected && styles.playerSelectCardActive,
+                        !isAvailableOnPlatform && { opacity: 0.5 },
+                      ]}
+                      onPress={() => {
+                        if (isAvailableOnPlatform) {
+                          handleSelectPlayer(player.name);
+                        } else {
+                          Alert.alert('KSPlayer Notice', 'KSPlayer is built with iOS FFmpegKit + Metal and is available in custom development and release builds.');
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.playerCardLeft}>
+                        <View style={[styles.playerIconBox, isSelected && { backgroundColor: 'rgba(10, 132, 255, 0.2)' }]}>
+                          <Tv size={20} color={isSelected ? '#0A84FF' : '#A09DB1'} />
+                        </View>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={[styles.playerCardName, isSelected && { color: '#0A84FF', fontWeight: '700' }]}>
+                              {player.name}
                             </Text>
+                            {isSelected && (
+                              <View style={styles.activePillSmall}>
+                                <Text style={styles.activePillSmallText}>ACTIVE</Text>
+                              </View>
+                            )}
                           </View>
+                          <Text style={styles.playerCardDesc}>{getPlayerDescription(player.name)}</Text>
                         </View>
-                        <View style={[styles.radioCircle, isSelected && { borderColor: Colors.primary, backgroundColor: Colors.primary }]}>
-                          {isSelected && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
-                        </View>
-                      </TouchableOpacity>
-                    </React.Fragment>
+                      </View>
+                      <View style={[styles.radioCircle, isSelected && { borderColor: '#0A84FF', backgroundColor: '#0A84FF' }]}>
+                        {isSelected && <Check size={11} color="#FFFFFF" strokeWidth={3} />}
+                      </View>
+                    </TouchableOpacity>
                   );
                 })}
+              </View>
 
               <View style={styles.cardDivider} />
 
-              {/* Prefer External Player Switch */}
+              <Text style={styles.cardInnerLabel}>PLAYBACK PREFERENCES</Text>
               <View style={styles.switchRowItem}>
                 <View style={styles.switchRowLeft}>
-                  <Film color="#A09DB1" size={18} strokeWidth={2} />
+                  <ExternalLink color="#A09DB1" size={18} strokeWidth={2} />
                   <View style={{ flex: 1, marginLeft: 12 }}>
                     <Text style={styles.switchRowTitle}>Prefer External Player</Text>
-                    <Text style={styles.switchRowSub}>Always display external player launcher prompt on playback</Text>
+                    <Text style={styles.switchRowSub}>Prompt to open VLC or MX Player on movie tap</Text>
                   </View>
                 </View>
                 <Switch
                   value={preferExternalPlayer}
                   onValueChange={setPreferExternalPlayer}
-                  trackColor={{ false: '#262438', true: Colors.primary }}
+                  trackColor={{ false: '#262438', true: '#0A84FF' }}
                   thumbColor="#FFFFFF"
                 />
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 3: SUBTITLES & OPENSUBTITLES ENGINE (Category: all or playback)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'playback') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
-                <Languages size={16} color="#0A84FF" strokeWidth={2.2} />
-              </View>
-              <View>
-                <Text style={styles.sectionTitle}>Subtitles & OpenSubtitles</Text>
-                <Text style={styles.sectionSubtitle}>Auto-fetch synchronized subtitles in your preferred languages</Text>
-              </View>
-            </View>
-
-            <View style={styles.cardContainer}>
-              {/* Preferred Languages Quick Select */}
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>PREFERRED SUBTITLE LANGUAGES</Text>
-                <View style={styles.langChipsWrap}>
-                  {POPULAR_LANG_CODES.map((code) => {
-                    const lang = SUBTITLE_LANGUAGES.find((l) => l.code === code);
-                    const isSelected = selectedSubLangs.includes(code);
-                    return (
-                      <TouchableOpacity
-                        key={code}
-                        style={[
-                          styles.langChip,
-                          isSelected && { backgroundColor: 'rgba(10, 132, 255, 0.2)', borderColor: '#0A84FF' },
-                        ]}
-                        activeOpacity={0.75}
-                        onPress={() => handleToggleLanguage(code)}
-                      >
-                        <Text style={[styles.langChipText, isSelected && { color: '#0A84FF', fontWeight: '700' }]}>
-                          {lang?.name || code.toUpperCase()}
-                        </Text>
-                        {isSelected && <Check color="#0A84FF" size={12} strokeWidth={3} />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <TouchableOpacity
-                    style={[styles.langChip, styles.langChipMore]}
-                    onPress={() => setSubtitlesModalVisible(true)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.langChipMoreText}>+ More ({SUBTITLE_LANGUAGES.length})</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
 
               <View style={styles.cardDivider} />
 
-              {/* OpenSubtitles API Key Mode */}
               <View style={styles.switchRowItem}>
                 <View style={styles.switchRowLeft}>
-                  <Key color="#A09DB1" size={18} strokeWidth={2} />
+                  <Cpu color="#A09DB1" size={18} strokeWidth={2} />
                   <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.switchRowTitle}>Use VFlix Built-in VIP Key</Text>
-                    <Text style={styles.switchRowSub}>Unlimited shared OpenSubtitles.com REST API queries</Text>
+                    <Text style={styles.switchRowTitle}>Hardware Acceleration</Text>
+                    <Text style={styles.switchRowSub}>Direct GPU decoding for HEVC, 10-bit and 4K streams</Text>
                   </View>
                 </View>
                 <Switch
-                  value={useDefaultSubKey}
-                  onValueChange={handleToggleDefaultSubKey}
+                  value={hardwareAccel}
+                  onValueChange={setHardwareAccel}
                   trackColor={{ false: '#262438', true: '#30D158' }}
                   thumbColor="#FFFFFF"
                 />
               </View>
 
+              <View style={styles.cardDivider} />
+
+              <View style={styles.switchRowItem}>
+                <View style={styles.switchRowLeft}>
+                  <Volume2 color="#A09DB1" size={18} strokeWidth={2} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.switchRowTitle}>Audio Passthrough</Text>
+                    <Text style={styles.switchRowSub}>Bitstream Dolby Digital AC3, EAC3 and DTS to soundbar</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={audioPassthrough}
+                  onValueChange={setAudioPassthrough}
+                  trackColor={{ false: '#262438', true: '#FF9500' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 3: SUBTITLES & AUDIO ENGINE
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'subtitles'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(255, 149, 0, 0.18)' }]}>
+                  <Languages size={18} color="#FF9500" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Subtitles & Audio Engine</Text>
+                  <Text style={styles.sheetHeaderSub}>OpenSubtitles API key & multi-language defaults</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              {/* OpenSubtitles API Key Section */}
+              <Text style={styles.cardInnerLabel}>OPENSUBTITLES v3 API KEY</Text>
+              <View style={styles.switchRowItem}>
+                <View style={styles.switchRowLeft}>
+                  <Key color="#FF9500" size={18} strokeWidth={2} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.switchRowTitle}>Use Built-in VFlix Key</Text>
+                    <Text style={styles.switchRowSub}>Zero setup required. Automatic cloud subtitle search.</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={useDefaultSubKey}
+                  onValueChange={handleToggleDefaultSubKey}
+                  trackColor={{ false: '#262438', true: '#FF9500' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
               {!useDefaultSubKey && (
-                <View style={styles.customKeyBox}>
-                  <Text style={styles.customKeyLabel}>YOUR OPENSUBTITLES.COM API KEY</Text>
-                  <View style={styles.inputWithIconRow}>
+                <View style={{ marginTop: 10 }}>
+                  <View style={styles.inputWithActionRow}>
                     <TextInput
-                      style={styles.keyTextInput}
-                      placeholder="Paste your personal OpenSubtitles API Key"
+                      style={[styles.urlTextInput, { flex: 1 }]}
+                      placeholder="Enter OpenSubtitles API key..."
                       placeholderTextColor="#6B677E"
                       value={customSubKey}
-                      onChangeText={handleSaveSubKey}
+                      onChangeText={setCustomSubKey}
                       secureTextEntry={!showSubKey}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
                     <TouchableOpacity
-                      style={styles.eyeToggleBtn}
+                      style={styles.keyVisibilityBtn}
                       onPress={() => setShowSubKey(!showSubKey)}
                     >
-                      {showSubKey ? (
-                        <EyeOff color="#A09DB1" size={16} />
-                      ) : (
-                        <Eye color="#A09DB1" size={16} />
-                      )}
+                      {showSubKey ? <EyeOff size={16} color="#A09DB1" /> : <Eye size={16} color="#A09DB1" />}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.applyBtn}
+                      onPress={() => handleSaveSubKey(customSubKey)}
+                    >
+                      <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
+                      <Text style={styles.applyBtnText}>Save</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               )}
-            </View>
+
+              <View style={styles.cardDivider} />
+
+              {/* Subtitle Languages */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+                <Text style={styles.cardInnerLabel}>DEFAULT SUBTITLE LANGUAGES</Text>
+                <Text style={{ fontSize: 11, color: '#A09DB1' }}>{selectedSubLangs.length} Selected</Text>
+              </View>
+
+              {/* Search Bar for Languages */}
+              <View style={[styles.inputWithActionRow, { height: 38, marginBottom: 12 }]}>
+                <Search size={14} color="#6B677E" style={{ marginLeft: 8 }} />
+                <TextInput
+                  style={[styles.urlTextInput, { fontSize: 12 }]}
+                  placeholder="Filter 100+ languages (e.g. Tamil, English, Hindi)..."
+                  placeholderTextColor="#6B677E"
+                  value={subSearchQuery}
+                  onChangeText={setSubSearchQuery}
+                />
+                {subSearchQuery ? (
+                  <TouchableOpacity onPress={() => setSubSearchQuery('')} style={{ padding: 6 }}>
+                    <X size={14} color="#A09DB1" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              <View style={styles.subLangGrid}>
+                {filteredSubLanguages.slice(0, 18).map((lang) => {
+                  const isSelected = selectedSubLangs.includes(lang.code);
+                  return (
+                    <TouchableOpacity
+                      key={lang.code}
+                      style={[
+                        styles.subLangChip,
+                        isSelected && styles.subLangChipActive,
+                      ]}
+                      onPress={() => handleToggleLanguage(lang.code)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.subLangChipText, isSelected && styles.subLangChipTextActive]}>
+                        {lang.name} ({lang.code.toUpperCase()})
+                      </Text>
+                      {isSelected && <Check size={12} color="#FFFFFF" strokeWidth={3} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
           </View>
-        )}
+        </View>
+      </Modal>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 4: STREAMING & BACKEND SERVER (Category: all or engine)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'engine') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
-                <Server size={16} color="#30D158" strokeWidth={2.2} />
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 4: STREAMING & BACKEND SERVER
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'server'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(48, 209, 88, 0.18)' }]}>
+                  <Server size={18} color="#30D158" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Streaming & Backend Server</Text>
+                  <Text style={styles.sheetHeaderSub}>WebTorrent HTTP relay & remote proxy settings</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.sectionTitle}>Streaming & Backend Server</Text>
-                <Text style={styles.sectionSubtitle}>WebTorrent HTTP byte-range relay for real-time video seeking</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.cardContainer}>
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
               {/* Server Status Header */}
               <View style={styles.serverCardHeader}>
                 <View style={styles.serverStatusGroup}>
@@ -839,7 +1175,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       { backgroundColor: isBackendConnected ? '#30D158' : '#FF453A' },
                     ]}
                   />
-                  <View>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
                     <Text style={styles.serverHostTitle} numberOfLines={1}>
                       {backendUrl}
                     </Text>
@@ -881,228 +1217,236 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <View style={styles.cardDivider} />
 
               {/* Presets List */}
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>SERVER PRESETS</Text>
-                <View style={styles.presetsList}>
-                  {[
-                    { label: 'Render Cloud (Production)', url: 'https://vflix-backend.onrender.com', icon: Globe },
-                    { label: 'Dev Server IP (Port 3002)', url: 'http://192.168.1.6:3002', icon: Cpu },
-                    {
-                      label: 'Localhost Bridge',
-                      url: Platform.OS === 'android'
-                        ? (Constants.isDevice ? 'http://127.0.0.1:3002' : 'http://10.0.2.2:3002')
-                        : 'http://localhost:3002',
-                      icon: Smartphone
-                    },
-                  ].map((preset) => {
-                    const isSelected = customServerUrl.trim() === preset.url.trim();
-                    const IconComp = preset.icon;
-                    return (
-                      <TouchableOpacity
-                        key={preset.url}
-                        style={[styles.presetRow, isSelected && styles.presetRowActive]}
-                        onPress={() => handleApplyServerUrl(preset.url)}
-                        activeOpacity={0.75}
-                      >
-                        <View style={[styles.presetIconWrap, isSelected && { backgroundColor: 'rgba(250, 36, 60, 0.2)' }]}>
-                          <IconComp size={15} color={isSelected ? Colors.primary : '#A09DB1'} />
-                        </View>
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={[styles.presetRowTitle, isSelected && { color: '#FFFFFF', fontWeight: '700' }]}>
-                            {preset.label}
-                          </Text>
-                          <Text style={styles.presetRowUrl} numberOfLines={1}>
-                            {preset.url}
-                          </Text>
-                        </View>
-                        {isSelected && <CheckCircle2 size={18} color={Colors.primary} />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+              <Text style={styles.cardInnerLabel}>SERVER PRESETS</Text>
+              <View style={styles.presetsList}>
+                {[
+                  { label: 'Render Cloud (Production)', url: 'https://vflix-backend.onrender.com', icon: Globe },
+                  { label: 'Dev Server IP (Port 3002)', url: 'http://192.168.1.6:3002', icon: Cpu },
+                  {
+                    label: 'Localhost Bridge',
+                    url: Platform.OS === 'android'
+                      ? (Constants.isDevice ? 'http://127.0.0.1:3002' : 'http://10.0.2.2:3002')
+                      : 'http://localhost:3002',
+                    icon: Smartphone,
+                  },
+                ].map((preset) => {
+                  const isSelected = customServerUrl.trim() === preset.url.trim();
+                  const IconComp = preset.icon;
+                  return (
+                    <TouchableOpacity
+                      key={preset.url}
+                      style={[styles.presetRow, isSelected && styles.presetRowActive]}
+                      onPress={() => handleApplyServerUrl(preset.url)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={[styles.presetIconWrap, isSelected && { backgroundColor: 'rgba(250, 36, 60, 0.2)' }]}>
+                        <IconComp size={15} color={isSelected ? Colors.primary : '#A09DB1'} />
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={[styles.presetRowTitle, isSelected && { color: '#FFFFFF', fontWeight: '700' }]}>
+                          {preset.label}
+                        </Text>
+                        <Text style={styles.presetRowUrl} numberOfLines={1}>
+                          {preset.url}
+                        </Text>
+                      </View>
+                      {isSelected && <CheckCircle2 size={18} color={Colors.primary} />}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <View style={styles.cardDivider} />
 
               {/* Custom URL Input */}
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>CUSTOM BACKEND URL</Text>
-                <View style={styles.inputWithActionRow}>
-                  <TextInput
-                    style={styles.urlTextInput}
-                    value={customServerUrl}
-                    onChangeText={setCustomServerUrl}
-                    placeholder="http://192.168.1.6:3002"
-                    placeholderTextColor="#6B677E"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    style={styles.applyBtn}
-                    onPress={() => handleApplyServerUrl(customServerUrl)}
-                    activeOpacity={0.8}
-                  >
-                    <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
-                    <Text style={styles.applyBtnText}>Apply</Text>
-                  </TouchableOpacity>
-                </View>
+              <Text style={styles.cardInnerLabel}>CUSTOM BACKEND URL</Text>
+              <View style={styles.inputWithActionRow}>
+                <TextInput
+                  style={styles.urlTextInput}
+                  value={customServerUrl}
+                  onChangeText={setCustomServerUrl}
+                  placeholder="http://192.168.1.6:3002"
+                  placeholderTextColor="#6B677E"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.applyBtn}
+                  onPress={() => handleApplyServerUrl(customServerUrl)}
+                  activeOpacity={0.8}
+                >
+                  <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
+                  <Text style={styles.applyBtnText}>Apply</Text>
+                </TouchableOpacity>
               </View>
-            </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
           </View>
-        )}
+        </View>
+      </Modal>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 5: DOWNLOAD ENGINE & TURBO BOOSTER (Category: all or engine)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'engine') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                <Zap size={16} color="#FF9500" strokeWidth={2.4} fill="#FF9500" />
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 5: DOWNLOAD ENGINE & TURBO BOOSTER
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'engine'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(255, 45, 85, 0.18)' }]}>
+                  <Zap size={18} color="#FF2D55" strokeWidth={2.2} fill="#FF2D55" />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Download Engine & Booster</Text>
+                  <Text style={styles.sheetHeaderSub}>Choose torrent protocol & accelerate download swarms</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.sectionTitle}>Download Engine & Turbo Booster</Text>
-                <Text style={styles.sectionSubtitle}>Select download protocol & accelerate active swarms</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
             </View>
 
-            {/* 3 Download Modes Segmented Selection */}
-            <View style={styles.cardContainer}>
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>ACTIVE DOWNLOAD PROTOCOL</Text>
-                <View style={styles.modeCardsList}>
-                  {/* Mode 1: Direct HTTP */}
-                  <TouchableOpacity
-                    style={[
-                      styles.modeCard,
-                      downloadMode === 'direct_http' && styles.modeCardActive,
-                    ]}
-                    onPress={() => setDownloadMode('direct_http')}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modeCardLeft}>
-                      <View style={[styles.modeIconBox, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                        <Zap color="#FF9500" size={18} strokeWidth={2.2} fill="#FF9500" />
-                      </View>
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={styles.modeCardTitle}>Direct HTTP Range Downloader</Text>
-                          <View style={styles.featureBadge}>
-                            <Text style={styles.featureBadgeText}>DEFAULT</Text>
-                          </View>
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.cardInnerLabel}>ACTIVE DOWNLOAD PROTOCOL</Text>
+              <View style={styles.modeCardsList}>
+                {/* Mode 1: Direct HTTP Streamer */}
+                <TouchableOpacity
+                  style={[styles.modeCard, downloadMode === 'direct_http' && styles.modeCardActive]}
+                  onPress={() => setDownloadMode('direct_http')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.modeCardLeft}>
+                    <View style={[styles.modeIconBox, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
+                      <Download color="#30D158" size={18} strokeWidth={2.2} />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.modeCardTitle}>Direct HTTP Streamer</Text>
+                        <View style={styles.recommendedPill}>
+                          <Text style={styles.recommendedPillText}>RECOMMENDED</Text>
                         </View>
-                        <Text style={styles.modeCardSub}>
-                          Ultra-fast native chunk streamer. Downloads directly to phone internal storage with automatic resume.
-                        </Text>
                       </View>
+                      <Text style={styles.modeCardSub}>
+                        Ultra-fast chunk streamer. Downloads directly to phone storage with auto-resume.
+                      </Text>
                     </View>
-                    <View style={[styles.radioCircle, downloadMode === 'direct_http' && { borderColor: '#FF9500', backgroundColor: '#FF9500' }]}>
-                      {downloadMode === 'direct_http' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
-                    </View>
-                  </TouchableOpacity>
+                  </View>
+                  <View style={[styles.radioCircle, downloadMode === 'direct_http' && { borderColor: '#FF9500', backgroundColor: '#FF9500' }]}>
+                    {downloadMode === 'direct_http' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
 
-                  {/* Mode 2: Local P2P WebTorrent Bridge */}
-                  <TouchableOpacity
-                    style={[
-                      styles.modeCard,
-                      downloadMode === 'local_p2p' && styles.modeCardActive,
-                    ]}
-                    onPress={() => setDownloadMode('local_p2p')}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modeCardLeft}>
-                      <View style={[styles.modeIconBox, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
-                        <Cpu color="#0A84FF" size={18} strokeWidth={2.2} />
-                      </View>
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.modeCardTitle}>Local P2P WebTorrent Bridge</Text>
-                        <Text style={styles.modeCardSub}>
-                          Client-side WebTorrent engine running locally inside mobile app using WebRTC & WebSocket trackers.
-                        </Text>
-                      </View>
+                {/* Mode 2: Local P2P WebTorrent Bridge */}
+                <TouchableOpacity
+                  style={[styles.modeCard, downloadMode === 'local_p2p' && styles.modeCardActive]}
+                  onPress={() => setDownloadMode('local_p2p')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.modeCardLeft}>
+                    <View style={[styles.modeIconBox, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
+                      <Cpu color="#0A84FF" size={18} strokeWidth={2.2} />
                     </View>
-                    <View style={[styles.radioCircle, downloadMode === 'local_p2p' && { borderColor: '#0A84FF', backgroundColor: '#0A84FF' }]}>
-                      {downloadMode === 'local_p2p' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={styles.modeCardTitle}>Local P2P WebTorrent Bridge</Text>
+                      <Text style={styles.modeCardSub}>
+                        Client-side engine running locally inside app via WebRTC & WebSocket trackers.
+                      </Text>
                     </View>
-                  </TouchableOpacity>
+                  </View>
+                  <View style={[styles.radioCircle, downloadMode === 'local_p2p' && { borderColor: '#0A84FF', backgroundColor: '#0A84FF' }]}>
+                    {downloadMode === 'local_p2p' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
 
-                  {/* Mode 3: Cloud Backend Relay */}
-                  <TouchableOpacity
-                    style={[
-                      styles.modeCard,
-                      downloadMode === 'backend_relay' && styles.modeCardActive,
-                    ]}
-                    onPress={() => setDownloadMode('backend_relay')}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.modeCardLeft}>
-                      <View style={[styles.modeIconBox, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-                        <Server color={Colors.primary} size={18} strokeWidth={2.2} />
-                      </View>
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.modeCardTitle}>Cloud Backend Relay</Text>
-                        <Text style={styles.modeCardSub}>
-                          Relays torrent swarms through the high-bandwidth VFlix cloud server and pipes media to your phone.
-                        </Text>
-                      </View>
+                {/* Mode 3: Cloud Backend Relay */}
+                <TouchableOpacity
+                  style={[styles.modeCard, downloadMode === 'backend_relay' && styles.modeCardActive]}
+                  onPress={() => setDownloadMode('backend_relay')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.modeCardLeft}>
+                    <View style={[styles.modeIconBox, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
+                      <Server color={Colors.primary} size={18} strokeWidth={2.2} />
                     </View>
-                    <View style={[styles.radioCircle, downloadMode === 'backend_relay' && { borderColor: Colors.primary, backgroundColor: Colors.primary }]}>
-                      {downloadMode === 'backend_relay' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={styles.modeCardTitle}>Cloud Backend Relay</Text>
+                      <Text style={styles.modeCardSub}>
+                        Relays torrent swarms through the high-speed VFlix cloud server to your phone.
+                      </Text>
                     </View>
-                  </TouchableOpacity>
-                </View>
+                  </View>
+                  <View style={[styles.radioCircle, downloadMode === 'backend_relay' && { borderColor: Colors.primary, backgroundColor: Colors.primary }]}>
+                    {downloadMode === 'backend_relay' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
               </View>
 
               <View style={styles.cardDivider} />
 
-              {/* Turbo Speed Booster Banner & Action */}
-              <View style={styles.cardPadding}>
-                <LinearGradient
-                  colors={['#FF9500', '#FA243C']}
-                  style={styles.turboBanner}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
+              {/* Turbo Speed Booster Banner */}
+              <LinearGradient
+                colors={['#FF9500', '#FA243C']}
+                style={styles.turboBanner}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <View style={styles.turboBannerContent}>
+                  <View style={styles.turboIconWrap}>
+                    <Zap color="#FFFFFF" size={24} fill="#FFFFFF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.turboBannerTitle}>Turbo Swarm Booster</Text>
+                    <Text style={styles.turboBannerSub}>
+                      Flushes TCP sockets & re-queries 20+ Tier-1 P2P trackers for maximum throughput.
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.turboTriggerBtn}
+                  onPress={handleApplySpeedBoost}
+                  disabled={boosting}
+                  activeOpacity={0.85}
                 >
-                  <View style={styles.turboBannerContent}>
-                    <View style={styles.turboIconWrap}>
-                      <Zap color="#FFFFFF" size={24} fill="#FFFFFF" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.turboBannerTitle}>Turbo Swarm Booster</Text>
-                      <Text style={styles.turboBannerSub}>
-                        Flushes TCP sockets & re-queries 20+ Tier-1 P2P trackers for maximum throughput.
-                      </Text>
-                    </View>
-                  </View>
+                  {boosting ? (
+                    <ActivityIndicator size="small" color="#FA243C" />
+                  ) : (
+                    <>
+                      <Zap color="#FA243C" size={14} fill="#FA243C" />
+                      <Text style={styles.turboTriggerText}>BOOST SPEED NOW</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </LinearGradient>
 
-                  <TouchableOpacity
-                    style={styles.turboTriggerBtn}
-                    onPress={handleApplySpeedBoost}
-                    disabled={boosting}
-                    activeOpacity={0.85}
-                  >
-                    {boosting ? (
-                      <ActivityIndicator size="small" color="#FA243C" />
-                    ) : (
-                      <>
-                        <Zap color="#FA243C" size={14} fill="#FA243C" />
-                        <Text style={styles.turboTriggerText}>BOOST SPEED NOW</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </LinearGradient>
-
-                {boostMessage && (
-                  <View style={styles.boostNotice}>
-                    <CheckCircle2 color="#30D158" size={16} />
-                    <Text style={styles.boostNoticeText}>{boostMessage}</Text>
-                  </View>
-                )}
-              </View>
+              {boostMessage && (
+                <View style={styles.boostNotice}>
+                  <CheckCircle2 color="#30D158" size={16} />
+                  <Text style={styles.boostNoticeText}>{boostMessage}</Text>
+                </View>
+              )}
 
               <View style={styles.cardDivider} />
 
               {/* Engine Preference Toggles */}
+              <Text style={styles.cardInnerLabel}>SWARM PREFERENCES</Text>
               <View style={styles.switchRowItem}>
                 <View style={styles.switchRowLeft}>
                   <Gauge color="#A09DB1" size={18} strokeWidth={2} />
@@ -1172,513 +1516,124 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   thumbColor="#FFFFFF"
                 />
               </View>
-            </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
           </View>
-        )}
+        </View>
+      </Modal>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 6: SEARCH & CONTENT MIRROR (Category: all or engine)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'engine') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(50, 215, 75, 0.15)' }]}>
-                <Globe size={16} color="#32D74B" strokeWidth={2.2} />
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 6: SEARCH MIRROR DOMAIN
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'mirror'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(50, 215, 75, 0.18)' }]}>
+                  <Globe size={18} color="#32D74B" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Search Mirror Domain</Text>
+                  <Text style={styles.sheetHeaderSub}>Switch active scraping domain & ping proxy nodes</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.sectionTitle}>Search Mirror Domain</Text>
-                <Text style={styles.sectionSubtitle}>Active source endpoint for fetching movie feeds & magnet links</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.cardContainer}>
-              <View style={styles.cardPadding}>
-                <View style={styles.activeMirrorBanner}>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={styles.activeMirrorLabel}>CURRENT ACTIVE MIRROR</Text>
-                    <Text style={styles.activeMirrorUrl}>{displayDomain}</Text>
-                    {mirrorStatus && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 5 }}>
-                        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: mirrorStatus.ok ? '#30D158' : '#FF453A' }} />
-                        <Text style={{ fontSize: 11, color: mirrorStatus.ok ? '#30D158' : '#FF453A', fontWeight: '600' }}>
-                          {mirrorStatus.ok ? `Online (${mirrorStatus.latency}ms)` : `Offline / Blocked (${mirrorStatus.error})`}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <TouchableOpacity
-                      style={[styles.pingBadgeBtn, { paddingHorizontal: 10, paddingVertical: 6, minWidth: 48 }]}
-                      onPress={handleTestActiveMirror}
-                      disabled={testingMirror}
-                      activeOpacity={0.75}
-                    >
-                      {testingMirror ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text style={[styles.pingBadgeText, { fontSize: 11 }]}>Ping</Text>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.changeMirrorBtn}
-                      onPress={() => setMirrorModalVisible(true)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.changeMirrorText}>Switch Mirror</Text>
-                    </TouchableOpacity>
-                  </View>
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              {/* Current Active Mirror Banner */}
+              <View style={styles.activeMirrorBanner}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.activeMirrorLabel}>CURRENT ACTIVE MIRROR</Text>
+                  <Text style={styles.activeMirrorUrl}>{displayDomain}</Text>
+                  {mirrorStatus && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 5 }}>
+                      <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: mirrorStatus.ok ? '#30D158' : '#FF453A' }} />
+                      <Text style={{ fontSize: 11, color: mirrorStatus.ok ? '#30D158' : '#FF453A', fontWeight: '600' }}>
+                        {mirrorStatus.ok ? `Online (${mirrorStatus.latency}ms)` : `Offline / Blocked (${mirrorStatus.error})`}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
-                {/* Popular Mirror Chips */}
-                <Text style={[styles.cardInnerLabel, { marginTop: 14 }]}>POPULAR MIRROR PRESETS</Text>
-                <View style={styles.mirrorChipsWrap}>
-                  {POPULAR_MIRRORS.map((m) => {
-                    const isActive = tamilMvUrl.toLowerCase() === m.toLowerCase();
-                    const cleanName = m.replace(/^https?:\/\/(www\.)?/, '');
-                    return (
-                      <TouchableOpacity
-                        key={m}
-                        style={[
-                          styles.mirrorChip,
-                          isActive && { backgroundColor: 'rgba(50, 215, 75, 0.18)', borderColor: '#32D74B' },
-                        ]}
-                        activeOpacity={0.75}
-                        onPress={() => handleUpdateTamilMvUrl(m)}
-                      >
-                        <Globe size={12} color={isActive ? '#32D74B' : '#A09DB1'} />
-                        <Text style={[styles.mirrorChipText, isActive && { color: '#32D74B', fontWeight: '700' }]}>
-                          {cleanName}
-                        </Text>
-                        {isActive && <Check size={12} color="#32D74B" strokeWidth={3} />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 7: SECURITY & CONTENT SHIELD (Category: all or system)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'system') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(48, 209, 88, 0.15)' }]}>
-                <ShieldCheck size={16} color="#30D158" strokeWidth={2.2} />
-              </View>
-              <View>
-                <Text style={styles.sectionTitle}>Security & Ad Shield</Text>
-                <Text style={styles.sectionSubtitle}>Block malicious popups, track redirects & page hijacking</Text>
-              </View>
-            </View>
-
-            <View style={styles.cardContainer}>
-              <View style={styles.switchRowItem}>
-                <View style={styles.switchRowLeft}>
-                  <ShieldCheck color="#30D158" size={18} strokeWidth={2} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.switchRowTitle}>Ad & Popup Blocker</Text>
-                    <Text style={styles.switchRowSub}>Filters ad networks, tracking telemetry and popup overlays</Text>
-                  </View>
-                </View>
-                <Switch
-                  value={adBlockEnabled}
-                  onValueChange={setAdBlockEnabled}
-                  trackColor={{ false: '#262438', true: '#30D158' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-
-              <View style={styles.cardDivider} />
-
-              <View style={styles.switchRowItem}>
-                <View style={styles.switchRowLeft}>
-                  <ShieldCheck color="#32D74B" size={18} strokeWidth={2} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.switchRowTitle}>Anti-Redirect Protection</Text>
-                    <Text style={styles.switchRowSub}>Prevents intrusive browser redirect traps to malware sites</Text>
-                  </View>
-                </View>
-                <Switch
-                  value={strictRedirectBlock}
-                  onValueChange={setStrictRedirectBlock}
-                  trackColor={{ false: '#262438', true: '#30D158' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            SECTION 8: STORAGE, DATA & CACHE CLEANUP (Category: all or storage)
-        ══════════════════════════════════════════════════════════════════ */}
-        {(activeCategory === 'all' || activeCategory === 'storage') && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderWrap}>
-              <View style={[styles.sectionIconBadge, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-                <HardDrive size={16} color={Colors.primary} strokeWidth={2.2} />
-              </View>
-              <View>
-                <Text style={styles.sectionTitle}>Device Storage & Cache</Text>
-                <Text style={styles.sectionSubtitle}>Manage offline media files, watch history & disk capacity</Text>
-              </View>
-            </View>
-
-            <View style={styles.cardContainer}>
-              {/* Storage Breakdown Visual Gauge */}
-              <View style={styles.cardPadding}>
-                <View style={styles.storageGaugeHeader}>
-                  <View>
-                    <Text style={styles.storageGaugeTitle}>Internal Storage Capacity</Text>
-                    <Text style={styles.storageGaugeSub}>
-                      {formatBytes(appDownloads)} in {completedCount} VFlix movie(s) • {formatBytes(freeDisk)} Free
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.rescanPillBtn}
-                    onPress={handleRescan}
-                    disabled={scanning}
-                    activeOpacity={0.7}
-                  >
-                    {scanning ? (
-                      <ActivityIndicator size="small" color={Colors.primary} />
-                    ) : (
-                      <>
-                        <RotateCcw size={12} color={Colors.primary} strokeWidth={2.4} />
-                        <Text style={styles.rescanPillText}>Rescan</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {/* Multi-segment Progress Bar */}
-                <View style={styles.storageBarTrack}>
-                  <View style={[styles.storageBarApp, { width: `${appPercent}%`, backgroundColor: Colors.primary }]} />
-                  <View style={[styles.storageBarOther, { width: `${otherPercent}%` }]} />
-                </View>
-
-                {/* Legend */}
-                <View style={styles.storageLegendRow}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
-                    <Text style={styles.legendLabel}>VFlix ({formatBytes(appDownloads)})</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#4A4E5D' }]} />
-                    <Text style={styles.legendLabel}>Other Files ({formatBytes(Math.max(0, usedDisk - appDownloads))})</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#211E32', borderWidth: 1, borderColor: '#4A4E5D' }]} />
-                    <Text style={styles.legendLabel}>Free ({formatBytes(freeDisk)})</Text>
-                  </View>
-                </View>
-
-                {/* File System Path Card */}
                 <TouchableOpacity
-                  style={styles.filePathCard}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    Share.share({
-                      title: 'VFlix Storage Location',
-                      message: currentDownloadsDir,
-                    }).catch(() => {});
-                  }}
+                  style={[styles.pingBadgeBtn, { paddingHorizontal: 12, paddingVertical: 7 }]}
+                  onPress={handleTestActiveMirror}
+                  disabled={testingMirror}
+                  activeOpacity={0.75}
                 >
-                  <View style={styles.filePathTopRow}>
-                    <View style={styles.folderBadge}>
-                      <Folder color="#30D158" size={14} strokeWidth={2} />
-                      <Text style={styles.folderLocationText}>{locationLabel}</Text>
-                    </View>
-                    <View style={styles.shareBadge}>
-                      <Share2 size={11} color={Colors.primary} />
-                      <Text style={styles.shareBadgeText}>Tap to Share / Copy</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.filePathCode} selectable numberOfLines={1}>
-                    {currentDownloadsDir || 'VFlix_Movies/'}
-                  </Text>
+                  {testingMirror ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Activity size={12} color="#30D158" />
+                      <Text style={[styles.pingBadgeText, { color: '#30D158' }]}>Ping Mirror</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
 
               <View style={styles.cardDivider} />
 
-              {/* Maintenance & Reset Actions */}
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>DATA & CACHE ACTIONS</Text>
-
-                <View style={styles.actionsGrid}>
-                  {/* Action 1: Clear Continue Watching */}
-                  <TouchableOpacity
-                    style={styles.actionGridCard}
-                    activeOpacity={0.75}
-                    onPress={handleClearContinueWatching}
-                  >
-                    <View style={[styles.actionIconSquare, { backgroundColor: 'rgba(255, 149, 0, 0.15)' }]}>
-                      <Clock color="#FF9500" size={17} strokeWidth={2.2} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.actionGridTitle}>Clear Continue Watching</Text>
-                      <Text style={styles.actionGridSub}>Reset progress for in-progress movies</Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Action 2: Clear Browser History */}
-                  <TouchableOpacity
-                    style={styles.actionGridCard}
-                    activeOpacity={0.75}
-                    onPress={handleClearBrowserHistory}
-                  >
-                    <View style={[styles.actionIconSquare, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
-                      <RotateCcw color="#0A84FF" size={17} strokeWidth={2.2} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.actionGridTitle}>Clear Search & Web Cache</Text>
-                      <Text style={styles.actionGridSub}>Wipe browser history & session cache</Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Action 3: Delete All Downloaded Movies */}
-                  <TouchableOpacity
-                    style={[styles.actionGridCard, styles.destructiveActionCard]}
-                    activeOpacity={0.75}
-                    onPress={handleClearDownloads}
-                  >
-                    <View style={[styles.actionIconSquare, { backgroundColor: 'rgba(255, 69, 58, 0.15)' }]}>
-                      <Trash2 color="#FF453A" size={17} strokeWidth={2.2} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.actionGridTitle, { color: '#FF453A' }]}>
-                        Delete All Downloaded Movies
-                      </Text>
-                      <Text style={styles.actionGridSub}>
-                        Permanently purge {completedCount} downloaded video files
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
+              {/* Custom Input */}
+              <Text style={styles.cardInnerLabel}>CUSTOM DOMAIN URL</Text>
+              <View style={styles.inputWithActionRow}>
+                <TextInput
+                  style={styles.urlTextInput}
+                  placeholder="https://www.1tamilmv.solar"
+                  placeholderTextColor="#6B677E"
+                  value={customMirrorInput}
+                  onChangeText={setCustomMirrorInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.applyBtn}
+                  onPress={() => {
+                    if (customMirrorInput.trim()) {
+                      handleAddCustomMirror(customMirrorInput.trim());
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
+                  <Text style={styles.applyBtnText}>Save</Text>
+                </TouchableOpacity>
               </View>
-            </View>
-          </View>
-        )}
 
-        {/* ── App Version & Footer Badge ── */}
-        <View style={styles.footerBranding}>
-          <Image
-            source={require('../../assets/logo.png')}
-            style={{ width: 44, height: 58, marginBottom: 10 }}
-            resizeMode="contain"
-          />
-          <Text style={styles.footerAppName}>VFlix Stream Pro</Text>
-          <Text style={styles.footerVersion}>Version 2.4.0 (Build 57.0) • Node.js Embedded</Text>
-          <Text style={styles.footerCopyright}>Designed & Engineered with ❤️ by Vignesh S</Text>
-        </View>
-      </ScrollView>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MODAL: APPLICATION SPECIFICATIONS & ARCHITECTURE
-      ══════════════════════════════════════════════════════════════════ */}
-      <Modal
-        visible={specsModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setSpecsModalVisible(false)}
-      >
-        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
-          <View style={styles.subModalHeader}>
-            <Text style={styles.subModalHeaderTitle}>System Specifications</Text>
-            <TouchableOpacity
-              style={styles.subModalCloseBtn}
-              onPress={() => setSpecsModalVisible(false)}
-            >
-              <X color="#A09DB1" size={18} strokeWidth={2.4} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
-            <View style={styles.specHeroBox}>
-              <Image
-                source={require('../../assets/logo.png')}
-                style={{ width: 48, height: 64, marginBottom: 12 }}
-                resizeMode="contain"
-              />
-              <Text style={styles.specHeroName}>VFlix Pro Streamer</Text>
-              <Text style={styles.specHeroTag}>High-Performance Decentralized Torrent Stream Engine</Text>
-            </View>
-
-            <View style={styles.cardContainer}>
-              {[
-                { label: 'Application Name', value: 'VFlix' },
-                { label: 'Client Version', value: 'v2.4.0 (Build 57.0)' },
-                { label: 'Torrent Protocol', value: 'WebTorrent P2P + HTTP Range' },
-                { label: 'Video Hardware Decoder', value: ksPlayerAvailable ? 'KSPlayer (Metal + FFmpegKit)' : 'ExoPlayer / AVPlayer' },
-                { label: 'Runtime Architecture', value: `${Platform.OS.toUpperCase()} (${Platform.select({ ios: 'Darwin', android: 'Linux ARM', default: 'JS Engine' })})` },
-                { label: 'Offline Media Directory', value: 'VFlix_Movies' },
-                { label: 'Backend Server', value: isBackendConnected ? 'Online (Connected)' : 'Offline / Standalone' },
-                { label: 'OpenSubtitles API', value: useDefaultSubKey ? 'VFlix VIP Pool' : 'Personal Key' },
-              ].map((item, idx) => (
-                <React.Fragment key={item.label}>
-                  {idx > 0 && <View style={styles.cardDivider} />}
-                  <View style={styles.specRow}>
-                    <Text style={styles.specLabel}>{item.label}</Text>
-                    <Text style={styles.specValue}>{item.value}</Text>
-                  </View>
-                </React.Fragment>
-              ))}
-            </View>
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MODAL: ALL SUBTITLE LANGUAGES PICKER
-      ══════════════════════════════════════════════════════════════════ */}
-      <Modal
-        visible={subtitlesModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setSubtitlesModalVisible(false)}
-      >
-        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
-          <View style={styles.subModalHeader}>
-            <Text style={styles.subModalHeaderTitle}>Select Subtitle Languages</Text>
-            <TouchableOpacity
-              style={styles.subModalCloseBtn}
-              onPress={() => setSubtitlesModalVisible(false)}
-            >
-              <X color="#A09DB1" size={18} strokeWidth={2.4} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Search Bar */}
-          <View style={styles.modalSearchWrap}>
-            <Search size={16} color="#A09DB1" />
-            <TextInput
-              style={styles.modalSearchInput}
-              placeholder="Search language name or code..."
-              placeholderTextColor="#6B677E"
-              value={subSearchQuery}
-              onChangeText={setSubSearchQuery}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {subSearchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSubSearchQuery('')}>
-                <X size={15} color="#A09DB1" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
-            <View style={styles.cardContainer}>
-              {filteredSubLanguages.map((lang, idx) => {
-                const isSelected = selectedSubLangs.includes(lang.code);
-                return (
-                  <React.Fragment key={lang.code}>
-                    {idx > 0 && <View style={styles.cardDivider} />}
-                    <TouchableOpacity
-                      style={styles.langModalRow}
-                      activeOpacity={0.7}
-                      onPress={() => handleToggleLanguage(lang.code)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.langModalName, isSelected && { color: Colors.primary, fontWeight: '700' }]}>
-                          {lang.name}
-                        </Text>
-                        <Text style={styles.langModalCode}>{lang.code.toUpperCase()}</Text>
-                      </View>
-                      <View style={[styles.checkboxBox, isSelected && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}>
-                        {isSelected && <Check color="#FFFFFF" size={13} strokeWidth={3} />}
-                      </View>
-                    </TouchableOpacity>
-                  </React.Fragment>
-                );
-              })}
-            </View>
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MODAL: ACTIVE MIRROR SELECTOR & CUSTOM DOMAIN
-      ══════════════════════════════════════════════════════════════════ */}
-      <Modal
-        visible={mirrorModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setMirrorModalVisible(false)}
-      >
-        <View style={[styles.subModalContainer, { paddingTop: Platform.OS === 'ios' ? 16 : insets.top + 10 }]}>
-          <View style={styles.subModalHeader}>
-            <View>
-              <Text style={styles.subModalHeaderTitle}>Search Mirror Domains</Text>
-              <Text style={{ fontSize: 11.5, color: '#A09DB1', marginTop: 2 }}>
-                Switch to an active domain for fast scraping
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.subModalCloseBtn}
-              onPress={() => setMirrorModalVisible(false)}
-            >
-              <X color="#A09DB1" size={18} strokeWidth={2.4} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.subModalBody} showsVerticalScrollIndicator={false}>
-            {/* Custom Input */}
-            <View style={styles.cardContainer}>
-              <View style={styles.cardPadding}>
-                <Text style={styles.cardInnerLabel}>CUSTOM DOMAIN URL</Text>
-                <View style={styles.inputWithActionRow}>
-                  <TextInput
-                    style={styles.urlTextInput}
-                    placeholder="https://www.1tamilmv.solar"
-                    placeholderTextColor="#6B677E"
-                    value={customMirrorInput}
-                    onChangeText={setCustomMirrorInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    style={styles.applyBtn}
-                    onPress={() => {
-                      if (customMirrorInput.trim()) {
-                        handleAddCustomMirror(customMirrorInput.trim());
-                        setMirrorModalVisible(false);
-                      }
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
-                    <Text style={styles.applyBtnText}>Save</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            {/* Custom User Mirrors if any */}
-            {customMirrors.length > 0 && (
-              <View style={{ marginTop: 18 }}>
-                <Text style={styles.sectionHeaderTitle}>SAVED CUSTOM MIRRORS</Text>
-                <View style={styles.cardContainer}>
-                  {customMirrors.map((mirror, idx) => {
-                    const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
-                    return (
-                      <React.Fragment key={mirror}>
-                        {idx > 0 && <View style={styles.cardDivider} />}
-                        <View style={[styles.presetRow, { justifyContent: 'space-between' }]}>
+              {/* Custom User Mirrors if any */}
+              {customMirrors.length > 0 && (
+                <View style={{ marginTop: 16 }}>
+                  <Text style={styles.cardInnerLabel}>SAVED CUSTOM MIRRORS</Text>
+                  <View style={styles.presetsList}>
+                    {customMirrors.map((mirror) => {
+                      const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
+                      return (
+                        <View key={mirror} style={[styles.presetRow, { justifyContent: 'space-between' }]}>
                           <TouchableOpacity
                             style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
                             activeOpacity={0.7}
-                            onPress={() => {
-                              handleUpdateTamilMvUrl(mirror);
-                              setMirrorModalVisible(false);
-                            }}
+                            onPress={() => handleUpdateTamilMvUrl(mirror)}
                           >
                             <Globe size={16} color={isActive ? '#32D74B' : '#A09DB1'} />
                             <Text style={[styles.presetRowTitle, { flex: 1, marginLeft: 10 }, isActive && { color: '#32D74B', fontWeight: '700' }]}>
@@ -1693,84 +1648,459 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                             <Trash2 size={14} color="#8E8E93" />
                           </TouchableOpacity>
                         </View>
-                      </React.Fragment>
-                    );
-                  })}
+                      );
+                    })}
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
 
-            <View style={{ marginTop: 20 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 4 }}>
-                <Text style={styles.sectionHeaderTitle}>POPULAR MIRRORS</Text>
+              <View style={styles.cardDivider} />
+
+              {/* Popular Mirrors */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Text style={styles.cardInnerLabel}>POPULAR MIRROR PRESETS</Text>
                 <Text style={{ fontSize: 11, color: '#A09DB1' }}>Tap to activate</Text>
               </View>
-              <View style={styles.cardContainer}>
-                {POPULAR_MIRRORS.map((mirror, idx) => {
+
+              <View style={styles.presetsList}>
+                {POPULAR_MIRRORS.map((mirror) => {
                   const isActive = tamilMvUrl.toLowerCase() === mirror.toLowerCase();
                   const testRes = presetTestResults[mirror];
                   return (
-                    <React.Fragment key={mirror}>
-                      {idx > 0 && <View style={styles.cardDivider} />}
-                      <View style={[styles.presetRow, { justifyContent: 'space-between' }]}>
-                        <TouchableOpacity
-                          style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            handleUpdateTamilMvUrl(mirror);
-                            setMirrorModalVisible(false);
-                          }}
-                        >
-                          <Globe size={16} color={isActive ? '#32D74B' : '#A09DB1'} />
-                          <View style={{ flex: 1, marginLeft: 10 }}>
-                            <Text style={[styles.presetRowTitle, isActive && { color: '#32D74B', fontWeight: '700' }]}>
-                              {mirror.replace(/^https?:\/\/(www\.)?/, '')}
+                    <View key={mirror} style={[styles.presetRow, { justifyContent: 'space-between' }]}>
+                      <TouchableOpacity
+                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+                        activeOpacity={0.7}
+                        onPress={() => handleUpdateTamilMvUrl(mirror)}
+                      >
+                        <Globe size={16} color={isActive ? '#32D74B' : '#A09DB1'} />
+                        <View style={{ flex: 1, marginLeft: 10 }}>
+                          <Text style={[styles.presetRowTitle, isActive && { color: '#32D74B', fontWeight: '700' }]}>
+                            {mirror.replace(/^https?:\/\/(www\.)?/, '')}
+                          </Text>
+                          {testRes && (
+                            <Text style={{ fontSize: 10.5, color: testRes.ok ? '#30D158' : '#FF453A', marginTop: 2 }}>
+                              {testRes.error === 'Testing...' ? 'Pinging...' : testRes.ok ? `Online (${testRes.latency}ms)` : `Offline (${testRes.error})`}
                             </Text>
-                            {testRes && (
-                              <Text style={{ fontSize: 10.5, color: testRes.ok ? '#30D158' : '#FF453A', marginTop: 2 }}>
-                                {testRes.error === 'Testing...' ? 'Pinging...' : testRes.ok ? `Online (${testRes.latency}ms)` : `Offline (${testRes.error})`}
-                              </Text>
-                            )}
-                          </View>
-                          {isActive && <Check size={18} color="#32D74B" strokeWidth={2.5} />}
-                        </TouchableOpacity>
+                          )}
+                        </View>
+                        {isActive && <Check size={18} color="#32D74B" strokeWidth={2.5} />}
+                      </TouchableOpacity>
 
-                        <TouchableOpacity
-                          style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#262438', marginLeft: 8 }}
-                          onPress={() => handleTestPreset(mirror)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={{ fontSize: 11, color: '#A09DB1', fontWeight: '600' }}>Ping</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </React.Fragment>
+                      <TouchableOpacity
+                        style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#262438', marginLeft: 8 }}
+                        onPress={() => handleTestPreset(mirror)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ fontSize: 11, color: '#A09DB1', fontWeight: '600' }}>Ping</Text>
+                      </TouchableOpacity>
+                    </View>
                   );
                 })}
               </View>
-            </View>
 
-            <View style={{ height: 40 }} />
-          </ScrollView>
+              <View style={{ height: 25 }} />
+            </ScrollView>
+          </View>
         </View>
       </Modal>
 
-      {/* ── About Us Full Screen Modal ── */}
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 7: SECURITY & AD SHIELD
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'security'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(48, 209, 88, 0.18)' }]}>
+                  <ShieldCheck size={18} color="#30D158" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Security & Ad Shield</Text>
+                  <Text style={styles.sheetHeaderSub}>Malware protection, popup blocking & tracker filters</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.cardInnerLabel}>CONTENT SHIELDS</Text>
+
+              <View style={styles.switchRowItem}>
+                <View style={styles.switchRowLeft}>
+                  <ShieldCheck color="#30D158" size={18} strokeWidth={2} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.switchRowTitle}>Ad & Popup Blocker</Text>
+                    <Text style={styles.switchRowSub}>Filters ad networks, tracking telemetry and full-screen overlays</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={adBlockEnabled}
+                  onValueChange={setAdBlockEnabled}
+                  trackColor={{ false: '#262438', true: '#30D158' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={styles.cardDivider} />
+
+              <View style={styles.switchRowItem}>
+                <View style={styles.switchRowLeft}>
+                  <Lock color="#FF9500" size={18} strokeWidth={2} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.switchRowTitle}>Strict Redirect Shield</Text>
+                    <Text style={styles.switchRowSub}>Prevents forum topics from navigating to phishing sponsor tabs</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={strictRedirectBlock}
+                  onValueChange={setStrictRedirectBlock}
+                  trackColor={{ false: '#262438', true: '#FF9500' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={styles.cardDivider} />
+
+              <View style={styles.switchRowItem}>
+                <View style={styles.switchRowLeft}>
+                  <Wifi color="#0A84FF" size={18} strokeWidth={2} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.switchRowTitle}>DNS-over-HTTPS (DoH)</Text>
+                    <Text style={styles.switchRowSub}>Encrypts DNS lookups via Cloudflare 1.1.1.1 to bypass ISP blocking</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={true}
+                  disabled={true}
+                  trackColor={{ false: '#262438', true: '#0A84FF' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 8: STORAGE & CACHE MANAGER
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'storage'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(191, 90, 242, 0.18)' }]}>
+                  <HardDrive size={18} color="#BF5AF2" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>Storage & Cache Manager</Text>
+                  <Text style={styles.sheetHeaderSub}>Manage downloads, temp media and storage breakdown</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              {/* Storage Bar Breakdown */}
+              <Text style={styles.cardInnerLabel}>DEVICE STORAGE BREAKDOWN</Text>
+              <View style={styles.storageBarRow}>
+                <View style={[styles.storageBarPart, { flex: appPercent, backgroundColor: Colors.primary }]} />
+                <View style={[styles.storageBarPart, { flex: otherPercent, backgroundColor: '#3A394D' }]} />
+                <View style={[styles.storageBarPart, { flex: freePercent, backgroundColor: '#262438' }]} />
+              </View>
+
+              <View style={styles.legendRow}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
+                  <Text style={styles.legendText}>App Media ({formatBytes(appDownloads)})</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#3A394D' }]} />
+                  <Text style={styles.legendText}>Other Files ({formatBytes(usedDisk)})</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#262438' }]} />
+                  <Text style={styles.legendText}>Free ({formatBytes(freeDisk)})</Text>
+                </View>
+              </View>
+
+              <View style={styles.cardDivider} />
+
+              {/* Maintenance Actions */}
+              <Text style={styles.cardInnerLabel}>CLEANING & CACHE ACTIONS</Text>
+
+              <TouchableOpacity
+                style={styles.storageActionRow}
+                onPress={handleClearCompletedDownloads}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storageActionIconWrap}>
+                  <Trash2 size={16} color="#FF453A" />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.storageActionTitle}>Clear Completed Downloads History</Text>
+                  <Text style={styles.storageActionSub}>{completedCount} finished download record(s)</Text>
+                </View>
+                <ChevronRight size={15} color="#A09DB1" />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity
+                style={styles.storageActionRow}
+                onPress={handleClearMediaCache}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storageActionIconWrap}>
+                  <RotateCcw size={16} color="#FF9500" />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.storageActionTitle}>Purge Temporary Media & Poster Cache</Text>
+                  <Text style={styles.storageActionSub}>Frees disk space from scraped images & thumbnails</Text>
+                </View>
+                <ChevronRight size={15} color="#A09DB1" />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity
+                style={styles.storageActionRow}
+                onPress={handleResetContinueWatching}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storageActionIconWrap}>
+                  <RotateCcw size={16} color="#FA243C" />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.storageActionTitle}>Reset Continue Watching History</Text>
+                  <Text style={styles.storageActionSub}>Clears playback resume timestamps</Text>
+                </View>
+                <ChevronRight size={15} color="#A09DB1" />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity
+                style={styles.storageActionRow}
+                onPress={handleClearBrowserHistory}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storageActionIconWrap}>
+                  <Globe size={16} color="#0A84FF" />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.storageActionTitle}>Clear In-App Browser History</Text>
+                  <Text style={styles.storageActionSub}>Erase forum navigation cookies & URLs</Text>
+                </View>
+                <ChevronRight size={15} color="#A09DB1" />
+              </TouchableOpacity>
+
+              <View style={styles.menuDivider} />
+
+              <TouchableOpacity
+                style={styles.storageActionRow}
+                onPress={handleRescanStorage}
+                disabled={scanning}
+                activeOpacity={0.75}
+              >
+                <View style={styles.storageActionIconWrap}>
+                  {scanning ? <ActivityIndicator size="small" color="#0A84FF" /> : <HardDrive size={16} color="#0A84FF" />}
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.storageActionTitle}>Rescan Device Storage</Text>
+                  <Text style={styles.storageActionSub}>Recalculates file system space allocation</Text>
+                </View>
+                <ChevronRight size={15} color="#A09DB1" />
+              </TouchableOpacity>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ═════════════════════════════════════════════════════════════════════
+          BOTTOM SHEET MODAL 9: COMMUNITY & ABOUT
+      ═════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={activeModal === 'support'}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setActiveModal(null)}
+          />
+          <View style={[styles.bottomSheetContainer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(255, 159, 10, 0.18)' }]}>
+                  <Info size={18} color="#FF9F0A" strokeWidth={2.2} />
+                </View>
+                <View>
+                  <Text style={styles.sheetHeaderTitle}>About & Community</Text>
+                  <Text style={styles.sheetHeaderSub}>App specifications & open-source developer links</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetCloseBtn}
+                onPress={() => setActiveModal(null)}
+                activeOpacity={0.7}
+              >
+                <X color="#A09DB1" size={17} strokeWidth={2.4} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              {/* Quick Actions */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                <TouchableOpacity
+                  style={[styles.quickSupportCard, { backgroundColor: 'rgba(250, 36, 60, 0.12)', borderColor: 'rgba(250, 36, 60, 0.3)' }]}
+                  onPress={() => {
+                    setActiveModal(null);
+                    setAboutModalVisible(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Sparkles size={20} color="#FA243C" />
+                  <Text style={styles.quickSupportTitle}>About VFlix</Text>
+                  <Text style={styles.quickSupportSub}>Version & Team</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickSupportCard, { backgroundColor: 'rgba(255, 45, 85, 0.12)', borderColor: 'rgba(255, 45, 85, 0.3)' }]}
+                  onPress={() => {
+                    setActiveModal(null);
+                    setDonateModalVisible(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Heart size={20} color="#FF2D55" fill="#FF2D55" />
+                  <Text style={styles.quickSupportTitle}>Donate Us</Text>
+                  <Text style={styles.quickSupportSub}>Support Hosting</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.cardInnerLabel}>COMMUNITY & OPEN SOURCE</Text>
+              <View style={styles.presetsList}>
+                <TouchableOpacity style={styles.presetRow} onPress={handleOpenGitHub} activeOpacity={0.75}>
+                  <View style={[styles.presetIconWrap, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+                    <ExternalLink size={15} color="#FFFFFF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.presetRowTitle}>GitHub Repository</Text>
+                    <Text style={styles.presetRowUrl}>Star the open-source codebase & file issues</Text>
+                  </View>
+                  <ChevronRight size={15} color="#A09DB1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.presetRow} onPress={handleOpenTelegram} activeOpacity={0.75}>
+                  <View style={[styles.presetIconWrap, { backgroundColor: 'rgba(10, 132, 255, 0.15)' }]}>
+                    <Radio size={15} color="#0A84FF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.presetRowTitle}>Telegram Channel</Text>
+                    <Text style={styles.presetRowUrl}>Join announcements & release updates</Text>
+                  </View>
+                  <ChevronRight size={15} color="#A09DB1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.presetRow} onPress={handleOpenDiscord} activeOpacity={0.75}>
+                  <View style={[styles.presetIconWrap, { backgroundColor: 'rgba(191, 90, 242, 0.15)' }]}>
+                    <Globe size={15} color="#BF5AF2" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.presetRowTitle}>Discord Server</Text>
+                    <Text style={styles.presetRowUrl}>Chat with contributors and fellow streamers</Text>
+                  </View>
+                  <ChevronRight size={15} color="#A09DB1" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.cardDivider} />
+
+              <Text style={styles.cardInnerLabel}>APPLICATION SPECIFICATIONS</Text>
+              <View style={styles.specsBox}>
+                <View style={styles.specRow}>
+                  <Text style={styles.specLabel}>App Version</Text>
+                  <Text style={styles.specValue}>v2.4.0 (Cyber Cinema Engine)</Text>
+                </View>
+                <View style={styles.specRow}>
+                  <Text style={styles.specLabel}>Operating System</Text>
+                  <Text style={styles.specValue}>{Platform.OS.toUpperCase()} {Platform.Version}</Text>
+                </View>
+                <View style={styles.specRow}>
+                  <Text style={styles.specLabel}>Device Mode</Text>
+                  <Text style={styles.specValue}>{Constants.isDevice ? 'Physical Mobile Device' : 'Simulator / Emulator'}</Text>
+                </View>
+                <View style={styles.specRow}>
+                  <Text style={styles.specLabel}>Streaming Core</Text>
+                  <Text style={styles.specValue}>ExoPlayer + WebTorrent v2.5</Text>
+                </View>
+              </View>
+
+              <View style={{ height: 25 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Full Screen About Us Modal ── */}
       <Modal
         visible={aboutModalVisible}
         animationType="slide"
         presentationStyle="fullScreen"
         onRequestClose={() => setAboutModalVisible(false)}
       >
-        <AboutUsScreen
-          onClose={() => setAboutModalVisible(false)}
-          onOpenDonate={() => {
-            setAboutModalVisible(false);
-            setDonateModalVisible(true);
-          }}
-        />
+        <AboutUsScreen onClose={() => setAboutModalVisible(false)} />
       </Modal>
 
-      {/* ── Donate Us Full Screen Modal ── */}
+      {/* ── Full Screen Donate Us Modal ── */}
       <Modal
         visible={donateModalVisible}
         animationType="slide"
@@ -1783,383 +2113,400 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   );
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   STYLES: Modern Cyber-Cinema Glassmorphic Theme
-────────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────────
+   STYLES: CYBER-CINEMA GLASSMORPHIC DESIGN
+───────────────────────────────────────────────────────────────────────────── */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0815',
+    backgroundColor: '#0A0910',
   },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-
-  /* ── Header ── */
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-  },
-  titleBadge: {
+  headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(250, 36, 60, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-    marginBottom: 6,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    backgroundColor: '#0A0910',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  titleBadgeText: {
-    color: Colors.primary,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  mainTitle: {
+  logoBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FA243C',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  headerTitle: {
     color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: -0.6,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
-  mainSubtitle: {
-    color: '#8E8A9F',
-    fontSize: 12.5,
-    marginTop: 3,
+  headerSubtitle: {
+    color: '#8E8B9E',
+    fontSize: 12,
+    marginTop: 1,
   },
-  infoIconButton: {
+  headerActionBtn: {
     width: 38,
     height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 4,
   },
-
-  /* ── Hero Profile Card ── */
-  heroCard: {
-    marginTop: 10,
-    marginBottom: 16,
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    backgroundColor: '#131022',
-  },
-  heroCardGradient: {
-    padding: 16,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatarBorderWrapper: {
-    position: 'relative',
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    padding: 2,
-    marginRight: 14,
-  },
-  heroAvatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 26,
-  },
-  onlineStatusDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#30D158',
-    borderWidth: 2,
-    borderColor: '#131022',
-  },
-  heroInfoColumn: {
+  menuScrollView: {
     flex: 1,
   },
-  heroNameRow: {
+  menuScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  quickStatusCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    marginBottom: 18,
   },
-  heroNameText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  proPill: {
-    backgroundColor: 'rgba(250, 36, 60, 0.2)',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  proPillText: {
-    color: Colors.primary,
-    fontSize: 9.5,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  heroRoleText: {
-    color: '#A09DB1',
-    fontSize: 12,
-    marginTop: 2,
-    marginBottom: 5,
-  },
-  serverStatusPill: {
+  statusPillItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
     gap: 5,
+    flex: 1,
+    justifyContent: 'center',
   },
-  serverStatusDot: {
+  statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
   },
-  serverStatusLabel: {
-    fontSize: 10.5,
-    fontWeight: '700',
+  statusPillLabel: {
+    color: '#8E8B9E',
+    fontSize: 11,
+    fontWeight: '500',
   },
-  serverStatusDivider: {
-    color: '#6B677E',
-    fontSize: 10,
-  },
-  serverStatusEngine: {
-    color: '#D1CEE2',
-    fontSize: 10.5,
-    fontWeight: '600',
-  },
-  heroActionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  heroActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  heroDonateBtn: {
-    backgroundColor: 'rgba(250, 36, 60, 0.15)',
-    borderColor: 'rgba(250, 36, 60, 0.35)',
-  },
-  heroActionText: {
+  statusPillVal: {
     color: '#FFFFFF',
     fontSize: 11.5,
     fontWeight: '700',
   },
-
-  /* ── Category Filter Tabs ── */
-  categoryFilterRow: {
-    gap: 8,
-    paddingBottom: 16,
-  },
-  categoryFilterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#161326',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-  },
-  categoryFilterText: {
-    color: '#A09DB1',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  /* ── Section Containers & Headers ── */
-  sectionContainer: {
-    marginBottom: 20,
+  statusPillDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   sectionHeaderWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
     paddingHorizontal: 4,
-  },
-  sectionIconBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  sectionSubtitle: {
-    color: '#8E8A9F',
-    fontSize: 11,
-    marginTop: 1,
-  },
-  sectionHeaderTitle: {
-    color: '#8E8A9F',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
     marginBottom: 8,
-    marginLeft: 6,
+    marginTop: 6,
   },
-
-  /* ── Card Styling ── */
-  cardContainer: {
-    backgroundColor: '#141124',
+  sectionHeaderText: {
+    color: '#6F6C80',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  menuGroupCard: {
+    backgroundColor: '#14131D',
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.07)',
     overflow: 'hidden',
+    marginBottom: 16,
   },
-  cardPadding: {
-    padding: 14,
-  },
-  cardDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  cardInnerLabel: {
-    color: '#8E8A9F',
-    fontSize: 10.5,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 10,
-  },
-
-  /* ── Theme Swatches ── */
-  themeSwatchesGrid: {
+  menuRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    padding: 14,
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
   },
-  themeOptionCard: {
+  menuIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 13,
+  },
+  menuTextWrap: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  menuTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  menuSub: {
+    color: '#8A879B',
+    fontSize: 11.5,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  menuRightWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1C1832',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    minWidth: '47%',
-    flex: 1,
   },
-  themeColorOrb: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    justifyContent: 'center',
+  menuPillBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    maxWidth: 90,
+  },
+  menuPillText: {
+    color: '#E0DEEA',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    marginLeft: 65,
+  },
+  footerWrap: {
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
   },
-  themeOptionName: {
-    color: '#C7C4DA',
-    fontSize: 12,
-    fontWeight: '600',
+  footerTitle: {
+    color: '#4B475D',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1.5,
   },
-  activeDotPill: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  footerSub: {
+    color: '#3A3749',
+    fontSize: 11,
+    marginTop: 4,
   },
 
-  /* ── Media Player Options ── */
-  playerOptionItem: {
+  /* ── Bottom Sheet Modals ── */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetContainer: {
+    backgroundColor: '#12111A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomWidth: 0,
+    maxHeight: '88%',
+    minHeight: '45%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
+    elevation: 24,
+  },
+  sheetHandle: {
+    width: 42,
+    height: 4.5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.07)',
   },
-  playerOptionItemActive: {
-    backgroundColor: 'rgba(250, 36, 60, 0.05)',
+  sheetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
   },
-  playerOptionLeft: {
+  sheetIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 16.5,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  sheetHeaderSub: {
+    color: '#8E8B9E',
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  sheetCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  sheetBody: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  cardInnerLabel: {
+    color: '#7E7A94',
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    marginVertical: 16,
+  },
+
+  /* ── Theme Options Grid ── */
+  themeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  themeCard: {
+    width: '48%',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  themeCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  themeSwatchBig: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  themeActiveCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeName: {
+    color: '#E0DEEA',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  themeTag: {
+    color: '#7E7A94',
+    fontSize: 10.5,
+    marginTop: 3,
+  },
+
+  /* ── Video Player Cards ── */
+  playerCardsList: {
+    gap: 10,
+  },
+  playerSelectCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  playerSelectCardActive: {
+    borderColor: '#0A84FF',
+    backgroundColor: 'rgba(10, 132, 255, 0.08)',
+  },
+  playerCardLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
   playerIconBox: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: 11,
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
-  playerOptionTitle: {
+  playerCardName: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 14.5,
+    fontWeight: '600',
   },
-  playerOptionSub: {
-    color: '#8E8A9F',
+  playerCardDesc: {
+    color: '#8A879B',
     fontSize: 11,
     marginTop: 3,
     lineHeight: 15,
   },
-  featureBadge: {
-    backgroundColor: 'rgba(250, 36, 60, 0.2)',
+  activePillSmall: {
+    backgroundColor: 'rgba(10, 132, 255, 0.2)',
     paddingHorizontal: 6,
-    paddingVertical: 1.5,
+    paddingVertical: 2,
     borderRadius: 4,
   },
-  featureBadgeText: {
-    color: Colors.primary,
+  activePillSmallText: {
+    color: '#0A84FF',
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 0.4,
   },
   radioCircle: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#4A4660',
-    justifyContent: 'center',
+    borderWidth: 1.8,
+    borderColor: '#4A465D',
     alignItems: 'center',
-    marginLeft: 8,
+    justifyContent: 'center',
   },
 
-  /* ── Switch Rows ── */
+  /* ── Switches & Toggles ── */
   switchRowItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 6,
   },
   switchRowLeft: {
     flexDirection: 'row',
@@ -2173,92 +2520,100 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   switchRowSub: {
-    color: '#8E8A9F',
+    color: '#8A879B',
     fontSize: 11,
     marginTop: 2,
+    lineHeight: 15,
   },
 
-  /* ── Subtitle Chips & Key ── */
-  langChipsWrap: {
+  /* ── Subtitle Languages ── */
+  subLangGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  langChip: {
+  subLangChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#1B172E',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  langChipText: {
-    color: '#C7C4DA',
-    fontSize: 11.5,
-    fontWeight: '600',
-  },
-  langChipMore: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  langChipMoreText: {
-    color: '#FFFFFF',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  customKeyBox: {
-    padding: 14,
-    backgroundColor: '#100D1E',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  customKeyLabel: {
-    color: '#8E8A9F',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 6,
-  },
-  inputWithIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1A162D',
-    borderRadius: 12,
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
   },
-  keyTextInput: {
+  subLangChipActive: {
+    backgroundColor: 'rgba(255, 149, 0, 0.2)',
+    borderColor: '#FF9500',
+  },
+  subLangChipText: {
+    color: '#A09DB1',
+    fontSize: 11.5,
+    fontWeight: '600',
+  },
+  subLangChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  /* ── Inputs & Action Rows ── */
+  inputWithActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 10,
+    height: 44,
+    gap: 8,
+  },
+  urlTextInput: {
     flex: 1,
     color: '#FFFFFF',
     fontSize: 13,
-    paddingVertical: 10,
+    paddingVertical: 0,
   },
-  eyeToggleBtn: {
+  keyVisibilityBtn: {
     padding: 6,
   },
+  applyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  applyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
-  /* ── Server Card ── */
+  /* ── Server Card Header & Ping ── */
   serverCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   serverStatusGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
     flex: 1,
-    paddingRight: 10,
   },
   serverStatusCircle: {
     width: 10,
     height: 10,
     borderRadius: 5,
+    marginRight: 10,
   },
   serverHostTitle: {
     color: '#FFFFFF',
@@ -2266,24 +2621,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   serverStatusSub: {
-    color: '#8E8A9F',
-    fontSize: 10.5,
+    color: '#8A879B',
+    fontSize: 11,
     marginTop: 2,
   },
   pingBadgeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(10, 132, 255, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(10, 132, 255, 0.3)',
-    paddingHorizontal: 10,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(10, 132, 255, 0.35)',
+    backgroundColor: 'rgba(10, 132, 255, 0.12)',
   },
   pingBadgeText: {
     color: '#0A84FF',
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   presetsList: {
@@ -2292,83 +2647,53 @@ const styles = StyleSheet.create({
   presetRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#19152B',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderRadius: 12,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    padding: 10,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   presetRowActive: {
     borderColor: Colors.primary,
     backgroundColor: 'rgba(250, 36, 60, 0.08)',
   },
   presetIconWrap: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    justifyContent: 'center',
+    marginRight: 11,
   },
   presetRowTitle: {
-    color: '#E0DEED',
+    color: '#E0DEEA',
     fontSize: 13,
     fontWeight: '600',
   },
   presetRowUrl: {
-    color: '#8E8A9F',
+    color: '#7E7A94',
     fontSize: 11,
-    marginTop: 1,
-  },
-  inputWithActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  urlTextInput: {
-    flex: 1,
-    backgroundColor: '#19152B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    color: '#FFFFFF',
-    fontSize: 13,
-  },
-  applyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  applyBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
+    marginTop: 2,
   },
 
   /* ── Download Mode Cards ── */
   modeCardsList: {
-    gap: 8,
+    gap: 10,
   },
   modeCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#19152B',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderRadius: 14,
+    padding: 13,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    padding: 12,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   modeCardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: 'rgba(250, 36, 60, 0.07)',
+    borderColor: '#FF9500',
+    backgroundColor: 'rgba(255, 149, 0, 0.08)',
   },
   modeCardLeft: {
     flexDirection: 'row',
@@ -2379,9 +2704,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    justifyContent: 'center',
+    marginRight: 11,
   },
   modeCardTitle: {
     color: '#FFFFFF',
@@ -2389,41 +2714,52 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   modeCardSub: {
-    color: '#8E8A9F',
+    color: '#8A879B',
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 3,
     lineHeight: 15,
   },
+  recommendedPill: {
+    backgroundColor: 'rgba(48, 209, 88, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  recommendedPillText: {
+    color: '#30D158',
+    fontSize: 8.5,
+    fontWeight: '800',
+  },
 
-  /* ── Turbo Booster Banner ── */
+  /* ── Turbo Banner ── */
   turboBanner: {
     borderRadius: 14,
     padding: 14,
+    marginTop: 4,
   },
   turboBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 12,
   },
   turboIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   turboBannerTitle: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
+    fontSize: 15,
+    fontWeight: '800',
   },
   turboBannerSub: {
-    color: 'rgba(255, 255, 255, 0.9)',
+    color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 11,
-    lineHeight: 15,
     marginTop: 2,
+    lineHeight: 15,
   },
   turboTriggerBtn: {
     flexDirection: 'row',
@@ -2432,28 +2768,29 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
-    paddingVertical: 10,
+    paddingVertical: 9,
+    marginTop: 12,
   },
   turboTriggerText: {
     color: '#FA243C',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   boostNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(48, 209, 88, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(48, 209, 88, 0.35)',
+    gap: 8,
+    backgroundColor: 'rgba(48, 209, 88, 0.12)',
     borderRadius: 10,
     padding: 10,
     marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(48, 209, 88, 0.3)',
   },
   boostNoticeText: {
     color: '#30D158',
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '600',
     flex: 1,
   },
@@ -2463,348 +2800,128 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#19152B',
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: 'rgba(50, 215, 75, 0.08)',
+    borderRadius: 14,
+    padding: 13,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(50, 215, 75, 0.25)',
   },
   activeMirrorLabel: {
-    color: '#8E8A9F',
-    fontSize: 9.5,
+    color: '#32D74B',
+    fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   activeMirrorUrl: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
     marginTop: 2,
-  },
-  changeMirrorBtn: {
-    backgroundColor: 'rgba(50, 215, 75, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(50, 215, 75, 0.3)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  changeMirrorText: {
-    color: '#32D74B',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  mirrorChipsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  mirrorChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#19152B',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-  mirrorChipText: {
-    color: '#C7C4DA',
-    fontSize: 11,
-    fontWeight: '600',
   },
 
-  /* ── Storage Gauge & Actions ── */
-  storageGaugeHeader: {
+  /* ── Storage Bar & Legend ── */
+  storageBarRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    height: 9,
+    borderRadius: 4.5,
+    overflow: 'hidden',
+    backgroundColor: '#262438',
+    gap: 2,
+    marginTop: 4,
   },
-  storageGaugeTitle: {
-    color: '#FFFFFF',
-    fontSize: 13.5,
-    fontWeight: '700',
+  storageBarPart: {
+    height: '100%',
   },
-  storageGaugeSub: {
-    color: '#8E8A9F',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  rescanPillBtn: {
+  legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(250, 36, 60, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(250, 36, 60, 0.3)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-  },
-  rescanPillText: {
-    color: Colors.primary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  storageBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#201C34',
-    flexDirection: 'row',
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  storageBarApp: {
-    height: '100%',
-  },
-  storageBarOther: {
-    height: '100%',
-    backgroundColor: '#4A4E5D',
-  },
-  storageLegendRow: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginTop: 10,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
   },
   legendDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
-  legendLabel: {
-    color: '#8E8A9F',
-    fontSize: 10,
-  },
-  filePathCard: {
-    backgroundColor: '#100D1E',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    padding: 10,
-  },
-  filePathTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  folderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  folderLocationText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  shareBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  shareBadgeText: {
-    color: Colors.primary,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  filePathCode: {
-    color: '#C7C4DA',
-    fontSize: 11,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  actionsGrid: {
-    gap: 8,
-  },
-  actionGridCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#19152B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    padding: 12,
-    gap: 12,
-  },
-  destructiveActionCard: {
-    borderColor: 'rgba(255, 69, 58, 0.25)',
-    backgroundColor: 'rgba(255, 69, 58, 0.05)',
-  },
-  actionIconSquare: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionGridTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  actionGridSub: {
-    color: '#8E8A9F',
+  legendText: {
+    color: '#8A879B',
     fontSize: 10.5,
-    marginTop: 1,
   },
-
-  /* ── Footer Branding ── */
-  footerBranding: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    marginTop: 8,
-  },
-  footerLogoWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(250, 36, 60, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  footerAppName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: -0.2,
-  },
-  footerVersion: {
-    color: '#8E8A9F',
-    fontSize: 11.5,
-    marginTop: 2,
-  },
-  footerCopyright: {
-    color: '#6B677E',
-    fontSize: 10.5,
-    marginTop: 4,
-  },
-
-  /* ── Sub Modal Sheets ── */
-  subModalContainer: {
-    flex: 1,
-    backgroundColor: '#0F0C1B',
-  },
-  subModalHeader: {
+  storageActionRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 12,
   },
-  subModalHeaderTitle: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  subModalCloseBtn: {
+  storageActionIconWrap: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    marginRight: 12,
   },
-  subModalBody: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  specHeroBox: {
-    alignItems: 'center',
-    paddingVertical: 16,
-    marginBottom: 14,
-  },
-  specHeroIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  specHeroName: {
+  storageActionTitle: {
     color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 13,
+    fontWeight: '600',
   },
-  specHeroTag: {
-    color: '#8E8A9F',
-    fontSize: 12,
-    textAlign: 'center',
+  storageActionSub: {
+    color: '#8A879B',
+    fontSize: 11,
     marginTop: 2,
+  },
+
+  /* ── Specs & Support ── */
+  quickSupportCard: {
+    flex: 1,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  quickSupportTitle: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  quickSupportSub: {
+    color: '#8A879B',
+    fontSize: 10.5,
+  },
+  specsBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    padding: 12,
+    gap: 10,
   },
   specRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    justifyContent: 'space-between',
   },
   specLabel: {
-    color: '#8E8A9F',
-    fontSize: 13,
+    color: '#8A879B',
+    fontSize: 12,
   },
   specValue: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    maxWidth: '55%',
-    textAlign: 'right',
-  },
-  modalSearchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 6,
-    backgroundColor: '#19152B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  modalSearchInput: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 13,
-  },
-  langModalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  langModalName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  langModalCode: {
-    color: '#8E8A9F',
-    fontSize: 10.5,
-    marginTop: 1,
-  },
-  checkboxBox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#4A4660',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
+
+export default SettingsScreen;
