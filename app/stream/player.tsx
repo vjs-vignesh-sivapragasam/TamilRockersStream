@@ -111,7 +111,7 @@ const MediaPlayerScreen: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">(
-    Platform.OS === "ios" ? "ksplayer" : "native"
+    isKSPlayerSupported() ? "ksplayer" : "native"
   );
   const [hasTriedNative, setHasTriedNative] = useState(false);
 
@@ -463,7 +463,7 @@ const MediaPlayerScreen: React.FC = () => {
   // Fallback: react-native-video (ExoPlayer on Android, AVPlayer on iOS)
 
   function getPlayer() {
-    if (Platform.OS === "ios" && currentPlayerType === "ksplayer") {
+    if (isKSPlayerSupported() && currentPlayerType === "ksplayer") {
       try {
         const ks = require("../../components/ksplayer");
         if (ks && ks.MediaPlayer) return ks.MediaPlayer;
@@ -509,7 +509,7 @@ const MediaPlayerScreen: React.FC = () => {
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
         pictureInPictureEnabled={true}
-        onForceSwitchToKSPlayer={Platform.OS === "ios" ? () => {
+        onForceSwitchToKSPlayer={isKSPlayerSupported() ? () => {
           setCurrentPlayerType("ksplayer");
           setHasTriedNative(true);
         } : undefined}

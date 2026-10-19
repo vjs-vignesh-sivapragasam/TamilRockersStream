@@ -143,7 +143,26 @@ const withKSPlayerBuildSettings = (config) => {
         .filter((f) => f.endsWith('.swift') || f.endsWith('.m'));
 
       const target = project.getFirstTarget();
-      const groupKey = project.findPBXGroupKey({ name: projectName });
+
+      // Find group by name, by path, or by scanning all PBXGroups
+      let groupKey = project.findPBXGroupKey({ name: projectName })
+                  || project.findPBXGroupKey({ path: projectName })
+                  || project.findPBXGroupKey({ path: `"${projectName}"` });
+
+      if (!groupKey) {
+        const pbxGroups = project.hash.project.objects.PBXGroup || {};
+        for (const [key, grp] of Object.entries(pbxGroups)) {
+          if (typeof grp === 'object' && (grp.name === projectName || grp.path === projectName || grp.path === `"${projectName}"`)) {
+            groupKey = key;
+            break;
+          }
+        }
+      }
+
+      if (!groupKey) {
+        const firstProject = project.getFirstProject();
+        groupKey = firstProject?.firstProject?.mainGroup;
+      }
 
       if (!target || !groupKey) {
         console.warn('[withKSPlayer] Could not find Xcode target or group — skipping file addition');

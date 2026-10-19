@@ -7,6 +7,7 @@ import {
   ViewStyle,
   StyleSheet,
   View,
+  Platform,
 } from 'react-native';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -84,9 +85,21 @@ export interface KSPlayerRef {
 
 // ─── Native component ─────────────────────────────────────────────────────────
 
-const KSPlayerNative = requireNativeComponent<any>('KSPlayerView');
+const KSPlayerNative = (() => {
+  if (Platform.OS === 'ios') {
+    try {
+      if (UIManager.getViewManagerConfig?.('KSPlayerView') || (UIManager as any)?.hasViewManagerConfig?.('KSPlayerView')) {
+        return requireNativeComponent<any>('KSPlayerView');
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+})();
 
 function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[] = []) {
+  if (!KSPlayerNative) return;
   const node = findNodeHandle(ref.current);
   if (!node) return;
   const commands = UIManager.getViewManagerConfig('KSPlayerView')?.Commands;
@@ -150,6 +163,12 @@ export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, r
     (e: NativeSyntheticEvent<KSOnSubtitleTextData>) => props.onSubtitleText?.(e.nativeEvent),
     [props.onSubtitleText]
   );
+
+  if (!KSPlayerNative) {
+    return (
+      <View style={[styles.container, props.style]} />
+    );
+  }
 
   return (
     <View style={[styles.container, props.style]}>

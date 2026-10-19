@@ -5,7 +5,7 @@ import React
 import KSPlayer
 
 @objc(KSPlayerRNView)
-class KSPlayerRNView: UIView {
+public class KSPlayerRNView: UIView {
 
     @objc var url: String = "" {
         didSet {

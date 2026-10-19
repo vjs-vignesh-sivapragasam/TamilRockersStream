@@ -3,7 +3,7 @@ import React
 import KSPlayer
 
 @objc(KSPlayerViewManager)
-class KSPlayerViewManager: RCTViewManager {
+public class KSPlayerViewManager: RCTViewManager {
 
     override func view() -> UIView! {
         return KSPlayerRNView()

@@ -1,8 +1,17 @@
-import { Platform } from "react-native";
+import { Platform, UIManager } from "react-native";
 import { getOriginalPlatform } from "./platform";
 
 export const isKSPlayerSupported = (): boolean => {
-    return Platform.OS === 'ios';
+    if (Platform.OS !== 'ios') return false;
+    try {
+        if (!UIManager) return false;
+        return Boolean(
+            UIManager.getViewManagerConfig?.('KSPlayerView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('KSPlayerView')
+        );
+    } catch {
+        return false;
+    }
 };
 
 export const isNativeVideoSupported = (): boolean => {
