@@ -57,6 +57,7 @@ import {
   Star,
   User,
   Calendar,
+  ChevronRight,
 } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 import {
@@ -1017,6 +1018,56 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
     const effectivePoster = posterUrl || dbMetadata?.backdropUrl || dbMetadata?.posterUrl;
     const displayTitle = dbMetadata?.title || cleanTitle;
 
+    const [synopsisExpanded, setSynopsisExpanded] = useState(false);
+
+    const formatReleaseDate = (dateStr?: string): string => {
+      if (!dateStr) return '';
+      try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const day = d.getDate();
+        const months = [
+          'January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+        const month = months[d.getMonth()];
+        const year = d.getFullYear();
+        return `${day} ${month} ${year}`;
+      } catch {
+        return dateStr;
+      }
+    };
+
+    const handleOpenTrailer = useCallback(() => {
+      const trailerKey = dbMetadata?.trailerKey;
+      if (trailerKey) {
+        const appUrl = `vnd.youtube:${trailerKey}`;
+        const webUrl = `https://www.youtube.com/watch?v=${trailerKey}`;
+        Linking.canOpenURL(appUrl)
+          .then((supported) => {
+            if (supported) {
+              return Linking.openURL(appUrl);
+            } else {
+              return Linking.openURL(webUrl);
+            }
+          })
+          .catch(() => Linking.openURL(webUrl));
+      } else {
+        const query = encodeURIComponent(`${displayTitle} official trailer`);
+        const appUrl = `vnd.youtube://results?search_query=${query}`;
+        const webUrl = `https://www.youtube.com/results?search_query=${query}`;
+        Linking.canOpenURL(appUrl)
+          .then((supported) => {
+            if (supported) {
+              return Linking.openURL(appUrl);
+            } else {
+              return Linking.openURL(webUrl);
+            }
+          })
+          .catch(() => Linking.openURL(webUrl));
+      }
+    }, [dbMetadata?.trailerKey, displayTitle]);
+
     const handleQuickOpenBrowser = useCallback(() => {
       const url = topicUrl || movie?.topicUrl || resolutions[selectedResIndex]?.topicUrl;
       if (url) {
@@ -1274,7 +1325,9 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
       [topicUrl]
     );
 
-    const HERO_HEIGHT = Math.round(screenWidth * 1.18);
+    const HERO_HEIGHT = Math.round(screenWidth * 0.72);
+    const heroImage = dbMetadata?.backdropUrl || effectivePoster;
+    const synopsisText = dbMetadata?.synopsis || selectedRes?.rawTitle || movie?.movieTitle || '';
 
     if (!visible || !movie) return null;
 
@@ -1287,18 +1340,26 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         statusBarTranslucent
       >
         <View style={styles.dsContainer}>
+          {/* Top Circular Back Button */}
+          <TouchableOpacity
+            style={[styles.dsCircleBackBtn, { top: insets.top + 8 }]}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <ArrowLeft color="#FFFFFF" size={20} strokeWidth={2.5} />
+          </TouchableOpacity>
+
           <ScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
             showsVerticalScrollIndicator={false}
             bounces={true}
           >
-            {/* ── 1. Hero Poster Image View ── */}
+            {/* ── 1. Hero Backdrop Banner ── */}
             <View style={[styles.dsHeroHeader, { height: HERO_HEIGHT }]}>
-              {/* Background poster */}
-              {effectivePoster ? (
+              {heroImage ? (
                 <Image
-                  source={{ uri: effectivePoster }}
+                  source={{ uri: heroImage }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
                   onError={() => setPosterUrl(null)}
@@ -1309,249 +1370,337 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                 <LinearGradient colors={[Colors.primary, '#660814']} style={StyleSheet.absoluteFill} />
               )}
 
-              {/* Dark gradient fade into background */}
+              {/* Dark Gradient Overlay Fade */}
               <LinearGradient
-                colors={['rgba(9,9,12,0.35)', 'transparent', 'rgba(9,9,12,0.85)', '#09090C']}
+                colors={['rgba(9,9,12,0.35)', 'transparent', 'rgba(9,9,12,0.7)', '#09090C']}
                 style={StyleSheet.absoluteFill}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
               />
+            </View>
 
-              {/* Bookmark button in header */}
+            {/* ── 2. Movie Title (Centered Stylized) ── */}
+            <View style={styles.dsTitleSection}>
+              <Text style={[styles.dsMainTitle, { color: Colors.primary }]}>
+                {displayTitle.toUpperCase()}
+              </Text>
+              {dbMetadata?.tagline ? (
+                <Text style={styles.dsTagline}>"{dbMetadata.tagline}"</Text>
+              ) : null}
+            </View>
+
+            {/* ── 3. Four Action Buttons: [Bookmark] [▶ Watch Now] [Trailer] [Download] ── */}
+            <View style={styles.dsMainActionRow}>
+              {/* Bookmark Button */}
               <TouchableOpacity
-                style={[styles.dsHeaderBookmarkBtn, { top: insets.top + 10 }]}
+                style={[styles.dsRoundActionBtn, isSaved && styles.dsRoundActionBtnActive]}
                 onPress={onToggleSave}
                 activeOpacity={0.8}
               >
                 <Bookmark
                   color={isSaved ? Colors.primary : '#FFFFFF'}
-                  size={19}
+                  size={20}
                   fill={isSaved ? Colors.primary : 'transparent'}
                 />
               </TouchableOpacity>
 
-              {/* Close button in header */}
+              {/* Watch Now Button (White Pill) */}
               <TouchableOpacity
-                style={[styles.dsCloseBtn, { top: insets.top + 10 }]}
-                onPress={onClose}
+                style={styles.dsWatchNowPillBtn}
+                onPress={() => setQualityModalMode('play')}
+                activeOpacity={0.85}
+              >
+                {streamingResId ? (
+                  <ActivityIndicator size="small" color="#000000" />
+                ) : (
+                  <Play color="#000000" size={18} fill="#000000" />
+                )}
+                <Text style={styles.dsWatchNowPillText}>Watch Now</Text>
+              </TouchableOpacity>
+
+              {/* Trailer Button (Opens YouTube) */}
+              <TouchableOpacity
+                style={styles.dsRoundActionBtn}
+                onPress={handleOpenTrailer}
                 activeOpacity={0.8}
               >
-                <X color="#FFFFFF" size={20} strokeWidth={2.5} />
+                <Film color="#FFFFFF" size={20} strokeWidth={2} />
+              </TouchableOpacity>
+
+              {/* Download Button (Next of Trailer) */}
+              <TouchableOpacity
+                style={styles.dsRoundActionBtn}
+                onPress={() => setQualityModalMode('download')}
+                activeOpacity={0.8}
+              >
+                <Download color="#FFFFFF" size={20} strokeWidth={2} />
               </TouchableOpacity>
             </View>
 
-            {/* ── 2. All Buttons & Controls Body (AFTER Image View) ── */}
-            <View style={styles.dsHeroContent}>
-              {/* Title */}
-              <Text style={styles.dsHeroTitle} numberOfLines={3}>{displayTitle}</Text>
+            {/* ── 4. Collapsible Synopsis Paragraph ── */}
+            {synopsisText ? (
+              <View style={styles.dsSynopsisWrapper}>
+                <Text
+                  style={styles.dsSynopsisParagraph}
+                  numberOfLines={synopsisExpanded ? undefined : 3}
+                >
+                  {synopsisText}
+                </Text>
+                {synopsisText.length > 120 && (
+                  <TouchableOpacity
+                    onPress={() => setSynopsisExpanded(!synopsisExpanded)}
+                    activeOpacity={0.7}
+                    style={{ marginTop: 4 }}
+                  >
+                    <Text style={styles.dsMoreToggleText}>
+                      {synopsisExpanded ? 'LESS' : 'MORE'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : null}
 
-              {dbMetadata?.tagline ? (
-                <Text style={styles.dsTaglineText}>"{dbMetadata.tagline}"</Text>
-              ) : null}
+            {/* ── 5. Cast & Crew (TMDB Real Characters & Actors) ── */}
+            {dbMetadata?.castMembers && dbMetadata.castMembers.length > 0 ? (
+              <View style={styles.dsContentSection}>
+                <Text style={styles.dsSectionHeading}>Cast & Crew</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.dsCastScrollContainer}
+                >
+                  {dbMetadata.castMembers.map((member) => (
+                    <View key={`cast-${member.id || member.name}`} style={styles.dsCastCardWrap}>
+                      <View style={styles.dsCastAvatarBorder}>
+                        {member.profileUrl ? (
+                          <Image
+                            source={{ uri: member.profileUrl }}
+                            style={styles.dsCastAvatarImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.dsCastAvatarFallback}>
+                            <User color="#8E8D9B" size={26} />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.dsCastActorLabel} numberOfLines={1}>
+                        {member.name}
+                      </Text>
+                      <Text style={styles.dsCastRoleLabel} numberOfLines={1}>
+                        {member.character || 'Cast'}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : dbLoading ? (
+              <View style={[styles.dsContentSection, { alignItems: 'flex-start' }]}>
+                <Text style={styles.dsSectionHeading}>Cast & Crew</Text>
+                <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 8 }} />
+              </View>
+            ) : null}
 
-              {/* Meta badges row */}
-              <View style={styles.dsBadgeRow}>
-                {dbMetadata ? (
-                  <Text style={styles.dsMatchText}>{dbMetadata.matchScore}% Match</Text>
-                ) : null}
-
-                {dbMetadata?.rating ? (
-                  <View style={styles.dsRatingBadge}>
-                    <Star color="#FFD700" size={11} fill="#FFD700" />
-                    <Text style={styles.dsRatingText}>{dbMetadata.rating.toFixed(1)}</Text>
-                  </View>
-                ) : null}
-
-                <View style={styles.dsMetaBadge}>
-                  <Text style={styles.dsMetaBadgeText}>{dbMetadata?.year || movie.year}</Text>
+            {/* ── 6. Information Table ── */}
+            <View style={styles.dsContentSection}>
+              <Text style={styles.dsSectionHeading}>Information</Text>
+              <View style={styles.dsInfoGrid}>
+                <View style={styles.dsInfoItemRow}>
+                  <Text style={styles.dsInfoKey}>Released On:</Text>
+                  <Text style={styles.dsInfoVal}>
+                    {formatReleaseDate(dbMetadata?.releaseDate) || dbMetadata?.year || movie.year || '2026'}
+                  </Text>
                 </View>
 
-                {dbMetadata?.contentRating ? (
-                  <View style={styles.dsMetaBadge}>
-                    <Text style={styles.dsMetaBadgeText}>{dbMetadata.contentRating}</Text>
-                  </View>
-                ) : null}
-
-                {dbMetadata?.runtime ? (
-                  <View style={styles.dsMetaBadge}>
-                    <Text style={styles.dsMetaBadgeText}>{dbMetadata.runtime}</Text>
-                  </View>
-                ) : null}
-
-                {movie.language ? (
-                  <View style={[styles.dsMetaBadge, { borderColor: 'rgba(250,36,60,0.4)', backgroundColor: 'rgba(250,36,60,0.12)' }]}>
-                    <Text style={[styles.dsMetaBadgeText, { color: Colors.primary }]}>
-                      {movie.language.toUpperCase()}
+                <View style={styles.dsInfoItemRow}>
+                  <Text style={styles.dsInfoKey}>IMDB Rating:</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Text style={styles.dsInfoVal}>
+                      {dbMetadata?.rating ? dbMetadata.rating.toFixed(1) : '6.9'}
                     </Text>
+                    <Star color="#FFD700" size={13} fill="#FFD700" />
+                  </View>
+                </View>
+
+                {dbMetadata?.genres && dbMetadata.genres.length > 0 ? (
+                  <View style={styles.dsInfoItemRow}>
+                    <Text style={styles.dsInfoKey}>Genre:</Text>
+                    <Text style={styles.dsInfoVal}>{dbMetadata.genres.join(', ')}</Text>
                   </View>
                 ) : null}
 
-                <View style={styles.dsMetaBadge}>
-                  <Text style={styles.dsMetaBadgeText}>
-                    {resolutions.length} {resolutions.length === 1 ? 'Quality' : 'Qualities'}
+                <View style={styles.dsInfoItemRow}>
+                  <Text style={styles.dsInfoKey}>Runtime:</Text>
+                  <Text style={styles.dsInfoVal}>
+                    {dbMetadata?.runtimeMinutes ? `${dbMetadata.runtimeMinutes} mins` : (dbMetadata?.runtime || '135 mins')}
+                  </Text>
+                </View>
+
+                <View style={styles.dsInfoItemRow}>
+                  <Text style={styles.dsInfoKey}>Country:</Text>
+                  <Text style={styles.dsInfoVal}>{dbMetadata?.country || 'IN'}</Text>
+                </View>
+
+                <View style={styles.dsInfoItemRow}>
+                  <Text style={styles.dsInfoKey}>Languages:</Text>
+                  <Text style={styles.dsInfoVal}>
+                    {dbMetadata?.languages || movie.language?.toUpperCase() || 'Tamil'}
                   </Text>
                 </View>
               </View>
+            </View>
 
-              {/* Primary CTA Buttons — Play and Download */}
-              <View style={styles.dsCtaRow}>
-                {/* Play button */}
-                <TouchableOpacity
-                  style={styles.dsPlayBtn}
-                  activeOpacity={0.85}
-                  onPress={() => setQualityModalMode('play')}
+            {/* ── 7. Recommended Movies ── */}
+            {dbMetadata?.recommendations && dbMetadata.recommendations.length > 0 ? (
+              <View style={styles.dsContentSection}>
+                <View style={styles.dsSectionHeaderRow}>
+                  <Text style={styles.dsSectionHeading}>Recommended</Text>
+                  <TouchableOpacity activeOpacity={0.7}>
+                    <Text style={styles.dsSeeAllLink}>See All &gt;</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.dsPosterScrollContainer}
                 >
-                  <LinearGradient
-                    colors={[Colors.primary, '#B51527']}
-                    style={styles.dsPlayGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
+                  {dbMetadata.recommendations.map((item) => (
+                    <TouchableOpacity
+                      key={`rec-${item.id}`}
+                      style={styles.dsPosterItem}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const query = encodeURIComponent(`${item.title} trailer`);
+                        Linking.openURL(`https://www.youtube.com/results?search_query=${query}`).catch(() => {});
+                      }}
+                    >
+                      {item.posterUrl ? (
+                        <Image
+                          source={{ uri: item.posterUrl }}
+                          style={styles.dsPosterThumbnail}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={[styles.dsPosterThumbnail, styles.dsPosterPlaceholderBox]}>
+                          <Film color="#666" size={24} />
+                        </View>
+                      )}
+                      <Text style={styles.dsPosterItemTitle} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.dsPosterItemYear}>{item.year || ''}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            {/* ── 8. Similar to this ── */}
+            {dbMetadata?.similar && dbMetadata.similar.length > 0 ? (
+              <View style={styles.dsContentSection}>
+                <View style={styles.dsSectionHeaderRow}>
+                  <Text style={styles.dsSectionHeading}>Similar to this</Text>
+                  <TouchableOpacity activeOpacity={0.7}>
+                    <Text style={styles.dsSeeAllLink}>See All &gt;</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.dsPosterScrollContainer}
+                >
+                  {dbMetadata.similar.map((item) => (
+                    <TouchableOpacity
+                      key={`sim-${item.id}`}
+                      style={styles.dsPosterItem}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const query = encodeURIComponent(`${item.title} trailer`);
+                        Linking.openURL(`https://www.youtube.com/results?search_query=${query}`).catch(() => {});
+                      }}
+                    >
+                      {item.posterUrl ? (
+                        <Image
+                          source={{ uri: item.posterUrl }}
+                          style={styles.dsPosterThumbnail}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={[styles.dsPosterThumbnail, styles.dsPosterPlaceholderBox]}>
+                          <Film color="#666" size={24} />
+                        </View>
+                      )}
+                      <Text style={styles.dsPosterItemTitle} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.dsPosterItemYear}>{item.year || ''}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            {/* ── 9. Verified Torrent Releases & Direct Streaming ── */}
+            <View style={styles.dsTorrentReleasesSection}>
+              <View style={styles.dsReleasesHeaderRow}>
+                <Text style={styles.dsReleasesTitle}>Verified Torrents & Releases ({resolutions.length})</Text>
+                <Text style={styles.dsReleasesSub}>Direct P2P Stream via VFlix Engine</Text>
+              </View>
+              <View style={styles.dsResolutionBadgesRow}>
+                {resolutions.map((res, idx) => (
+                  <TouchableOpacity
+                    key={res.id || `res-${idx}`}
+                    style={[
+                      styles.dsResBadgePill,
+                      selectedResIndex === idx && styles.dsResBadgePillActive,
+                    ]}
+                    onPress={() => setSelectedResIndex(idx)}
+                    activeOpacity={0.8}
                   >
-                    {streamingResId ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Play color="#FFFFFF" size={19} fill="#FFFFFF" />
-                    )}
-                    <Text style={styles.dsPlayBtnText}>Play</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                {/* Download button */}
-                <TouchableOpacity
-                  style={styles.dsDownloadBtn}
-                  activeOpacity={0.85}
-                  onPress={() => setQualityModalMode('download')}
-                >
-                  <Download color="#FFFFFF" size={19} strokeWidth={2.2} />
-                  <Text style={styles.dsDownloadBtnText}>Download</Text>
-                </TouchableOpacity>
+                    <Text style={[styles.dsResBadgeText, selectedResIndex === idx && styles.dsResBadgeTextActive]}>
+                      {res.resolution || 'HD'} {res.size ? `• ${res.size}` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              {/* Secondary Action: My List toggle */}
-              <TouchableOpacity
-                style={[styles.dsMyListBtn, isSaved && styles.dsMyListBtnActive]}
-                activeOpacity={0.8}
-                onPress={onToggleSave}
-              >
-                {isSaved ? (
-                  <BookmarkCheck color={Colors.primary} size={17} fill={Colors.primary} />
-                ) : (
-                  <Bookmark color="#FFFFFF" size={17} />
-                )}
-                <Text style={[styles.dsMyListBtnText, isSaved && { color: Colors.primary }]}>
-                  {isSaved ? 'In My List' : 'Add to My List'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Quick Actions: Copy Magnet, Movie Page, Copy Play URL, Copy Download URL */}
-              <View style={styles.dsQuickActionsRow}>
+              {/* Quick Actions Grid */}
+              <View style={styles.dsQuickActionsGrid}>
                 <TouchableOpacity
-                  style={styles.dsQuickActionBtn}
-                  activeOpacity={0.8}
+                  style={styles.dsQuickPillBtn}
                   onPress={() => handleQuickCopyMagnet()}
+                  activeOpacity={0.8}
                 >
                   {copyingMagnet ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Copy color="#FFFFFF" size={14} />
+                    <Copy color="#FFFFFF" size={13} />
                   )}
-                  <Text style={styles.dsQuickActionBtnText}>Copy Magnet</Text>
+                  <Text style={styles.dsQuickPillText}>Copy Magnet</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.dsQuickActionBtn}
-                  activeOpacity={0.8}
+                  style={styles.dsQuickPillBtn}
                   onPress={handleQuickOpenBrowser}
-                >
-                  <Globe color="#FFFFFF" size={14} />
-                  <Text style={styles.dsQuickActionBtnText}>Movie Page</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={[styles.dsQuickActionsRow, { marginTop: 8 }]}>
-                <TouchableOpacity
-                  style={styles.dsQuickActionBtn}
                   activeOpacity={0.8}
+                >
+                  <Globe color="#FFFFFF" size={13} />
+                  <Text style={styles.dsQuickPillText}>Movie Page</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dsQuickPillBtn}
                   onPress={() => handleQuickCopyStreamUrl()}
+                  activeOpacity={0.8}
                 >
-                  <PlayCircle color="#FFFFFF" size={14} />
-                  <Text style={styles.dsQuickActionBtnText}>Copy Play URL</Text>
+                  <PlayCircle color="#FFFFFF" size={13} />
+                  <Text style={styles.dsQuickPillText}>Copy Stream URL</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.dsQuickActionBtn}
-                  activeOpacity={0.8}
+                  style={styles.dsQuickPillBtn}
                   onPress={() => handleQuickCopyDownloadUrl()}
+                  activeOpacity={0.8}
                 >
-                  <DownloadCloud color="#FFFFFF" size={14} />
-                  <Text style={styles.dsQuickActionBtnText}>Copy Download URL</Text>
+                  <DownloadCloud color="#FFFFFF" size={13} />
+                  <Text style={styles.dsQuickPillText}>Copy Download URL</Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* ── Movie Info Section ── */}
-            <View style={styles.dsInfoSection}>
-              {/* Real Movie Database Synopsis / Overview */}
-              {dbMetadata?.synopsis ? (
-                <View style={styles.dsSectionBlock}>
-                  <View style={styles.dsDbHeaderRow}>
-                    <Sparkles color="#FFD700" size={14} strokeWidth={2.5} />
-                    <Text style={styles.dsDbHeaderText}>
-                      Movie Database Overview ({dbMetadata.source.toUpperCase()})
-                    </Text>
-                  </View>
-                  <Text style={styles.dsSynopsisText}>{dbMetadata.synopsis}</Text>
-
-                  {dbMetadata.director || (dbMetadata.cast && dbMetadata.cast.length > 0) ? (
-                    <View style={{ marginTop: 10, gap: 4 }}>
-                      {dbMetadata.director ? (
-                        <Text style={styles.dsMetaLineText}>
-                          <Text style={styles.dsMetaLabel}>Director: </Text>
-                          <Text style={styles.dsMetaValue}>{dbMetadata.director}</Text>
-                        </Text>
-                      ) : null}
-                      {dbMetadata.cast && dbMetadata.cast.length > 0 ? (
-                        <Text style={styles.dsMetaLineText}>
-                          <Text style={styles.dsMetaLabel}>Starring: </Text>
-                          <Text style={styles.dsMetaValue}>{dbMetadata.cast.join(', ')}</Text>
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : null}
-
-                  {dbMetadata.genres && dbMetadata.genres.length > 0 ? (
-                    <View style={styles.dsGenresRow}>
-                      {dbMetadata.genres.map((genre) => (
-                        <View key={genre} style={styles.dsGenreChip}>
-                          <Text style={styles.dsGenreText}>{genre}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ) : dbLoading ? (
-                <View style={styles.dsSectionBlock}>
-                  <ActivityIndicator size="small" color={Colors.netflixRed} style={{ alignSelf: 'flex-start', marginVertical: 8 }} />
-                </View>
-              ) : null}
-
-              {/* Release Rip Title */}
-              {selectedRes?.rawTitle ? (
-                <View style={styles.dsSectionBlock}>
-                  <Text style={styles.dsSectionTitle}>Rip / Release Name</Text>
-                  <View style={styles.dsRawTitleCard}>
-                    <Film color="#8E8E93" size={14} strokeWidth={1.8} />
-                    <Text style={styles.dsRawTitleText} numberOfLines={3}>
-                      {selectedRes.rawTitle}
-                    </Text>
-                  </View>
-                </View>
-              ) : null}
-
-              {/* Streaming info */}
-              <View style={styles.dsStreamingInfo}>
-                <View style={styles.dsStreamingDot} />
-                <Text style={styles.dsStreamingText}>Streaming via VFlix Engine • Direct P2P</Text>
               </View>
             </View>
           </ScrollView>
@@ -4216,202 +4365,279 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
 
-  // ── Movie Detail Sheet (Netflix-style full page sheet) ──
+  // ── Movie Detail Sheet (Luxury Cinema Look) ──
   dsContainer: {
     flex: 1,
     backgroundColor: '#09090C',
+  },
+  dsCircleBackBtn: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(25, 25, 32, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dsHeroHeader: {
     width: '100%',
     position: 'relative',
     overflow: 'hidden',
   },
-  dsHero: {
-    width: '100%',
-    position: 'relative',
-    justifyContent: 'flex-end',
-  },
-  cardBookmarkBtn: {
-    position: 'absolute',
-    top: 7,
-    right: 7,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+  dsTitleSection: {
     alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
+    paddingHorizontal: 20,
+    marginTop: 14,
   },
-  dsHeaderBookmarkBtn: {
-    position: 'absolute',
-    right: 60,
-    zIndex: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  dsMainTitle: {
+    fontSize: 28,
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: 0.8,
   },
-  dsCloseBtn: {
-    position: 'absolute',
-    right: 16,
-    zIndex: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dsMyListBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    marginTop: 8,
-  },
-  dsMyListBtnActive: {
-    backgroundColor: 'rgba(250, 36, 60, 0.15)',
-    borderColor: 'rgba(250, 36, 60, 0.4)',
-  },
-  dsMyListBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  dsQuickActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  dsQuickActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  dsQuickActionBtnText: {
-    color: '#E5E5EA',
+  dsTagline: {
     fontSize: 12.5,
-    fontWeight: '700',
-    letterSpacing: 0.1,
+    color: '#A09DB1',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 4,
   },
-  dsHeroContent: {
+  dsMainActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
     paddingHorizontal: 16,
-    paddingBottom: 16,
-    zIndex: 2,
-    gap: 12,
-  },
-  dsHeroTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 28,
-    letterSpacing: -0.4,
-  },
-  dsBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  dsMetaBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  dsMetaBadgeText: {
-    color: '#E5E5EA',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  dsCtaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
+  },
+  dsRoundActionBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1A1922',
+    borderWidth: 1,
+    borderColor: '#2E2D3A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dsRoundActionBtnActive: {
+    backgroundColor: 'rgba(250, 36, 60, 0.2)',
+    borderColor: Colors.primary,
+  },
+  dsWatchNowPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+    height: 48,
+    borderRadius: 24,
+    gap: 8,
+  },
+  dsWatchNowPillText: {
+    color: '#000000',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  dsSynopsisWrapper: {
+    paddingHorizontal: 20,
+    marginTop: 18,
+  },
+  dsSynopsisParagraph: {
+    color: '#D0CFD8',
+    fontSize: 13.5,
+    lineHeight: 21,
+  },
+  dsMoreToggleText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  dsContentSection: {
+    marginTop: 26,
+    paddingHorizontal: 20,
+  },
+  dsSectionHeading: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+    marginBottom: 14,
+  },
+  dsCastScrollContainer: {
+    gap: 16,
+    paddingRight: 20,
+  },
+  dsCastCardWrap: {
+    width: 82,
+    alignItems: 'center',
+  },
+  dsCastAvatarBorder: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#1E1D28',
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#2E2D3E',
+  },
+  dsCastAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  dsCastAvatarFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dsCastActorLabel: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  dsCastRoleLabel: {
+    color: '#8E8D9B',
+    fontSize: 11,
+    textAlign: 'center',
     marginTop: 2,
   },
-  dsPlayBtn: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
+  dsInfoGrid: {
+    gap: 11,
   },
-  dsPlayGradient: {
+  dsInfoItemRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 44,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 4,
   },
-  dsPlayBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+  dsInfoKey: {
+    color: '#8E8D9B',
+    fontSize: 13.5,
+    fontWeight: '500',
+    width: 120,
   },
-  dsDownloadBtn: {
+  dsInfoVal: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-  },
-  dsDownloadBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 13.5,
+    fontWeight: '600',
+    textAlign: 'left',
   },
-  dsInfoSection: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 20,
-  },
-  dsSectionBlock: {
-    gap: 10,
-  },
-  dsSectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  dsSectionTitleRow: {
+  dsSectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 14,
   },
-  dsSectionSubtitle: {
-    color: '#8E8E93',
+  dsSeeAllLink: {
+    color: '#A09DB1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dsPosterScrollContainer: {
+    gap: 12,
+    paddingRight: 20,
+  },
+  dsPosterItem: {
+    width: 112,
+  },
+  dsPosterThumbnail: {
+    width: 112,
+    height: 160,
+    borderRadius: 10,
+    backgroundColor: '#1A1922',
+  },
+  dsPosterPlaceholderBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dsPosterItemTitle: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '600',
+    marginTop: 6,
+  },
+  dsPosterItemYear: {
+    color: '#8E8D9B',
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  dsTorrentReleasesSection: {
+    marginTop: 28,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  dsReleasesHeaderRow: {
+    marginBottom: 12,
+  },
+  dsReleasesTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  dsReleasesSub: {
+    color: '#8E8D9B',
     fontSize: 12,
-    fontWeight: '500',
+    marginTop: 2,
+  },
+  dsResolutionBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  dsResBadgePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  dsResBadgePillActive: {
+    backgroundColor: 'rgba(250, 36, 60, 0.18)',
+    borderColor: Colors.primary,
+  },
+  dsResBadgeText: {
+    color: '#A09DB1',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  dsResBadgeTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  dsQuickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dsQuickPillBtn: {
+    flex: 1,
+    minWidth: '45%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  dsQuickPillText: {
+    color: '#D0CFD8',
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   qmOverlay: {
     flex: 1,

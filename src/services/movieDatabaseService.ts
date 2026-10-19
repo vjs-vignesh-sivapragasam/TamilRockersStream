@@ -7,6 +7,21 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { useState, useEffect } from 'react';
 
+export interface CastMember {
+  id: number;
+  name: string;
+  character: string;
+  profileUrl?: string | null;
+}
+
+export interface RecommendationMovie {
+  id: number;
+  title: string;
+  posterUrl?: string | null;
+  year?: string;
+  rating?: number;
+}
+
 export interface RealMovieMetadata {
   title: string;
   originalTitle?: string;
@@ -19,11 +34,18 @@ export interface RealMovieMetadata {
   year: string;
   releaseDate?: string;
   runtime?: string; // e.g. '2h 49m'
+  runtimeMinutes?: number; // e.g. 157
+  country?: string; // e.g. 'KR'
+  languages?: string; // e.g. 'Korean'
   genres: string[];
   cast: string[];
+  castMembers?: CastMember[];
   director?: string;
   backdropUrl?: string;
   posterUrl?: string;
+  trailerKey?: string;
+  recommendations?: RecommendationMovie[];
+  similar?: RecommendationMovie[];
   source: 'tmdb' | 'itunes';
 }
 
@@ -168,14 +190,20 @@ export async function fetchMovieDatabaseMetadata(
     if (data && data.results && data.results.length > 0) {
       const m = data.results[0];
 
-      // Fetch full TMDB movie details and cast credits
+      // Fetch full TMDB movie details, cast credits, videos, recommendations & similar
       try {
         const detailRes = await fetch(
-          `${TMDB_BASE_URL}/movie/${m.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`
+          `${TMDB_BASE_URL}/movie/${m.id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos,recommendations,similar`
         );
         if (detailRes.ok) {
           const d = await detailRes.json();
-          const castList = (d.credits?.cast || []).slice(0, 6).map((c: any) => c.name);
+          const castList = (d.credits?.cast || []).slice(0, 10).map((c: any) => c.name);
+          const castMembers: CastMember[] = (d.credits?.cast || []).slice(0, 16).map((c: any) => ({
+            id: c.id,
+            name: c.name || '',
+            character: c.character || '',
+            profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+          }));
           const directorObj = (d.credits?.crew || []).find((c: any) => c.job === 'Director');
           const runtimeMins = d.runtime || 0;
           const runtimeStr =
@@ -185,6 +213,33 @@ export async function fetchMovieDatabaseMetadata(
 
           const voteAvg = Number((d.vote_average || m.vote_average || 0).toFixed(1));
           const relYear = (d.release_date || m.release_date || year || '').substring(0, 4);
+
+          // Find YouTube trailer key
+          const trailer = (d.videos?.results || []).find(
+            (v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
+          ) || (d.videos?.results || []).find((v: any) => v.site === 'YouTube');
+          const trailerKey = trailer?.key;
+
+          // Recommendations
+          const recommendations: RecommendationMovie[] = (d.recommendations?.results || []).slice(0, 10).map((r: any) => ({
+            id: r.id,
+            title: r.title || '',
+            posterUrl: r.poster_path ? `https://image.tmdb.org/t/p/w342${r.poster_path}` : null,
+            year: (r.release_date || '').substring(0, 4),
+            rating: Number((r.vote_average || 0).toFixed(1)),
+          }));
+
+          // Similar movies
+          const similar: RecommendationMovie[] = (d.similar?.results || []).slice(0, 10).map((s: any) => ({
+            id: s.id,
+            title: s.title || '',
+            posterUrl: s.poster_path ? `https://image.tmdb.org/t/p/w342${s.poster_path}` : null,
+            year: (s.release_date || '').substring(0, 4),
+            rating: Number((s.vote_average || 0).toFixed(1)),
+          }));
+
+          const country = d.production_countries?.[0]?.iso_3166_1 || (d.origin_country?.[0] || 'IN');
+          const languages = d.spoken_languages?.map((l: any) => l.english_name || l.name).filter(Boolean).join(', ') || d.original_language?.toUpperCase() || 'Tamil';
 
           const result: RealMovieMetadata = {
             title: d.title || m.title,
@@ -198,11 +253,18 @@ export async function fetchMovieDatabaseMetadata(
             year: relYear,
             releaseDate: d.release_date || m.release_date,
             runtime: runtimeStr,
+            runtimeMinutes: runtimeMins,
+            country,
+            languages,
             genres: (d.genres || []).map((g: any) => g.name),
             cast: castList,
+            castMembers,
             director: directorObj?.name,
             backdropUrl: d.backdrop_path ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}` : undefined,
             posterUrl: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : undefined,
+            trailerKey,
+            recommendations,
+            similar,
             source: 'tmdb',
           };
 
