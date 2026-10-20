@@ -1468,7 +1468,8 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
             ) : null}
 
             {/* ── 5. Cast & Crew (TMDB Real Characters & Actors) ── */}
-            {dbMetadata?.castMembers && dbMetadata.castMembers.length > 0 ? (
+            {((dbMetadata?.castMembers && dbMetadata.castMembers.length > 0) ||
+              (dbMetadata?.cast && dbMetadata.cast.length > 0)) ? (
               <View style={styles.dsContentSection}>
                 <Text style={styles.dsSectionHeading}>Cast & Crew</Text>
                 <ScrollView
@@ -1476,29 +1477,63 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.dsCastScrollContainer}
                 >
-                  {dbMetadata.castMembers.map((member) => (
-                    <View key={`cast-${member.id || member.name}`} style={styles.dsCastCardWrap}>
-                      <View style={styles.dsCastAvatarBorder}>
-                        {member.profileUrl ? (
-                          <Image
-                            source={{ uri: member.profileUrl }}
-                            style={styles.dsCastAvatarImage}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View style={styles.dsCastAvatarFallback}>
-                            <User color="#8E8D9B" size={26} />
-                          </View>
-                        )}
+                  {/* Director Card if available */}
+                  {dbMetadata?.director && (
+                    <View key="cast-director" style={styles.dsCastCardWrap}>
+                      <View style={[styles.dsCastAvatarBorder, { borderColor: theme.primary }]}>
+                        <View style={styles.dsCastAvatarFallback}>
+                          <User color={theme.primary} size={26} />
+                        </View>
                       </View>
                       <Text style={styles.dsCastActorLabel} numberOfLines={1}>
-                        {member.name}
+                        {dbMetadata.director}
                       </Text>
-                      <Text style={styles.dsCastRoleLabel} numberOfLines={1}>
-                        {member.character || 'Cast'}
+                      <Text style={[styles.dsCastRoleLabel, { color: theme.primary }]} numberOfLines={1}>
+                        Director
                       </Text>
                     </View>
-                  ))}
+                  )}
+
+                  {/* TMDB Cast Members with headshots */}
+                  {dbMetadata?.castMembers && dbMetadata.castMembers.length > 0
+                    ? dbMetadata.castMembers.map((member) => (
+                        <View key={`cast-${member.id || member.name}`} style={styles.dsCastCardWrap}>
+                          <View style={styles.dsCastAvatarBorder}>
+                            {member.profileUrl ? (
+                              <Image
+                                source={{ uri: member.profileUrl }}
+                                style={styles.dsCastAvatarImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View style={styles.dsCastAvatarFallback}>
+                                <User color="#8E8D9B" size={26} />
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.dsCastActorLabel} numberOfLines={1}>
+                            {member.name}
+                          </Text>
+                          <Text style={styles.dsCastRoleLabel} numberOfLines={1}>
+                            {member.character || 'Cast'}
+                          </Text>
+                        </View>
+                      ))
+                    : (dbMetadata?.cast || []).map((actorName, idx) => (
+                        <View key={`cast-str-${idx}-${actorName}`} style={styles.dsCastCardWrap}>
+                          <View style={styles.dsCastAvatarBorder}>
+                            <View style={styles.dsCastAvatarFallback}>
+                              <User color="#8E8D9B" size={26} />
+                            </View>
+                          </View>
+                          <Text style={styles.dsCastActorLabel} numberOfLines={1}>
+                            {actorName}
+                          </Text>
+                          <Text style={styles.dsCastRoleLabel} numberOfLines={1}>
+                            Cast
+                          </Text>
+                        </View>
+                      ))}
                 </ScrollView>
               </View>
             ) : dbLoading ? (
