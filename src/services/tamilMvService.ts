@@ -34,8 +34,13 @@ export const DEFAULT_TAMILMV_URL = 'https://www.1tamilmv.solar';
 
 export const POPULAR_MIRRORS = [
   'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.fi',
   'https://www.1tamilmv.click',
-  'https://www.1tamilmv.lease',
+  'https://www.1tamilmv.cool',
+  'https://www.1tamilmv.cloud',
+  'https://www.1tamilmv.club',
+  'https://www.1tamilmv.plus',
+  'https://www.1tamilmv.biz',
   'https://www.1tamilmv.meme',
   'https://www.1tamilmv.rocks',
   'https://www.1tamilmv.li',
@@ -214,35 +219,58 @@ export const tamilMvService = {
     if (!term) return [];
 
     const isRecent = !term || /^recent/i.test(term);
-    const baseUrl = overrideUrl ? overrideUrl.replace(/\/+$/, '') : configuredBaseUrl;
-    const searchUrl = isRecent
-      ? baseUrl
-      : `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
+    const primaryBase = overrideUrl ? overrideUrl.replace(/\/+$/, '') : configuredBaseUrl;
 
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-
-      const response = await fetch(searchUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`HTTP Error ${response.status} from ${baseUrl}`);
+    // Build list of candidate mirrors to try, starting with primary configured URL
+    const candidates = [primaryBase];
+    for (const m of POPULAR_MIRRORS) {
+      const cleanM = m.replace(/\/+$/, '');
+      if (cleanM.toLowerCase() !== primaryBase.toLowerCase() && !candidates.includes(cleanM)) {
+        candidates.push(cleanM);
       }
-
-      const html = await response.text();
-      return this.parseSearchResults(html, baseUrl, isRecent ? '' : term);
-    } catch (err: any) {
-      console.warn('TamilMV Search Fetch error:', err?.message || err);
-      throw err;
     }
+
+    let lastError: any = null;
+
+    for (const baseUrl of candidates) {
+      const searchUrl = isRecent
+        ? baseUrl
+        : `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 7000);
+
+        const response = await fetch(searchUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          throw new Error(`HTTP Error ${response.status} from ${baseUrl}`);
+        }
+
+        const html = await response.text();
+        const results = this.parseSearchResults(html, baseUrl, isRecent ? '' : term);
+        if (results && results.length > 0) {
+          if (!overrideUrl && baseUrl.toLowerCase() !== configuredBaseUrl.toLowerCase()) {
+            console.log(`[tamilMvService] Auto-switched working mirror to: ${baseUrl}`);
+            this.setBaseUrl(baseUrl);
+          }
+          return results;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`TamilMV Search Fetch error for ${baseUrl}:`, err?.message || err);
+      }
+    }
+
+    throw lastError || new Error('All mirrors failed to respond');
   },
 
   /**

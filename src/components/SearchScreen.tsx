@@ -871,6 +871,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           <WebView
             ref={browserWebViewRef}
             source={{ uri: browserUrl }}
+            originWhitelist={['*']}
+            setSupportMultipleWindows={false}
             style={styles.flex1}
             injectedJavaScript={`${INJECTED_TORRENT_INTERCEPTOR}\n${adBlockEnabled ? INJECTED_AD_SHIELD_SCRIPT : ''}`}
             onNavigationStateChange={(nav) => {
@@ -910,6 +912,12 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           <WebView
             ref={scraperWebViewRef}
             source={{ uri: webViewSearchUrl }}
+            originWhitelist={['*']}
+            setSupportMultipleWindows={false}
+            onShouldStartLoadWithRequest={() => true}
+            javaScriptEnabled
+            domStorageEnabled
+            userAgent="Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
             onMessage={(e) => {
               try {
                 const data = JSON.parse(e.nativeEvent.data);

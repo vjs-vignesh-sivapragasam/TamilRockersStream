@@ -1,70 +1,110 @@
+import * as FileSystem from 'expo-file-system/legacy';
+
 const memoryStorage = new Map<string, string>();
+const FALLBACK_STORAGE_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}vflix_storage_fallback.json`
+  : '';
+
+let isFallbackLoaded = false;
+async function loadFallbackStorage() {
+  if (isFallbackLoaded || !FALLBACK_STORAGE_FILE) return;
+  try {
+    const content = await FileSystem.readAsStringAsync(FALLBACK_STORAGE_FILE);
+    if (content) {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === 'object') {
+        Object.entries(parsed).forEach(([k, v]) => {
+          if (typeof v === 'string') memoryStorage.set(k, v);
+        });
+      }
+    }
+    isFallbackLoaded = true;
+  } catch {}
+}
+loadFallbackStorage();
+
+let saveFallbackTimer: any = null;
+function persistFallbackStorage() {
+  if (!FALLBACK_STORAGE_FILE) return;
+  if (saveFallbackTimer) clearTimeout(saveFallbackTimer);
+  saveFallbackTimer = setTimeout(() => {
+    try {
+      const obj: Record<string, string> = {};
+      memoryStorage.forEach((v, k) => {
+        obj[k] = v;
+      });
+      FileSystem.writeAsStringAsync(FALLBACK_STORAGE_FILE, JSON.stringify(obj)).catch(() => {});
+    } catch {}
+  }, 500);
+}
 
 let mmkvInstance: any = null;
 try {
-    const { createMMKV } = require('react-native-mmkv');
-    mmkvInstance = createMMKV({ id: 'tmv' });
+  const { createMMKV } = require('react-native-mmkv');
+  mmkvInstance = createMMKV({ id: 'tmv' });
 } catch (e) {
-    console.warn('[StorageService] react-native-mmkv not available, using fallback storage');
+  // Silent fallback to file-backed memory storage
 }
 
 export const StorageKeys = {
-    SERVERS_KEY: 'TMV_SERVERS',
-    ADDONS_KEY: 'TMV_ADDONS',
-    DEFAULT_MEDIA_PLAYER_KEY: 'TMV_DEFAULT_MEDIA_PLAYER',
-    OPENSUBTITLES_API_KEY: 'TMV_OPENSUBTITLES_API_KEY',
-    OPENSUBTITLES_USER_AGENT: 'TMV_OPENSUBTITLES_USER_AGENT',
-    WATCH_HISTORY_KEY: 'TMV_WATCH_HISTORY_KEY',
-    SUBTITLE_LANGUAGES_KEY: 'TMV_SUBTITLE_LANGUAGES_KEY',
-    LIBRARY_KEY: 'TMV_LIBRARY_KEY',
-    THEME_KEY: 'TMV_THEME_KEY',
-    TAMILMV_MIRROR_KEY: 'TMV_TAMILMV_MIRROR_KEY',
-    TAMILMV_CUSTOM_MIRRORS_KEY: 'TMV_TAMILMV_CUSTOM_MIRRORS_KEY'
+  SERVERS_KEY: 'TMV_SERVERS',
+  ADDONS_KEY: 'TMV_ADDONS',
+  DEFAULT_MEDIA_PLAYER_KEY: 'TMV_DEFAULT_MEDIA_PLAYER',
+  OPENSUBTITLES_API_KEY: 'TMV_OPENSUBTITLES_API_KEY',
+  OPENSUBTITLES_USER_AGENT: 'TMV_OPENSUBTITLES_USER_AGENT',
+  WATCH_HISTORY_KEY: 'TMV_WATCH_HISTORY_KEY',
+  SUBTITLE_LANGUAGES_KEY: 'TMV_SUBTITLE_LANGUAGES_KEY',
+  LIBRARY_KEY: 'TMV_LIBRARY_KEY',
+  THEME_KEY: 'TMV_THEME_KEY',
+  TAMILMV_MIRROR_KEY: 'TMV_TAMILMV_MIRROR_KEY',
+  TAMILMV_CUSTOM_MIRRORS_KEY: 'TMV_TAMILMV_CUSTOM_MIRRORS_KEY',
 } as const;
 
 export const storageService = {
-    getItem(key: string): string | undefined {
-        try {
-            if (mmkvInstance) return mmkvInstance.getString(key);
-            if (typeof localStorage !== 'undefined') return localStorage.getItem(key) ?? undefined;
-            return memoryStorage.get(key);
-        } catch (error) {
-            console.error('Error reading storage:', error);
-            return undefined;
-        }
-    },
+  getItem(key: string): string | undefined {
+    try {
+      if (mmkvInstance) return mmkvInstance.getString(key);
+      if (typeof localStorage !== 'undefined') return localStorage.getItem(key) ?? undefined;
+      return memoryStorage.get(key);
+    } catch (error) {
+      console.error('Error reading storage:', error);
+      return undefined;
+    }
+  },
 
-    setItem(key: string, value: string): void {
-        try {
-            if (mmkvInstance) {
-                mmkvInstance.set(key, value);
-                return;
-            }
-            if (typeof localStorage !== 'undefined') {
-                localStorage.setItem(key, value);
-                return;
-            }
-            memoryStorage.set(key, value);
-        } catch (error) {
-            console.error('Error writing to storage:', error);
-        }
-    },
+  setItem(key: string, value: string): void {
+    try {
+      if (mmkvInstance) {
+        mmkvInstance.set(key, value);
+        return;
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, value);
+        return;
+      }
+      memoryStorage.set(key, value);
+      persistFallbackStorage();
+    } catch (error) {
+      console.error('Error writing to storage:', error);
+    }
+  },
 
-    removeItem(key: string): void {
-        try {
-            if (mmkvInstance) {
-                mmkvInstance.remove(key);
-                return;
-            }
-            if (typeof localStorage !== 'undefined') {
-                localStorage.removeItem(key);
-                return;
-            }
-            memoryStorage.delete(key);
-        } catch (error) {
-            console.error('Error removing from storage:', error);
-        }
-    },
+  removeItem(key: string): void {
+    try {
+      if (mmkvInstance) {
+        mmkvInstance.remove(key);
+        return;
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+        return;
+      }
+      memoryStorage.delete(key);
+      persistFallbackStorage();
+    } catch (error) {
+      console.error('Error removing from storage:', error);
+    }
+  },
 
     clear(): void {
         try {
@@ -74,6 +114,7 @@ export const storageService = {
                 localStorage.clear();
             } else {
                 memoryStorage.clear();
+                persistFallbackStorage();
             }
         } catch (error) {
             console.error('Error clearing storage:', error);

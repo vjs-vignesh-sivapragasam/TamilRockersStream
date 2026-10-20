@@ -231,6 +231,7 @@ async function fetchSingleXmlUrl(url: string): Promise<string> {
         const fallbackUrl = parsed.toString();
         const text = await tryFetch(fallbackUrl, 8000);
         if (text && text.includes('<rss')) {
+          tamilMvService.setBaseUrl(mirror);
           return text;
         }
       } catch {}
@@ -299,9 +300,22 @@ export const xmlFeedService = {
       try {
         storageService.setItem(cacheKey, JSON.stringify(cacheEntry));
       } catch {}
+      return results;
     }
 
-    return results;
+    // Fallback: If network fetch failed for all feeds, serve whatever is in disk/storage cache so movies are still displayed
+    try {
+      const stored = storageService.getItem(cacheKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          console.log(`[xmlFeedService] Network unavailable, loaded ${parsed.data.length} cached movies for ${categoryKey}`);
+          return parsed.data;
+        }
+      }
+    } catch {}
+
+    return [];
   },
 
   /**

@@ -2410,6 +2410,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
       // Timeout safety fallback
       searchTimeoutRef.current = setTimeout(() => {
         setLoading(false);
+        // If results are still empty, try to restore cached movies from disk
+        if (FINDER_CACHE_FILE) {
+          FileSystem.readAsStringAsync(FINDER_CACHE_FILE)
+            .then((content) => {
+              try {
+                const parsed = JSON.parse(content);
+                if (parsed && Array.isArray(parsed.results) && parsed.results.length > 0) {
+                  updateFinderState(parsed.results, term, true);
+                }
+              } catch {}
+            })
+            .catch(() => {});
+        }
       }, 15000);
 
       // Try direct fetch first
@@ -2847,11 +2860,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
     (function() {
       function sendResults() {
         try {
+          var title = document.title || '';
+          if (title.indexOf('Just a moment') !== -1 || document.querySelector('#challenge-stage') || document.querySelector('.cf-turnstile')) {
+            setTimeout(sendResults, 1200);
+            return;
+          }
+
           var topicMap = {};
           var links = document.querySelectorAll('a[href*="topic/"]');
           for (var i = 0; i < links.length; i++) {
             var a = links[i];
             var rawHref = a.href || '';
+            var cleanUrl = rawHref.split('#')[0].replace(/&.*$/, '').replace(/\/page\/\d+\/?$/, '/');
+            if (!cleanUrl || cleanUrl.indexOf('/topic/183-0') !== -1) continue;
+
             var cleanText = function(str) {
               if (!str) return '';
               return str
@@ -3421,6 +3443,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
           <WebView
             ref={webViewRef}
             source={{ uri: webViewSearchUrl }}
+            originWhitelist={['*']}
+            setSupportMultipleWindows={false}
+            onShouldStartLoadWithRequest={() => true}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             userAgent="Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -3435,6 +3460,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
         <View style={styles.offscreenWebView}>
           <WebView
             source={{ uri: posterWebViewUrl }}
+            originWhitelist={['*']}
+            setSupportMultipleWindows={false}
+            onShouldStartLoadWithRequest={() => true}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             userAgent="Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
