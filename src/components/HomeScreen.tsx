@@ -59,7 +59,7 @@ import {
   Calendar,
   ChevronRight,
 } from 'lucide-react-native';
-import { Colors } from '../constants/theme';
+import { Colors, getTheme } from '../constants/theme';
 import {
   tamilMvService,
   TamilMvMovieResult,
@@ -182,6 +182,8 @@ interface ContinueWatchingCardProps {
 }
 
 const ContinueWatchingCard = React.memo<ContinueWatchingCardProps>(({ item, onResume, onRemove }) => {
+  const { themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
   const remainingText = formatRemainingTime(item.currentTime, item.duration);
   const progressPercent = Math.min(Math.max(Math.round(item.progress * 100), 5), 100);
 
@@ -250,7 +252,7 @@ const ContinueWatchingCard = React.memo<ContinueWatchingCardProps>(({ item, onRe
 
         {/* Progress Bar */}
         <View style={styles.cwProgressBarBg}>
-          <View style={[styles.cwProgressBarFill, { width: `${progressPercent}%` }]} />
+          <View style={[styles.cwProgressBarFill, { width: `${progressPercent}%`, backgroundColor: theme.primary }]} />
         </View>
       </View>
     </TouchableOpacity>
@@ -269,6 +271,8 @@ interface PosterGridCardProps {
 }
 
 const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
+  const { themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
   const { width: screenWidth } = useWindowDimensions();
   const NUM_COLUMNS = 2;
   const cardWidth = Math.floor((screenWidth - 32 - (NUM_COLUMNS - 1) * 10) / NUM_COLUMNS);
@@ -351,7 +355,7 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
           </LinearGradient>
         ) : (
           <LinearGradient
-            colors={['#8B5CF6', '#4C1D95']}
+            colors={[theme.primary, theme.dark]}
             style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -413,6 +417,8 @@ interface TopReleaseCardProps {
 }
 
 const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, onToggleSave, enqueuePosterFetch, onPress }) => {
+  const { themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
   const topicUrl = item.topicUrl || item.resolutions?.[0]?.topicUrl || '';
   const [posterUrl, setPosterUrl] = useState<string | null>(() => {
     if (item.posterUrl) return item.posterUrl;
@@ -489,7 +495,7 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
         </LinearGradient>
       ) : (
         <LinearGradient
-          colors={[Colors.primary, '#660814']}
+          colors={[theme.primary, theme.dark]}
           style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -631,6 +637,8 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
   enqueuePosterFetch,
   onPress,
 }) => {
+  const { themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const cardWidth = screenWidth;
@@ -702,7 +710,7 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
         </LinearGradient>
       ) : (
         <LinearGradient
-          colors={[Colors.primary, '#660814']}
+          colors={[theme.primary, theme.dark]}
           style={[StyleSheet.absoluteFill, styles.pgShimmerCenter]}
         >
           <Film color="rgba(255,255,255,0.4)" size={40} strokeWidth={1.5} />
@@ -759,8 +767,8 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
             ) : null}
 
             {movie.language ? (
-              <View style={[styles.heroMetaBadge, { backgroundColor: Colors.navActivePill, borderColor: Colors.primary }]}>
-                <Text style={[styles.heroMetaBadgeText, { color: Colors.primary }]}>
+              <View style={[styles.heroMetaBadge, { backgroundColor: theme.badgeBg, borderColor: theme.primary }]}>
+                <Text style={[styles.heroMetaBadgeText, { color: theme.primary }]}>
                   {movie.language.toUpperCase()}
                 </Text>
               </View>
@@ -776,7 +784,7 @@ const HeroFeaturedMovieCard = React.memo<HeroFeaturedMovieCardProps>(({
                   style={[
                     styles.slideshowDot,
                     i === (slideNumber ? slideNumber - 1 : 0)
-                      ? [styles.slideshowDotActive, { backgroundColor: Colors.primary }]
+                      ? [styles.slideshowDotActive, { backgroundColor: theme.primary }]
                       : styles.slideshowDotInactive,
                   ]}
                 />
@@ -905,6 +913,8 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
   }) => {
     const insets = useSafeAreaInsets();
     const { width: screenWidth } = useWindowDimensions();
+    const { themeKey } = useDownloads();
+    const theme = getTheme(themeKey);
     const [selectedResIndex, setSelectedResIndex] = useState(0);
     const [posterUrl, setPosterUrl] = useState<string | null>(null);
     const [posterLoading, setPosterLoading] = useState(true);
@@ -1367,7 +1377,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
               ) : posterLoading || dbLoading ? (
                 <LinearGradient colors={['#181920', '#252834', '#181920']} style={StyleSheet.absoluteFill} />
               ) : (
-                <LinearGradient colors={[Colors.primary, '#660814']} style={StyleSheet.absoluteFill} />
+                <LinearGradient colors={[theme.primary, theme.dark]} style={StyleSheet.absoluteFill} />
               )}
 
               {/* Dark Gradient Overlay Fade */}
@@ -1381,7 +1391,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 
             {/* ── 2. Movie Title (Centered Stylized) ── */}
             <View style={styles.dsTitleSection}>
-              <Text style={[styles.dsMainTitle, { color: Colors.primary }]}>
+              <Text style={[styles.dsMainTitle, { color: theme.primary }]}>
                 {displayTitle.toUpperCase()}
               </Text>
               {dbMetadata?.tagline ? (
@@ -1393,14 +1403,17 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
             <View style={styles.dsMainActionRow}>
               {/* Bookmark Button */}
               <TouchableOpacity
-                style={[styles.dsRoundActionBtn, isSaved && styles.dsRoundActionBtnActive]}
+                style={[
+                  styles.dsRoundActionBtn,
+                  isSaved && [styles.dsRoundActionBtnActive, { backgroundColor: theme.badgeBg, borderColor: theme.primary }],
+                ]}
                 onPress={onToggleSave}
                 activeOpacity={0.8}
               >
                 <Bookmark
-                  color={isSaved ? Colors.primary : '#FFFFFF'}
+                  color={isSaved ? theme.primary : '#FFFFFF'}
                   size={20}
-                  fill={isSaved ? Colors.primary : 'transparent'}
+                  fill={isSaved ? theme.primary : 'transparent'}
                 />
               </TouchableOpacity>
 
@@ -1497,7 +1510,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
             ) : dbLoading ? (
               <View style={[styles.dsContentSection, { alignItems: 'flex-start' }]}>
                 <Text style={styles.dsSectionHeading}>Cast & Crew</Text>
-                <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 8 }} />
+                <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 8 }} />
               </View>
             ) : null}
 
@@ -1648,7 +1661,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                     key={res.id || `res-${idx}`}
                     style={[
                       styles.dsResBadgePill,
-                      selectedResIndex === idx && styles.dsResBadgePillActive,
+                      selectedResIndex === idx && [styles.dsResBadgePillActive, { backgroundColor: theme.badgeBg, borderColor: theme.primary }],
                     ]}
                     onPress={() => setSelectedResIndex(idx)}
                     activeOpacity={0.8}
@@ -1730,15 +1743,15 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                       style={[
                         styles.qmIconBadge,
                         qualityModalMode === 'play'
-                          ? { backgroundColor: 'rgba(250, 36, 60, 0.15)' }
+                          ? { backgroundColor: theme.badgeBg }
                           : { backgroundColor: 'rgba(52, 199, 89, 0.15)' },
                       ]}
                     >
                       {qualityModalMode === 'play' ? (
                         playDestination === 'internal' ? (
-                          <Play color={Colors.primary} size={18} fill={Colors.primary} />
+                          <Play color={theme.primary} size={18} fill={theme.primary} />
                         ) : (
-                          <Globe color={Colors.primary} size={18} />
+                          <Globe color={theme.primary} size={18} />
                         )
                       ) : downloadDestination === 'internal' ? (
                         <Download color="#30D158" size={18} strokeWidth={2.2} />
@@ -1784,7 +1797,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                       <TouchableOpacity
                         style={[
                           styles.qmDestinationTab,
-                          playDestination === 'internal' && styles.qmDestinationTabActivePlay,
+                          playDestination === 'internal' && [styles.qmDestinationTabActivePlay, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }],
                         ]}
                         onPress={() => setPlayDestination('internal')}
                         activeOpacity={0.8}
@@ -1807,7 +1820,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                       <TouchableOpacity
                         style={[
                           styles.qmDestinationTab,
-                          playDestination === 'browser' && styles.qmDestinationTabActivePlay,
+                          playDestination === 'browser' && [styles.qmDestinationTabActivePlay, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }],
                         ]}
                         onPress={() => setPlayDestination('browser')}
                         activeOpacity={0.8}
@@ -1878,7 +1891,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                 {/* Quality Options */}
                 {resolutionsLoading && resolutions.length === 0 ? (
                   <View style={styles.qmLoadingContainer}>
-                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <ActivityIndicator size="small" color={theme.primary} />
                     <Text style={styles.qmLoadingText}>Fetching qualities & sizes...</Text>
                   </View>
                 ) : (
@@ -1940,17 +1953,17 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                               style={[
                                 styles.qmActionCircle,
                                 qualityModalMode === 'play'
-                                  ? { backgroundColor: 'rgba(250, 36, 60, 0.15)', borderColor: 'rgba(250, 36, 60, 0.35)' }
+                                  ? { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }
                                   : { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: 'rgba(52, 199, 89, 0.35)' },
                               ]}
                             >
                               {isThisStreaming ? (
-                                <ActivityIndicator size="small" color={Colors.primary} />
+                                <ActivityIndicator size="small" color={theme.primary} />
                               ) : qualityModalMode === 'play' ? (
                                 playDestination === 'internal' ? (
-                                  <Play color={Colors.primary} size={13} fill={Colors.primary} />
+                                  <Play color={theme.primary} size={13} fill={theme.primary} />
                                 ) : (
-                                  <Globe color={Colors.primary} size={13} />
+                                  <Globe color={theme.primary} size={13} />
                                 )
                               ) : downloadDestination === 'internal' ? (
                                 <Download color="#30D158" size={13} strokeWidth={2.2} />
@@ -1977,6 +1990,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenInBrowserTab }) => {
   const insets = useSafeAreaInsets();
   const { downloads, isBackendConnected, startDownload, backendUrl, themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
 
   const [query, setQuery] = useState(globalCachedFinderState.query);
   const [loading, setLoading] = useState(false);
@@ -2897,7 +2911,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
     if (displayedCount < recentlyAdded.length) {
       return (
         <View style={styles.lazyLoadFooter}>
-          <ActivityIndicator size="small" color={Colors.netflixRed} />
+          <ActivityIndicator size="small" color={theme.primary} />
           <Text style={styles.lazyLoadText}>
             Loading more movies ({visibleRecentlyAdded.length} / {recentlyAdded.length})...
           </Text>
@@ -3136,7 +3150,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
       {/* 3. Main Body Content */}
       {loading ? (
         <View style={[styles.stateCenter, { paddingTop: insets.top + 60 }]}>
-          <ActivityIndicator size="small" color={Colors.netflixRed} />
+          <ActivityIndicator size="small" color={theme.primary} />
           <Text style={styles.loadingText}>Searching {currentBaseUrl.replace(/^https?:\/\/(www\.)?/, '')}...</Text>
         </View>
       ) : hasSearched && results.length === 0 ? (
@@ -3149,7 +3163,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
           </Text>
           <View style={styles.notFoundActionsRow}>
             <TouchableOpacity
-              style={styles.backHomeBtnPrimary}
+              style={[styles.backHomeBtnPrimary, { backgroundColor: theme.primary, shadowColor: theme.primary }]}
               onPress={handleClearSearch}
               activeOpacity={0.8}
             >
@@ -3175,7 +3189,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
           </Text>
           <View style={styles.notFoundActionsRow}>
             <TouchableOpacity
-              style={styles.backHomeBtnPrimary}
+              style={[styles.backHomeBtnPrimary, { backgroundColor: theme.primary, shadowColor: theme.primary }]}
               onPress={() => setSelectedLanguages(['All'])}
               activeOpacity={0.8}
             >
@@ -3222,8 +3236,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={handlePullToRefresh}
-              tintColor={Colors.netflixRed}
-              colors={[Colors.netflixRed]}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
               progressBackgroundColor="#16171D"
             />
           }
@@ -3291,12 +3305,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                   <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleRow}>
                       <View style={styles.sectionIconWrap}>
-                        <PlayCircle color={Colors.primary} size={16} strokeWidth={2.4} />
+                        <PlayCircle color={theme.primary} size={16} strokeWidth={2.4} />
                       </View>
                       <Text style={styles.sectionTitle}>Continue Watching</Text>
                     </View>
-                    <View style={styles.cwBadge}>
-                      <Text style={styles.cwBadgeText}>{continueWatchingList.length} Active</Text>
+                    <View style={[styles.cwBadge, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}>
+                      <Text style={[styles.cwBadgeText, { color: theme.primary }]}>{continueWatchingList.length} Active</Text>
                     </View>
                   </View>
 
@@ -3323,12 +3337,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                   <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleRow}>
                       <View style={styles.sectionIconWrap}>
-                        <Flame color={Colors.primary} size={16} strokeWidth={2.4} />
+                        <Flame color={theme.primary} size={16} strokeWidth={2.4} />
                       </View>
                       <Text style={styles.sectionTitle}>Top Release for this week</Text>
                     </View>
-                    <View style={styles.topReleaseBadge}>
-                      <Text style={styles.topReleaseBadgeText}>{topReleases.length} Hot</Text>
+                    <View style={[styles.topReleaseBadge, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}>
+                      <Text style={[styles.topReleaseBadgeText, { color: theme.primary }]}>{topReleases.length} Hot</Text>
                     </View>
                   </View>
 
@@ -3360,9 +3374,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                 <View style={[styles.sectionTitleRow, { flex: 1, marginRight: 8 }]}>
                   <View style={styles.sectionIconWrap}>
                     {isHomeFeed ? (
-                      <Sparkles color={Colors.primary} size={15} strokeWidth={2.4} />
+                      <Sparkles color={theme.primary} size={15} strokeWidth={2.4} />
                     ) : (
-                      <Search color={Colors.primary} size={15} strokeWidth={2.4} />
+                      <Search color={theme.primary} size={15} strokeWidth={2.4} />
                     )}
                   </View>
                   <Text style={styles.sectionTitle} numberOfLines={1}>
@@ -3410,7 +3424,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
           accessibilityLabel="Scroll to top"
         >
           <LinearGradient
-            colors={[Colors.primary, '#8A0E1C']}
+            colors={[theme.primary, theme.dark]}
             style={styles.scrollTopGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -3454,7 +3468,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                 autoCorrect={false}
               />
               <TouchableOpacity
-                style={styles.modalSaveBtn}
+                style={[styles.modalSaveBtn, { backgroundColor: theme.primary }]}
                 onPress={() => handleSaveBaseUrl(customUrlInput)}
                 activeOpacity={0.8}
               >
@@ -3477,7 +3491,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                     <Text style={[styles.presetRowText, isActive && styles.presetRowTextActive]}>
                       {mirror.replace(/^https?:\/\/(www\.)?/, '')}
                     </Text>
-                    {isActive && <Check color={Colors.netflixRed} size={14} />}
+                    {isActive && <Check color={theme.primary} size={14} />}
                   </TouchableOpacity>
                 );
               })}
@@ -3536,8 +3550,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
             {/* Header */}
             <View style={styles.streamModalHeader}>
               <View style={styles.streamBadgeRow}>
-                <View style={styles.streamResBadge}>
-                  <Text style={styles.streamResBadgeText}>
+                <View style={[styles.streamResBadge, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}>
+                  <Text style={[styles.streamResBadgeText, { color: theme.primary }]}>
                     {streamModalData?.resItem.resolution || '1080p'}
                   </Text>
                 </View>
@@ -3573,7 +3587,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                 onPress={() => streamModalData && handleLaunchInternalPlayer(streamModalData)}
               >
                 <LinearGradient
-                  colors={[Colors.primary, '#B51527']}
+                  colors={[theme.primary, theme.dark]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.defaultStreamGradient}
@@ -3587,7 +3601,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
                         Play in Internal Player ({streamModalData?.resItem.resolution || '1080p'})
                       </Text>
                       <View style={styles.defaultTagPill}>
-                        <Text style={styles.defaultTagText}>DEFAULT</Text>
+                        <Text style={[styles.defaultTagText, { color: theme.primary }]}>DEFAULT</Text>
                       </View>
                     </View>
                     <Text style={styles.defaultStreamSub}>

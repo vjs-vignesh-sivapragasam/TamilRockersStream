@@ -15,7 +15,7 @@ import {
   ArrowDownToLine,
   SlidersHorizontal,
 } from 'lucide-react-native';
-import { Colors } from '../constants/theme';
+import { Colors, getTheme } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 
 export type TabKey = 'home' | 'search' | 'mylist' | 'downloads' | 'settings';
@@ -120,7 +120,8 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { themeKey } = useDownloads();
-  const primaryColor = Colors.primary;
+  const currentTheme = getTheme(themeKey);
+  const primaryColor = currentTheme.primary;
 
   const tabs: TabConfig[] = [
     { key: 'home',      label: 'Home',      icon: Clapperboard },

@@ -48,7 +48,7 @@ import {
 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
-import { Colors } from '../constants/theme';
+import { Colors, getTheme } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 import { DownloadItem } from '../types/downloads';
 import {
@@ -77,7 +77,10 @@ export const DownloadsScreen: React.FC = () => {
     importMovie,
     isBackendConnected,
     backendUrl,
+    themeKey,
   } = useDownloads();
+
+  const theme = getTheme(themeKey);
 
   const [refreshing, setRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -528,10 +531,10 @@ export const DownloadsScreen: React.FC = () => {
                 {
                   backgroundColor: isBackendConnected
                     ? 'rgba(70, 211, 105, 0.12)'
-                    : 'rgba(250, 36, 60, 0.12)',
+                    : theme.badgeBg,
                   borderColor: isBackendConnected
                     ? 'rgba(70, 211, 105, 0.3)'
-                    : 'rgba(250, 36, 60, 0.3)',
+                    : theme.badgeBorder,
                 },
               ]}
             >
@@ -539,14 +542,14 @@ export const DownloadsScreen: React.FC = () => {
                 style={[
                   styles.statusDot,
                   {
-                    backgroundColor: isBackendConnected ? '#46D369' : Colors.primary,
+                    backgroundColor: isBackendConnected ? '#46D369' : theme.primary,
                   },
                 ]}
               />
               <Text
                 style={[
                   styles.serverStatusText,
-                  { color: isBackendConnected ? '#46D369' : Colors.primary },
+                  { color: isBackendConnected ? '#46D369' : theme.primary },
                 ]}
               >
                 {isBackendConnected ? 'ENGINE ONLINE' : 'ENGINE OFFLINE'}
@@ -566,15 +569,15 @@ export const DownloadsScreen: React.FC = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor={Colors.primary}
-            colors={[Colors.primary]}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
           />
         }
       >
         {/* High-End YouTube & Instagram Downloader Studio */}
         <View style={styles.socialStudioCard}>
           <LinearGradient
-            colors={[Colors.primaryRedDark, '#1C0D18', '#14141A']}
+            colors={[theme.dark, '#1C0D18', '#14141A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.socialStudioGradient}
@@ -632,7 +635,7 @@ export const DownloadsScreen: React.FC = () => {
                 ) : (
                   <TouchableOpacity
                     onPress={handlePasteToSocial}
-                    style={[styles.pasteActionBtn, { backgroundColor: Colors.primary }]}
+                    style={[styles.pasteActionBtn, { backgroundColor: theme.primary }]}
                     activeOpacity={0.8}
                   >
                     <Sparkles color="#FFFFFF" size={12} />
@@ -680,7 +683,7 @@ export const DownloadsScreen: React.FC = () => {
                         key={fmt.id}
                         style={[
                           styles.formatCard,
-                          isSelected && { borderColor: Colors.primary, backgroundColor: Colors.navActivePill },
+                          isSelected && { borderColor: theme.primary, backgroundColor: theme.pill },
                         ]}
                         onPress={() => setSelectedFormat(fmt)}
                         activeOpacity={0.8}
@@ -690,7 +693,7 @@ export const DownloadsScreen: React.FC = () => {
                             {fmt.label || fmt.resolution}
                           </Text>
                         </View>
-                        {isSelected && <CheckCircle2 color={Colors.primary} size={16} />}
+                        {isSelected && <CheckCircle2 color={theme.primary} size={16} />}
                       </TouchableOpacity>
                     );
                   })}
@@ -727,7 +730,7 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={[Colors.primary, Colors.primaryRedDark]}
+                colors={[theme.primary, theme.dark]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.socialCtaGradient}
@@ -756,9 +759,9 @@ export const DownloadsScreen: React.FC = () => {
               <Text style={styles.sectionTitle}>
                 Downloading Now ({activeQueue.length})
               </Text>
-              <View style={styles.activePulseBadge}>
-                <Radio color={Colors.primary} size={12} />
-                <Text style={styles.activePulseText}>LIVE</Text>
+              <View style={[styles.activePulseBadge, { backgroundColor: theme.badgeBg }]}>
+                <Radio color={theme.primary} size={12} />
+                <Text style={[styles.activePulseText, { color: theme.primary }]}>LIVE</Text>
               </View>
             </View>
 
@@ -791,11 +794,11 @@ export const DownloadsScreen: React.FC = () => {
                         </Text>
                         <View style={styles.speedBadge}>
                           <Radio
-                            color={isError ? '#FF453A' : Colors.primary}
+                            color={isError ? '#FF453A' : theme.primary}
                             size={11}
                           />
                           <Text
-                            style={[styles.speedText, isError && { color: '#FF453A' }]}
+                            style={[styles.speedText, { color: theme.primary }, isError && { color: '#FF453A' }]}
                             numberOfLines={1}
                           >
                             {isError
@@ -844,7 +847,7 @@ export const DownloadsScreen: React.FC = () => {
                               ? '#FF453A'
                               : isPaused
                               ? '#8E8E93'
-                              : Colors.primary,
+                              : theme.primary,
                           },
                         ]}
                       />
@@ -876,8 +879,8 @@ export const DownloadsScreen: React.FC = () => {
 
           {completedList.length === 0 ? (
             <View style={styles.emptyState}>
-              <View style={styles.emptyIconCircle}>
-                <Film color={Colors.primary} size={36} />
+              <View style={[styles.emptyIconCircle, { backgroundColor: theme.badgeBg }]}>
+                <Film color={theme.primary} size={36} />
               </View>
               <Text style={styles.emptyTitle}>No Offline Movies Downloaded</Text>
               <Text style={styles.emptySubtitle}>
@@ -885,7 +888,7 @@ export const DownloadsScreen: React.FC = () => {
               </Text>
               <View style={styles.emptyActionRow}>
                 <TouchableOpacity
-                  style={styles.emptyScanBtn}
+                  style={[styles.emptyScanBtn, { backgroundColor: theme.primary }]}
                   onPress={handleManualScanStorage}
                   activeOpacity={0.82}
                 >
@@ -932,7 +935,7 @@ export const DownloadsScreen: React.FC = () => {
 
                       {/* Play overlay button */}
                       <View style={styles.playOverlay}>
-                        <View style={styles.playCircle}>
+                        <View style={[styles.playCircle, { backgroundColor: theme.playCircleBg }]}>
                           <Play
                             color="#FFFFFF"
                             size={22}
@@ -982,7 +985,7 @@ export const DownloadsScreen: React.FC = () => {
                       <View style={styles.actionButtonsRow}>
                         {/* Watch Offline */}
                         <TouchableOpacity
-                          style={styles.playNetflixBtn}
+                          style={[styles.playNetflixBtn, { backgroundColor: theme.primary }]}
                           onPress={() => handlePlayInNetflixPlayer(item)}
                           activeOpacity={0.85}
                         >
@@ -1041,8 +1044,8 @@ export const DownloadsScreen: React.FC = () => {
             {/* Header */}
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderLeft}>
-                <View style={styles.sheetIconCircle}>
-                  <Download color={Colors.netflixRed} size={20} />
+                <View style={[styles.sheetIconCircle, { backgroundColor: theme.badgeBg }]}>
+                  <Download color={theme.primary} size={20} />
                 </View>
                 <View>
                   <Text style={styles.sheetTitle}>
@@ -1075,7 +1078,7 @@ export const DownloadsScreen: React.FC = () => {
             <View style={styles.modernTabSwitcher}>
               {/* Tab 1: YouTube & Instagram */}
               <TouchableOpacity
-                style={[styles.modernTabItem, addTab === 'social' && styles.modernTabItemActive]}
+                style={[styles.modernTabItem, addTab === 'social' && [styles.modernTabItemActive, { backgroundColor: theme.primary }]]}
                 onPress={() => setAddTab('social')}
                 activeOpacity={0.8}
               >
@@ -1093,7 +1096,7 @@ export const DownloadsScreen: React.FC = () => {
 
               {/* Tab 2: HTTP Direct / Magnet */}
               <TouchableOpacity
-                style={[styles.modernTabItem, addTab === 'link' && styles.modernTabItemActive]}
+                style={[styles.modernTabItem, addTab === 'link' && [styles.modernTabItemActive, { backgroundColor: theme.primary }]]}
                 onPress={() => setAddTab('link')}
                 activeOpacity={0.8}
               >
@@ -1111,7 +1114,7 @@ export const DownloadsScreen: React.FC = () => {
 
               {/* Tab 3: Upload .torrent */}
               <TouchableOpacity
-                style={[styles.modernTabItem, addTab === 'file' && styles.modernTabItemActive]}
+                style={[styles.modernTabItem, addTab === 'file' && [styles.modernTabItemActive, { backgroundColor: theme.primary }]]}
                 onPress={() => setAddTab('file')}
                 activeOpacity={0.8}
               >
@@ -1160,10 +1163,10 @@ export const DownloadsScreen: React.FC = () => {
                     ) : (
                       <TouchableOpacity
                         onPress={handlePasteToSocial}
-                        style={styles.pasteInlineBtn}
+                        style={[styles.pasteInlineBtn, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.pasteInlineText}>Paste</Text>
+                        <Text style={[styles.pasteInlineText, { color: theme.primary }]}>Paste</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1212,7 +1215,10 @@ export const DownloadsScreen: React.FC = () => {
                         return (
                           <TouchableOpacity
                             key={fmt.id}
-                            style={[styles.resChip, isSelected && styles.resChipActive]}
+                            style={[
+                              styles.resChip,
+                              isSelected && [styles.resChipActive, { backgroundColor: theme.badgeBg, borderColor: theme.primary }],
+                            ]}
                             onPress={() => setSelectedFormat(fmt)}
                             activeOpacity={0.8}
                           >
@@ -1269,10 +1275,10 @@ export const DownloadsScreen: React.FC = () => {
                     ) : (
                       <TouchableOpacity
                         onPress={handlePasteFromClipboard}
-                        style={styles.pasteInlineBtn}
+                        style={[styles.pasteInlineBtn, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.pasteInlineText}>Paste</Text>
+                        <Text style={[styles.pasteInlineText, { color: theme.primary }]}>Paste</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1360,7 +1366,7 @@ export const DownloadsScreen: React.FC = () => {
                   ) : (
                     <View style={styles.emptyUploadContent}>
                       <View style={styles.emptyUploadIcon}>
-                        <Upload color={Colors.netflixRed} size={24} />
+                        <Upload color={theme.primary} size={24} />
                       </View>
                       <Text style={styles.emptyUploadTitle}>Tap to Browse .torrent File</Text>
                       <Text style={styles.emptyUploadSubtitle}>
@@ -1437,7 +1443,7 @@ export const DownloadsScreen: React.FC = () => {
               activeOpacity={0.88}
             >
               <LinearGradient
-                colors={addTab === 'social' ? ['#FF0000', '#B51527'] : [Colors.netflixRed, '#B51527']}
+                colors={addTab === 'social' ? ['#FF0000', '#B51527'] : [theme.primary, theme.dark]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.submitGradient}

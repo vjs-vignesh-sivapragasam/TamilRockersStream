@@ -22,7 +22,7 @@ import {
   Star,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Colors } from '../constants/theme';
+import { Colors, getTheme } from '../constants/theme';
 import { myListService, MyListItem } from '../services/myListService';
 import {
   MovieResolutionItem,
@@ -189,7 +189,8 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
   onSelectMovie,
 }) => {
   const insets = useSafeAreaInsets();
-  const { backendUrl, startDownload } = useDownloads();
+  const { backendUrl, startDownload, themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
 
   const [items, setItems] = useState<MyListItem[]>([]);
   const [selectedMovie, setSelectedMovie] = useState<TamilMvMovieResult | null>(null);
@@ -459,7 +460,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
 
       {/* ── Ambient Radial Atmosphere Aura ── */}
       <LinearGradient
-        colors={['rgba(250, 36, 60, 0.08)', 'rgba(20, 15, 38, 0.95)', '#0A0815']}
+        colors={[theme.bgAura, 'rgba(20, 15, 38, 0.95)', '#0A0815']}
         style={StyleSheet.absoluteFill}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 0.45 }}
@@ -468,9 +469,9 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
       {/* ── Clean Header ── */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.headerBadge}>
-            <Sparkles size={11} color={Colors.primary} />
-            <Text style={styles.headerBadgeText}>YOUR PERSONAL WATCHLIST</Text>
+          <View style={[styles.headerBadge, { backgroundColor: theme.badgeBg }]}>
+            <Sparkles size={11} color={theme.primary} />
+            <Text style={[styles.headerBadgeText, { color: theme.primary }]}>YOUR PERSONAL WATCHLIST</Text>
           </View>
           <View style={styles.headerTitleRow}>
             <Text style={styles.headerTitle}>My List</Text>
@@ -497,9 +498,9 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
       {/* ── Poster Grid or Empty State ── */}
       {items.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <View style={styles.emptyAura}>
-            <View style={styles.emptyIconCircle}>
-              <Bookmark color={Colors.primary} size={36} fill={Colors.primary} strokeWidth={1.5} />
+          <View style={[styles.emptyAura, { backgroundColor: theme.bgAura }]}>
+            <View style={[styles.emptyIconCircle, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}>
+              <Bookmark color={theme.primary} size={36} fill={theme.primary} strokeWidth={1.5} />
             </View>
           </View>
           <Text style={styles.emptyTitle}>Your Watchlist is Empty</Text>
@@ -507,7 +508,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
             Save films you want to stream later by tapping the bookmark icon on any movie poster or detail sheet.
           </Text>
           <TouchableOpacity
-            style={styles.exploreBtn}
+            style={[styles.exploreBtn, { backgroundColor: theme.primary }]}
             onPress={() => onNavigateToTab?.('home')}
             activeOpacity={0.85}
           >

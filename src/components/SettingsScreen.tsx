@@ -62,7 +62,7 @@ import {
   Volume2,
   Sparkle,
 } from 'lucide-react-native';
-import { Colors, THEME_OPTIONS, ThemeKey } from '../constants/theme';
+import { Colors, THEME_OPTIONS, ThemeKey, getTheme } from '../constants/theme';
 import { useDownloads } from '../context/DownloadContext';
 import { formatBytes, downloadService, getStorageLocationText } from '../services/downloadService';
 import { tamilMvService, POPULAR_MIRRORS } from '../services/tamilMvService';
@@ -468,7 +468,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     Linking.openURL('https://discord.gg/vflex');
   };
 
-  const activeThemeName = THEME_OPTIONS[themeKey]?.name || 'Netflix Red';
+  const theme = getTheme(themeKey);
+  const activeThemeName = theme.name;
 
   return (
     <View style={styles.container}>
@@ -476,7 +477,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       <View style={[styles.headerContainer, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerLeft}>
           <LinearGradient
-            colors={['#FA243C', '#B30E22']}
+            colors={[theme.primary, theme.dark]}
             style={styles.logoBadge}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -538,8 +539,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             onPress={() => setActiveModal('theme')}
             activeOpacity={0.7}
           >
-            <View style={[styles.menuIconWrap, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-              <Palette size={19} color="#FA243C" strokeWidth={2.2} />
+            <View style={[styles.menuIconWrap, { backgroundColor: theme.badgeBg }]}>
+              <Palette size={19} color={theme.primary} strokeWidth={2.2} />
             </View>
             <View style={styles.menuTextWrap}>
               <Text style={styles.menuTitle}>Appearance & Themes</Text>
@@ -785,8 +786,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderLeft}>
-                <View style={[styles.sheetIconWrap, { backgroundColor: 'rgba(250, 36, 60, 0.18)' }]}>
-                  <Palette size={18} color="#FA243C" strokeWidth={2.2} />
+                <View style={[styles.sheetIconWrap, { backgroundColor: theme.badgeBg }]}>
+                  <Palette size={18} color={theme.primary} strokeWidth={2.2} />
                 </View>
                 <View>
                   <Text style={styles.sheetHeaderTitle}>Appearance & Themes</Text>
@@ -1065,7 +1066,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       {showSubKey ? <EyeOff size={16} color="#A09DB1" /> : <Eye size={16} color="#A09DB1" />}
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.applyBtn}
+                      style={[styles.applyBtn, { backgroundColor: theme.primary }]}
                       onPress={() => handleSaveSubKey(customSubKey)}
                     >
                       <Check color="#FFFFFF" size={14} strokeWidth={2.5} />
@@ -1235,12 +1236,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   return (
                     <TouchableOpacity
                       key={preset.url}
-                      style={[styles.presetRow, isSelected && styles.presetRowActive]}
+                      style={[
+                        styles.presetRow,
+                        isSelected && [styles.presetRowActive, { borderColor: theme.primary, backgroundColor: theme.badgeBg }],
+                      ]}
                       onPress={() => handleApplyServerUrl(preset.url)}
                       activeOpacity={0.75}
                     >
-                      <View style={[styles.presetIconWrap, isSelected && { backgroundColor: 'rgba(250, 36, 60, 0.2)' }]}>
-                        <IconComp size={15} color={isSelected ? Colors.primary : '#A09DB1'} />
+                      <View style={[styles.presetIconWrap, isSelected && { backgroundColor: theme.pill }]}>
+                        <IconComp size={15} color={isSelected ? theme.primary : '#A09DB1'} />
                       </View>
                       <View style={{ flex: 1, paddingRight: 8 }}>
                         <Text style={[styles.presetRowTitle, isSelected && { color: '#FFFFFF', fontWeight: '700' }]}>
@@ -1250,7 +1254,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                           {preset.url}
                         </Text>
                       </View>
-                      {isSelected && <CheckCircle2 size={18} color={Colors.primary} />}
+                      {isSelected && <CheckCircle2 size={18} color={theme.primary} />}
                     </TouchableOpacity>
                   );
                 })}
@@ -1271,7 +1275,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   autoCorrect={false}
                 />
                 <TouchableOpacity
-                  style={styles.applyBtn}
+                  style={[styles.applyBtn, { backgroundColor: theme.primary }]}
                   onPress={() => handleApplyServerUrl(customServerUrl)}
                   activeOpacity={0.8}
                 >
@@ -1382,8 +1386,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   activeOpacity={0.8}
                 >
                   <View style={styles.modeCardLeft}>
-                    <View style={[styles.modeIconBox, { backgroundColor: 'rgba(250, 36, 60, 0.15)' }]}>
-                      <Server color={Colors.primary} size={18} strokeWidth={2.2} />
+                    <View style={[styles.modeIconBox, { backgroundColor: theme.badgeBg }]}>
+                      <Server color={theme.primary} size={18} strokeWidth={2.2} />
                     </View>
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text style={styles.modeCardTitle}>Cloud Backend Relay</Text>
@@ -1392,7 +1396,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       </Text>
                     </View>
                   </View>
-                  <View style={[styles.radioCircle, downloadMode === 'backend_relay' && { borderColor: Colors.primary, backgroundColor: Colors.primary }]}>
+                  <View style={[styles.radioCircle, downloadMode === 'backend_relay' && { borderColor: theme.primary, backgroundColor: theme.primary }]}>
                     {downloadMode === 'backend_relay' && <Check color="#FFFFFF" size={12} strokeWidth={3} />}
                   </View>
                 </TouchableOpacity>
@@ -1402,7 +1406,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
               {/* Turbo Speed Booster Banner */}
               <LinearGradient
-                colors={['#FF9500', '#FA243C']}
+                colors={['#FF9500', theme.primary]}
                 style={styles.turboBanner}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -1426,11 +1430,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   activeOpacity={0.85}
                 >
                   {boosting ? (
-                    <ActivityIndicator size="small" color="#FA243C" />
+                    <ActivityIndicator size="small" color={theme.primary} />
                   ) : (
                     <>
-                      <Zap color="#FA243C" size={14} fill="#FA243C" />
-                      <Text style={styles.turboTriggerText}>BOOST SPEED NOW</Text>
+                      <Zap color={theme.primary} size={14} fill={theme.primary} />
+                      <Text style={[styles.turboTriggerText, { color: theme.primary }]}>BOOST SPEED NOW</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -1608,7 +1612,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   autoCorrect={false}
                 />
                 <TouchableOpacity
-                  style={styles.applyBtn}
+                  style={[styles.applyBtn, { backgroundColor: theme.primary }]}
                   onPress={() => {
                     if (customMirrorInput.trim()) {
                       handleAddCustomMirror(customMirrorInput.trim());
@@ -1844,14 +1848,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               {/* Storage Bar Breakdown */}
               <Text style={styles.cardInnerLabel}>DEVICE STORAGE BREAKDOWN</Text>
               <View style={styles.storageBarRow}>
-                <View style={[styles.storageBarPart, { flex: appPercent, backgroundColor: Colors.primary }]} />
+                <View style={[styles.storageBarPart, { flex: appPercent, backgroundColor: theme.primary }]} />
                 <View style={[styles.storageBarPart, { flex: otherPercent, backgroundColor: '#3A394D' }]} />
                 <View style={[styles.storageBarPart, { flex: freePercent, backgroundColor: '#262438' }]} />
               </View>
 
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
+                  <View style={[styles.legendDot, { backgroundColor: theme.primary }]} />
                   <Text style={styles.legendText}>App Media ({formatBytes(appDownloads)})</Text>
                 </View>
                 <View style={styles.legendItem}>
@@ -1909,7 +1913,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 activeOpacity={0.75}
               >
                 <View style={styles.storageActionIconWrap}>
-                  <RotateCcw size={16} color="#FA243C" />
+                  <RotateCcw size={16} color={theme.primary} />
                 </View>
                 <View style={{ flex: 1, paddingRight: 8 }}>
                   <Text style={styles.storageActionTitle}>Reset Continue Watching History</Text>
@@ -2000,14 +2004,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               {/* Quick Actions */}
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
                 <TouchableOpacity
-                  style={[styles.quickSupportCard, { backgroundColor: 'rgba(250, 36, 60, 0.12)', borderColor: 'rgba(250, 36, 60, 0.3)' }]}
+                  style={[styles.quickSupportCard, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}
                   onPress={() => {
                     setActiveModal(null);
                     setAboutModalVisible(true);
                   }}
                   activeOpacity={0.8}
                 >
-                  <Sparkles size={20} color="#FA243C" />
+                  <Sparkles size={20} color={theme.primary} />
                   <Text style={styles.quickSupportTitle}>About VFlix</Text>
                   <Text style={styles.quickSupportSub}>Version & Team</Text>
                 </TouchableOpacity>

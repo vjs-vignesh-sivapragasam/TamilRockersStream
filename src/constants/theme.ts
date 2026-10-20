@@ -7,6 +7,10 @@ export interface ThemeOption {
   dark: string;
   glow: string;
   pill: string;
+  bgAura: string;
+  badgeBg: string;
+  badgeBorder: string;
+  playCircleBg: string;
 }
 
 export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
@@ -17,6 +21,10 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#B51527',
     glow: 'rgba(250, 36, 60, 0.35)',
     pill: 'rgba(250, 36, 60, 0.2)',
+    bgAura: 'rgba(250, 36, 60, 0.08)',
+    badgeBg: 'rgba(250, 36, 60, 0.15)',
+    badgeBorder: 'rgba(250, 36, 60, 0.4)',
+    playCircleBg: 'rgba(250, 36, 60, 0.92)',
   },
   purple: {
     key: 'purple',
@@ -25,6 +33,10 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#6D28D9',
     glow: 'rgba(139, 92, 246, 0.35)',
     pill: 'rgba(139, 92, 246, 0.2)',
+    bgAura: 'rgba(139, 92, 246, 0.08)',
+    badgeBg: 'rgba(139, 92, 246, 0.15)',
+    badgeBorder: 'rgba(139, 92, 246, 0.4)',
+    playCircleBg: 'rgba(139, 92, 246, 0.92)',
   },
   blue: {
     key: 'blue',
@@ -33,6 +45,10 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#1D4ED8',
     glow: 'rgba(59, 130, 246, 0.35)',
     pill: 'rgba(59, 130, 246, 0.2)',
+    bgAura: 'rgba(59, 130, 246, 0.08)',
+    badgeBg: 'rgba(59, 130, 246, 0.15)',
+    badgeBorder: 'rgba(59, 130, 246, 0.4)',
+    playCircleBg: 'rgba(59, 130, 246, 0.92)',
   },
   emerald: {
     key: 'emerald',
@@ -41,6 +57,10 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#047857',
     glow: 'rgba(16, 185, 129, 0.35)',
     pill: 'rgba(16, 185, 129, 0.2)',
+    bgAura: 'rgba(16, 185, 129, 0.08)',
+    badgeBg: 'rgba(16, 185, 129, 0.15)',
+    badgeBorder: 'rgba(16, 185, 129, 0.4)',
+    playCircleBg: 'rgba(16, 185, 129, 0.92)',
   },
   amber: {
     key: 'amber',
@@ -49,6 +69,10 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#B45309',
     glow: 'rgba(245, 158, 11, 0.35)',
     pill: 'rgba(245, 158, 11, 0.2)',
+    bgAura: 'rgba(245, 158, 11, 0.08)',
+    badgeBg: 'rgba(245, 158, 11, 0.15)',
+    badgeBorder: 'rgba(245, 158, 11, 0.4)',
+    playCircleBg: 'rgba(245, 158, 11, 0.92)',
   },
   pink: {
     key: 'pink',
@@ -57,11 +81,19 @@ export const THEME_OPTIONS: Record<ThemeKey, ThemeOption> = {
     dark: '#BE185D',
     glow: 'rgba(236, 72, 153, 0.35)',
     pill: 'rgba(236, 72, 153, 0.2)',
+    bgAura: 'rgba(236, 72, 153, 0.08)',
+    badgeBg: 'rgba(236, 72, 153, 0.15)',
+    badgeBorder: 'rgba(236, 72, 153, 0.4)',
+    playCircleBg: 'rgba(236, 72, 153, 0.92)',
   },
 };
 
+export const getTheme = (key?: ThemeKey): ThemeOption => {
+  return THEME_OPTIONS[key || 'red'] || THEME_OPTIONS.red;
+};
+
 export const colors = {
-  primary: THEME_OPTIONS.purple.primary,
+  primary: THEME_OPTIONS.red.primary,
   background: '#0F0C1B',
   surface: '#19152B',
   text: '#FFFFFF',
@@ -76,8 +108,8 @@ export const Colors = {
   // Brand color - modern vibrant red or customizable theme
   netflixRed: colors.primary,
   primaryRed: colors.primary,
-  primaryRedDark: THEME_OPTIONS.purple.dark,
-  primaryRedGlow: THEME_OPTIONS.purple.glow,
+  primaryRedDark: THEME_OPTIONS.red.dark,
+  primaryRedGlow: THEME_OPTIONS.red.glow,
   textPrimary: colors.text,
   textSecondary: colors.secondaryText,
   text: colors.text,
@@ -90,11 +122,11 @@ export const Colors = {
   translucent: 'rgba(255, 255, 255, 0.12)',
   translucentDark: 'rgba(25, 21, 43, 0.88)',
   navBg: '#0D0A18',
-  navActivePill: THEME_OPTIONS.purple.pill,
+  navActivePill: THEME_OPTIONS.red.pill,
 };
 
 export function applyTheme(key: ThemeKey) {
-  const theme = THEME_OPTIONS[key] || THEME_OPTIONS.red;
+  const theme = getTheme(key);
   Colors.primary = theme.primary;
   Colors.netflixRed = theme.primary;
   Colors.primaryRed = theme.primary;

@@ -54,7 +54,7 @@ import {
   AlertCircle,
   Play,
 } from 'lucide-react-native';
-import { Colors } from '../constants/theme';
+import { Colors, getTheme } from '../constants/theme';
 import {
   tamilMvService,
   TamilMvMovieResult,
@@ -161,6 +161,8 @@ const SearchResultCard = React.memo<SearchResultCardProps>(({
   }, [item.movieTitle]);
 
   // Fetch TMDB metadata (Rating, Year, HD Poster)
+  const { themeKey } = useDownloads();
+  const theme = getTheme(themeKey);
   const { metadata } = useMovieMetadata(cleanMovieName, item.year);
   const displayRating = metadata?.rating || item.rating || 0;
   const displayYear = metadata?.year || item.year || '';
@@ -189,7 +191,7 @@ const SearchResultCard = React.memo<SearchResultCardProps>(({
           </LinearGradient>
         ) : (
           <LinearGradient
-            colors={[Colors.primary, '#660814']}
+            colors={[theme.primary, theme.dark]}
             style={[StyleSheet.absoluteFill, styles.shimmerCenter]}
           >
             <Film color="rgba(255,255,255,0.4)" size={30} strokeWidth={1.5} />
@@ -243,6 +245,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { startDownload, themeKey, backendUrl } = useDownloads();
+  const theme = getTheme(themeKey);
 
   // Mode: 'movies' for native Movie Finder / 'browser' for Web Browser
   const [activeMode, setActiveMode] = useState<'movies' | 'browser'>('movies');
@@ -639,7 +642,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           {/* Main Search Input Capsule */}
           <View style={styles.searchBarWrapper}>
             <View style={styles.searchBarCapsule}>
-              <Search color={Colors.primary} size={18} style={{ marginLeft: 4 }} />
+              <Search color={theme.primary} size={18} style={{ marginLeft: 4 }} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Search movies, torrents, or enter web URL..."
@@ -660,11 +663,11 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
               {/* Quick Jump to Browser with current query */}
               <TouchableOpacity
                 onPress={() => handleOpenUrlInBrowser(query || DEFAULT_BROWSER_HOME)}
-                style={styles.browserShortcutPill}
+                style={[styles.browserShortcutPill, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}
                 activeOpacity={0.7}
               >
-                <Globe color="#E50914" size={14} />
-                <Text style={styles.browserShortcutText}>Web</Text>
+                <Globe color={theme.primary} size={14} />
+                <Text style={[styles.browserShortcutText, { color: theme.primary }]}>Web</Text>
               </TouchableOpacity>
             </View>
 
@@ -691,7 +694,10 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                 return (
                   <TouchableOpacity
                     key={cat.key}
-                    style={[styles.filterChip, isActive && styles.filterChipActive]}
+                    style={[
+                      styles.filterChip,
+                      isActive && [styles.filterChipActive, { backgroundColor: theme.primary, borderColor: theme.primary }],
+                    ]}
                     onPress={() => handleSelectCategory(cat.key)}
                     activeOpacity={0.75}
                   >
@@ -707,7 +713,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           {/* Results Grid or Category Feed Grid */}
           {loading ? (
             <View style={styles.centerState}>
-              <ActivityIndicator size="large" color={Colors.primary} />
+              <ActivityIndicator size="large" color={theme.primary} />
               <Text style={styles.stateTitle}>Searching 1TamilMV & TMDB...</Text>
               <Text style={styles.stateSubtitle}>Finding verified releases and metadata</Text>
             </View>
@@ -740,7 +746,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                   <Text style={styles.backToFeedText}>Back to Feeds</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.searchWebFallbackBtn}
+                  style={[styles.searchWebFallbackBtn, { backgroundColor: theme.primary }]}
                   onPress={() =>
                     handleOpenUrlInBrowser(
                       `https://www.google.com/search?q=${encodeURIComponent(searchedQuery + ' movie download')}`
@@ -755,7 +761,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             </View>
           ) : feedLoading && categoryMovies.length === 0 ? (
             <View style={styles.centerState}>
-              <ActivityIndicator size="large" color={Colors.primary} />
+              <ActivityIndicator size="large" color={theme.primary} />
               <Text style={styles.stateTitle}>Loading {currentCategoryConfig.label}...</Text>
               <Text style={styles.stateSubtitle}>Fetching latest releases, posters & magnets</Text>
             </View>
@@ -793,8 +799,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                   <RefreshControl
                     refreshing={feedRefreshing}
                     onRefresh={() => loadCategoryFeed(selectedCategory, true)}
-                    tintColor={Colors.primary}
-                    colors={[Colors.primary]}
+                    tintColor={theme.primary}
+                    colors={[theme.primary]}
                   />
                 }
                 renderItem={({ item }) => (
@@ -828,7 +834,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           <View style={styles.browserAddressBar}>
             {/* Back to Search Button */}
             <TouchableOpacity
-              style={styles.exitBrowserBtn}
+              style={[styles.exitBrowserBtn, { backgroundColor: theme.primary }]}
               onPress={() => setActiveMode('movies')}
               activeOpacity={0.8}
             >
@@ -849,7 +855,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                 selectTextOnFocus
               />
               {browserLoading ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
+                <ActivityIndicator size="small" color={theme.primary} />
               ) : (
                 <TouchableOpacity onPress={() => browserWebViewRef.current?.reload()} style={styles.iconBtn}>
                   <RotateCcw color="#8A8D9B" size={14} />
@@ -872,7 +878,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
           {/* Progress Bar */}
           {browserLoading ? (
             <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.max(browserProgress * 100, 15)}%` }]} />
+              <View style={[styles.progressFill, { width: `${Math.max(browserProgress * 100, 15)}%`, backgroundColor: theme.primary }]} />
             </View>
           ) : null}
 
@@ -979,9 +985,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
         <View style={styles.streamModalOverlay}>
           <View style={styles.streamModalCard}>
             <View style={styles.streamModalHeader}>
-              <View style={styles.streamEnginePill}>
-                <View style={styles.streamEngineDot} />
-                <Text style={styles.streamEngineText}>VFlix Stream Engine</Text>
+              <View style={[styles.streamEnginePill, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }]}>
+                <View style={[styles.streamEngineDot, { backgroundColor: theme.primary }]} />
+                <Text style={[styles.streamEngineText, { color: theme.primary }]}>VFlix Stream Engine</Text>
               </View>
               <Text style={styles.streamModalTitle} numberOfLines={2}>
                 {streamModalData?.movie.movieTitle}
@@ -999,7 +1005,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                 onPress={() => streamModalData && handleLaunchInternalPlayer(streamModalData)}
               >
                 <LinearGradient
-                  colors={[Colors.primary, '#B51527']}
+                  colors={[theme.primary, theme.dark]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.defaultStreamGradient}
