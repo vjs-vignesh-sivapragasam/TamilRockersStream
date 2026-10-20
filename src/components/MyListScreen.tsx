@@ -141,21 +141,6 @@ const MyListGridCard = React.memo<MyListGridCardProps>(({ item, onPress, onLongP
             <Film color="rgba(255,255,255,0.4)" size={28} strokeWidth={1.5} />
           </LinearGradient>
         )}
-
-        {/* Floating TMDB Rating Pill on Top-Left */}
-        {displayRating > 0 ? (
-          <View style={styles.pgFloatingRating}>
-            <Star size={10} color="#FFD700" fill="#FFD700" />
-            <Text style={styles.pgFloatingRatingText}>{displayRating.toFixed(1)}</Text>
-          </View>
-        ) : null}
-
-        {/* Floating Year Pill on Top-Right */}
-        {displayYear ? (
-          <View style={styles.pgFloatingYear}>
-            <Text style={styles.pgFloatingYearText}>{displayYear}</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* 2. Movie Name & Year (Matches HomeScreen style) */}

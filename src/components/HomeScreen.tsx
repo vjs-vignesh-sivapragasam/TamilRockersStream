@@ -363,21 +363,6 @@ const PosterGridCard = React.memo<PosterGridCardProps>(({ item, isSaved, onToggl
             <Film color="rgba(255,255,255,0.4)" size={28} strokeWidth={1.5} />
           </LinearGradient>
         )}
-
-        {/* Floating TMDB Rating Pill on Top-Left */}
-        {displayRating > 0 ? (
-          <View style={styles.pgFloatingRating}>
-            <Star size={10} color="#FFD700" fill="#FFD700" />
-            <Text style={styles.pgFloatingRatingText}>{displayRating.toFixed(1)}</Text>
-          </View>
-        ) : null}
-
-        {/* Floating Year Pill on Top-Right */}
-        {displayYear ? (
-          <View style={styles.pgFloatingYear}>
-            <Text style={styles.pgFloatingYearText}>{displayYear}</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* 2. Next line shows - Title of the Movie & TMDB Rating/Year */}
@@ -508,14 +493,6 @@ const TopReleaseCard = React.memo<TopReleaseCardProps>(({ item, rank, isSaved, o
       <View style={styles.trRankBadge}>
         <Text style={styles.trRankText}>#{rank}</Text>
       </View>
-
-      {/* Floating Top-Right TMDB Rating Badge */}
-      {displayRating > 0 ? (
-        <View style={styles.trRatingBadge}>
-          <Star size={10} color="#FFD700" fill="#FFD700" />
-          <Text style={styles.trRatingBadgeText}>{displayRating.toFixed(1)}</Text>
-        </View>
-      ) : null}
 
       {/* Bottom gradient overlay with Title & Year/Rating */}
       <LinearGradient

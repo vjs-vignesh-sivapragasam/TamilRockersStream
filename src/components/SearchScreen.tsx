@@ -197,21 +197,6 @@ const SearchResultCard = React.memo<SearchResultCardProps>(({
             <Film color="rgba(255,255,255,0.4)" size={30} strokeWidth={1.5} />
           </LinearGradient>
         )}
-
-        {/* Floating TMDB Rating Badge */}
-        {displayRating > 0 ? (
-          <View style={styles.floatingRatingBadge}>
-            <Star size={10} color="#FFD700" fill="#FFD700" />
-            <Text style={styles.floatingRatingText}>{displayRating.toFixed(1)}</Text>
-          </View>
-        ) : null}
-
-        {/* Floating Release Year Badge */}
-        {displayYear ? (
-          <View style={styles.floatingYearBadge}>
-            <Text style={styles.floatingYearText}>{displayYear}</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Title & Metadata */}
