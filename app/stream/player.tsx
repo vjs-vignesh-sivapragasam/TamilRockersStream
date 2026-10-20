@@ -1,4 +1,4 @@
-import { getPlatformSpecificPlayers, Players, isKSPlayerSupported } from "@/utils/MediaPlayer";
+import { getPlatformSpecificPlayers, Players, isKSPlayerSupported, isVLCPlayerSupported } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -110,8 +110,10 @@ const MediaPlayerScreen: React.FC = () => {
   const [stremioClient, setStremioClient] = useState<StreamingServerClient | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const isAdvancedSupported = Platform.OS === 'android' ? isVLCPlayerSupported() : isKSPlayerSupported();
+
   const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">(
-    isKSPlayerSupported() ? "ksplayer" : "native"
+    isAdvancedSupported ? "ksplayer" : "native"
   );
   const [hasTriedNative, setHasTriedNative] = useState(false);
 
@@ -296,7 +298,7 @@ const MediaPlayerScreen: React.FC = () => {
 
     setIsLoadingStream(true);
     setStreamError('');
-    setCurrentPlayerType(Platform.OS === "ios" ? "ksplayer" : "native");
+    setCurrentPlayerType(isAdvancedSupported ? "ksplayer" : "native");
     setHasTriedNative(false);
 
     const stream = list[streamIndex];
@@ -371,7 +373,7 @@ const MediaPlayerScreen: React.FC = () => {
     if (selectedPlayer === Players.Default) {
       if (s.url) {
         setVideoUrl(s.url);
-        setCurrentPlayerType(Platform.OS === "ios" ? "ksplayer" : "native");
+        setCurrentPlayerType(isAdvancedSupported ? "ksplayer" : "native");
         setHasTriedNative(false);
       } else {
         loadStream(newIndex);
@@ -381,8 +383,8 @@ const MediaPlayerScreen: React.FC = () => {
 
   const handlePlaybackError = (event: PlaybackErrorEvent) => {
     console.log('Playback error:', event);
-    if (Platform.OS === "ios" && currentPlayerType === "ksplayer" && !hasTriedNative) {
-      console.log('KSPlayer failed, falling back to native player');
+    if (isAdvancedSupported && currentPlayerType === "ksplayer" && !hasTriedNative) {
+      console.log('Advanced native player failed, falling back to basic player');
       setHasTriedNative(true);
       setStreamError('');
       setCurrentPlayerType("native");
@@ -459,16 +461,27 @@ const MediaPlayerScreen: React.FC = () => {
   };
 
   // ── Player selection ─────────────────────────────────────────────────────────
+  // Android Default (when VLCPlayer native module available): LibVLC (FFmpeg-based, MKV/AC3/EAC3/DTS/ASS support)
   // iOS Default (when KSPlayer native module available): KSPlayer (FFmpeg-based, hardware Metal, MKV/AC3/EAC3/DTS/ASS support)
   // Fallback: react-native-video (ExoPlayer on Android, AVPlayer on iOS)
 
   function getPlayer() {
-    if (isKSPlayerSupported() && currentPlayerType === "ksplayer") {
-      try {
-        const ks = require("../../components/ksplayer");
-        if (ks && ks.MediaPlayer) return ks.MediaPlayer;
-      } catch (e) {
-        console.warn('[StreamPlayer] Failed to load KSPlayer, falling back to NativePlayer:', e);
+    if (currentPlayerType === "ksplayer") {
+      if (Platform.OS === 'android' && isVLCPlayerSupported()) {
+        try {
+          const vlc = require("../../components/vlcplayer");
+          if (vlc && vlc.MediaPlayer) return vlc.MediaPlayer;
+        } catch (e) {
+          console.warn('[StreamPlayer] Failed to load VLCPlayer, falling back to NativePlayer:', e);
+        }
+      }
+      if (Platform.OS === 'ios' && isKSPlayerSupported()) {
+        try {
+          const ks = require("../../components/ksplayer");
+          if (ks && ks.MediaPlayer) return ks.MediaPlayer;
+        } catch (e) {
+          console.warn('[StreamPlayer] Failed to load KSPlayer, falling back to NativePlayer:', e);
+        }
       }
     }
     return require("../../components/nativeplayer").MediaPlayer;
@@ -509,7 +522,7 @@ const MediaPlayerScreen: React.FC = () => {
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
         pictureInPictureEnabled={true}
-        onForceSwitchToKSPlayer={isKSPlayerSupported() ? () => {
+        onForceSwitchToKSPlayer={isAdvancedSupported ? () => {
           setCurrentPlayerType("ksplayer");
           setHasTriedNative(true);
         } : undefined}

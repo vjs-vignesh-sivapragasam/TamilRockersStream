@@ -14,6 +14,19 @@ export const isKSPlayerSupported = (): boolean => {
     }
 };
 
+export const isVLCPlayerSupported = (): boolean => {
+    if (Platform.OS !== 'android') return false;
+    try {
+        if (!UIManager) return false;
+        return Boolean(
+            UIManager.getViewManagerConfig?.('VLCPlayerView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('VLCPlayerView')
+        );
+    } catch {
+        return false;
+    }
+};
+
 export const isNativeVideoSupported = (): boolean => {
     return Platform.OS !== 'web';
 };

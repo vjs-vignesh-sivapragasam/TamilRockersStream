@@ -48,6 +48,7 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
+      "./plugins/withVLCPlayer",
       [
         "react-native-video",
         {

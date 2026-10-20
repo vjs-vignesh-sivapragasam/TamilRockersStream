@@ -15,8 +15,8 @@ import { StorageKeys, storageService } from '@/utils/StorageService';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
-import { MenuView, MenuAction } from '@react-native-menu/menu';
-import { WebMenu } from '@/components/WebMenuView';
+import { MenuAction } from '@react-native-menu/menu';
+import { UniversalMenu } from '@/components/WebMenuView';
 import { SUBTITLE_LANGUAGES } from '@/utils/Subtitles';
 import BottomSpacing from '@/components/BottomSpacing';
 
@@ -185,31 +185,21 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
     }));
 
     const renderLanguageMenu = () => {
-        if (Platform.OS === 'web') {
-            return (
-                <WebMenu
-                    title="Select Languages"
-                    actions={webMenuActions as any}
-                    onPressAction={(action: any) => {
-                        const language = SUBTITLE_LANGUAGES.find(lang => lang.name === action.title);
+        return (
+            <UniversalMenu
+                title="Select Languages"
+                actions={Platform.OS === 'web' ? (webMenuActions as any) : languageMenuActions}
+                onPressAction={(action: any) => {
+                    if (Platform.OS === 'web' || typeof action === 'string') {
+                        const actionTitle = typeof action === 'string' ? action : action?.title;
+                        const language = SUBTITLE_LANGUAGES.find(lang => lang.name === actionTitle || lang.code === action);
                         if (language) {
                             toggleLanguage(language.code);
                         }
-                    }}
-                >
-                    <TouchableOpacity style={styles.menuButton}>
-                        <Ionicons name="language-outline" size={20} color="#bbb" />
-                        <Text style={styles.menuButtonText}>Add Language</Text>
-                        <Ionicons name="chevron-down-outline" size={20} color="#bbb" />
-                    </TouchableOpacity>
-                </WebMenu>
-            );
-        }
-
-        return (
-            <MenuView
-                actions={languageMenuActions}
-                onPressAction={handleLanguageMenuAction}
+                    } else {
+                        handleLanguageMenuAction(action);
+                    }
+                }}
                 themeVariant='dark'
                 shouldOpenOnLongPress={false}
             >
@@ -218,7 +208,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                     <Text style={styles.menuButtonText}>Add Language</Text>
                     <Ionicons name="chevron-down-outline" size={20} color="#bbb" />
                 </TouchableOpacity>
-            </MenuView>
+            </UniversalMenu>
         );
     };
 

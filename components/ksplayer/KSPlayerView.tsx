@@ -104,7 +104,11 @@ function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[]
   if (!node) return;
   const commands = UIManager.getViewManagerConfig('KSPlayerView')?.Commands;
   if (!commands || commands[command] === undefined) {
-    console.warn(`[KSPlayerView] Command "${command}" not found`);
+    try {
+      UIManager.dispatchViewManagerCommand(node, command as any, args);
+    } catch {
+      console.warn(`[KSPlayerView] Command "${command}" not found`);
+    }
     return;
   }
   UIManager.dispatchViewManagerCommand(node, commands[command], args);

@@ -898,7 +898,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                         if (isAvailableOnPlatform) {
                           handleSelectPlayer(player.name);
                         } else {
-                          Alert.alert('KSPlayer Notice', 'KSPlayer is built with iOS FFmpegKit + Metal and is available in custom development and release builds.');
+                          Alert.alert('Native Player Engine', Platform.OS === 'android' ? 'LibVLC is built with Android FFmpeg and is available in custom development and release builds.' : 'KSPlayer is built with iOS FFmpegKit + Metal and is available in custom development and release builds.');
                         }
                       }}
                       activeOpacity={0.8}

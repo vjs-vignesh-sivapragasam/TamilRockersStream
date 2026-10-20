@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { TouchableOpacity, Animated, Platform } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
-import { WebMenu } from "@/components/WebMenuView";
+import { WebMenu, UniversalMenu } from "@/components/WebMenuView";
 import { styles } from "../coreplayer/styles";
 import {
     usePlayerState,
@@ -42,10 +42,7 @@ const { KSPlayerView: VideoComponent } = require('@/components/ksplayer/KSPlayer
 
 const RNResizeMode = { COVER: 'cover', CONTAIN: 'contain', STRETCH: 'stretch' };
 
-const MenuWrapper: React.FC<any> = (props) => {
-    if (Platform.OS === 'web') return <WebMenu {...props} />;
-    return <MenuView {...props} />;
-};
+const MenuWrapper = UniversalMenu;
 
 export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     videoUrl,

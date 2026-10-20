@@ -1,34 +1,63 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Platform, StyleSheet, Animated } from 'react-native';
+import React, { useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    Platform,
+    StyleSheet,
+    Animated,
+    Modal,
+    TouchableWithoutFeedback,
+    ScrollView,
+    UIManager,
+} from 'react-native';
 
-interface MenuAction {
+export interface MenuAction {
     id: string;
     title: string;
     subtitle?: string;
-    state?: 'on';
+    state?: 'on' | 'off';
     titleColor?: string;
 }
 
-interface WebMenuProps {
-    title: string;
-    actions: MenuAction[];
-    onPressAction: (id: string) => void;
+export interface WebMenuProps {
+    title?: string;
+    actions?: MenuAction[] | any[];
+    onPressAction?: (id: string | any) => void;
     onOpenMenu?: () => void;
     onCloseMenu?: () => void;
-    children: React.ReactNode;
+    children?: React.ReactNode;
+    style?: any;
+    themeVariant?: string;
+    shouldOpenOnLongPress?: boolean;
+    [key: string]: any;
 }
 
-export const WebMenu: React.FC<WebMenuProps> = ({
+export const isMenuViewAvailable = (() => {
+    if (Platform.OS === 'web') return false;
+    try {
+        if (!UIManager) return false;
+        return Boolean(
+            UIManager.getViewManagerConfig?.('MenuView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('MenuView') ||
+            UIManager.getViewManagerConfig?.('RNCPopupMenuView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('RNCPopupMenuView')
+        );
+    } catch {
+        return false;
+    }
+})();
+
+export const WebMenu = forwardRef<any, WebMenuProps>(({
     title,
-    actions,
+    actions = [],
     onPressAction,
     onOpenMenu,
     onCloseMenu,
     children,
-}) => {
+    style,
+}, ref) => {
     const [isOpen, setIsOpen] = useState(false);
-    const menuRef = useRef<View | any>(null);
-    const triggerRef = useRef<View | any>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
@@ -40,12 +69,12 @@ export const WebMenu: React.FC<WebMenuProps> = ({
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
-                duration: 200,
+                duration: 180,
                 useNativeDriver: true,
             }),
             Animated.timing(scaleAnim, {
                 toValue: 1,
-                duration: 200,
+                duration: 180,
                 useNativeDriver: true,
             }),
         ]).start();
@@ -56,12 +85,12 @@ export const WebMenu: React.FC<WebMenuProps> = ({
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 0,
-                duration: 150,
+                duration: 140,
                 useNativeDriver: true,
             }),
             Animated.timing(scaleAnim, {
                 toValue: 0.95,
-                duration: 150,
+                duration: 140,
                 useNativeDriver: true,
             }),
         ]).start(() => {
@@ -70,169 +99,228 @@ export const WebMenu: React.FC<WebMenuProps> = ({
         });
     };
 
+    useImperativeHandle(ref, () => ({
+        show: () => openMenu(),
+        open: () => openMenu(),
+        close: () => closeMenu(),
+    }));
+
     const handleActionPress = (actionId: string) => {
-        onPressAction(actionId);
+        if (typeof onPressAction === 'function') {
+            try {
+                (onPressAction as any)(actionId);
+            } catch {
+                try {
+                    (onPressAction as any)({ nativeEvent: { event: actionId }, id: actionId });
+                } catch (err) {
+                    console.warn('[WebMenu] Error calling onPressAction:', err);
+                }
+            }
+        }
         closeMenu();
     };
 
-    useEffect(() => {
-        if (Platform.OS === 'web') {
-            const handleClickOutside = (event: MouseEvent) => {
-                if (
-                    menuRef.current &&
-                    triggerRef.current &&
-                    !menuRef.current.contains(event.target as Node) &&
-                    !triggerRef.current.contains(event.target as Node)
-                ) {
-                    closeMenu();
-                }
-            };
-
-            if (isOpen) {
-                document.addEventListener('click', handleClickOutside);
-                return () => document.removeEventListener('click', handleClickOutside);
-            }
-        }
-    }, [isOpen]);
-
-    if (Platform.OS !== 'web') {
-        return <>{children}</>;
-    }
-
     return (
-        <View ref={triggerRef} style={styles.container}>
+        <View style={[styles.container, style]}>
             <TouchableOpacity onPress={openMenu} activeOpacity={0.7}>
                 {children}
             </TouchableOpacity>
 
-            {isOpen && (
-                <Animated.View
-                    ref={menuRef}
-                    style={[
-                        styles.menu,
-                        {
-                            opacity: fadeAnim,
-                            transform: [{ scale: scaleAnim }],
-                        },
-                    ]}
-                    pointerEvents="auto"
-                >
-                    <View style={styles.menuContent}>
-                        <View style={styles.menuHeader}>
-                            <Text style={styles.menuTitle}>{title}</Text>
-                        </View>
+            <Modal
+                visible={isOpen}
+                transparent
+                animationType="none"
+                supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+                onRequestClose={closeMenu}
+            >
+                <TouchableWithoutFeedback onPress={closeMenu}>
+                    <Animated.View style={[styles.modalOverlay, { opacity: fadeAnim }]}>
+                        <TouchableWithoutFeedback>
+                            <Animated.View
+                                style={[
+                                    styles.modalCard,
+                                    {
+                                        transform: [{ scale: scaleAnim }],
+                                    },
+                                ]}
+                            >
+                                <View style={styles.menuHeader}>
+                                    <Text style={styles.menuTitle} numberOfLines={1}>{title}</Text>
+                                    <TouchableOpacity onPress={closeMenu} style={styles.closeBtn} activeOpacity={0.7}>
+                                        <Text style={styles.closeBtnText}>✕</Text>
+                                    </TouchableOpacity>
+                                </View>
 
-                        <View style={styles.menuDivider} />
-
-                        {actions.map((action, index) => (
-                            <View key={action.id}>
-                                <TouchableOpacity
-                                    style={styles.menuItem}
-                                    onPress={() => handleActionPress(action.id)}
-                                    activeOpacity={0.6}
-                                >
-                                    <View style={styles.menuItemContent}>
-                                        <Text
+                                <ScrollView style={styles.actionsList} showsVerticalScrollIndicator={false}>
+                                    {actions.map((action: any, index: number) => (
+                                        <TouchableOpacity
+                                            key={action.id || index}
                                             style={[
-                                                styles.menuItemTitle,
-                                                { color: action.titleColor || '#FFFFFF' },
-                                                action.state === 'on' && styles.menuItemSelected,
+                                                styles.menuItem,
+                                                index < actions.length - 1 && styles.menuItemBorder,
                                             ]}
+                                            onPress={() => handleActionPress(action.id)}
+                                            activeOpacity={0.65}
                                         >
-                                            {action.title}
-                                        </Text>
-                                        {action.subtitle && (
-                                            <Text style={styles.menuItemSubtitle}>{action.subtitle}</Text>
-                                        )}
-                                    </View>
-                                    {action.state === 'on' && <View style={styles.checkmark} />}
-                                </TouchableOpacity>
-                                {index < actions.length - 1 && <View style={styles.itemDivider} />}
-                            </View>
-                        ))}
-                    </View>
-                </Animated.View>
-            )}
+                                            <View style={styles.menuItemContent}>
+                                                <Text
+                                                    style={[
+                                                        styles.menuItemTitle,
+                                                        { color: action.titleColor || '#FFFFFF' },
+                                                        action.state === 'on' && styles.menuItemSelected,
+                                                    ]}
+                                                >
+                                                    {action.title}
+                                                </Text>
+                                                {action.subtitle ? (
+                                                    <Text style={styles.menuItemSubtitle}>{action.subtitle}</Text>
+                                                ) : null}
+                                            </View>
+                                            {action.state === 'on' ? (
+                                                <View style={styles.checkmarkBadge}>
+                                                    <Text style={styles.checkmarkText}>✓</Text>
+                                                </View>
+                                            ) : null}
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </Animated.View>
+                        </TouchableWithoutFeedback>
+                    </Animated.View>
+                </TouchableWithoutFeedback>
+            </Modal>
         </View>
     );
-};
+});
+
+export const UniversalMenu = forwardRef<any, WebMenuProps>((props, ref) => {
+    if (isMenuViewAvailable) {
+        try {
+            const { MenuView } = require('@react-native-menu/menu');
+            if (MenuView) {
+                return <MenuView ref={ref} {...props} />;
+            }
+        } catch {}
+    }
+
+    const normalizedOnPressAction = (param: any) => {
+        const actionId = typeof param === 'string' ? param : (param?.nativeEvent?.event || param?.id || String(param));
+        if (typeof props.onPressAction === 'function') {
+            try {
+                props.onPressAction(actionId);
+            } catch {
+                try {
+                    props.onPressAction({ nativeEvent: { event: actionId }, id: actionId });
+                } catch (err) {
+                    console.warn('[UniversalMenu] Error calling onPressAction:', err);
+                }
+            }
+        }
+    };
+
+    return <WebMenu ref={ref} {...props} onPressAction={normalizedOnPressAction} />;
+});
 
 const styles = StyleSheet.create({
     container: {
         position: 'relative',
-        zIndex: 1,
     },
-    menu: {
-        position: 'absolute',
-        top: '100%',
-        right: 0,
-        marginTop: 8,
-        backgroundColor: '#1c1c1e',
-        borderRadius: 12,
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+    },
+    modalCard: {
+        width: '100%',
+        maxWidth: 380,
+        maxHeight: '82%',
+        backgroundColor: '#1E1E22',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         overflow: 'hidden',
-        minWidth: 200,
-        maxWidth: 280,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 12,
-        elevation: 10,
-        zIndex: 9999,
-    },
-    menuContent: {
-        backgroundColor: '#1c1c1e',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.5,
+        shadowRadius: 20,
+        elevation: 25,
     },
     menuHeader: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-    },
-    menuTitle: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#999',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    menuDivider: {
-        height: 1,
-        backgroundColor: '#3a3a3c',
-    },
-    menuItem: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#1c1c1e',
-        cursor: 'pointer' as any,
+        paddingHorizontal: 18,
+        paddingVertical: 14,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+        backgroundColor: '#26262B',
+    },
+    menuTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        letterSpacing: 0.3,
+        flex: 1,
+    },
+    closeBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 8,
+    },
+    closeBtnText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    actionsList: {
+        paddingVertical: 4,
+    },
+    menuItem: {
+        paddingHorizontal: 18,
+        paddingVertical: 13,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    menuItemBorder: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
     },
     menuItemContent: {
         flex: 1,
+        paddingRight: 10,
     },
     menuItemTitle: {
-        fontSize: 16,
+        fontSize: 15,
         color: '#FFFFFF',
         fontWeight: '500',
     },
     menuItemSelected: {
         fontWeight: '700',
+        color: '#0A84FF',
     },
     menuItemSubtitle: {
         fontSize: 12,
-        color: '#8e8e93',
-        marginTop: 4,
+        color: '#8E8E93',
+        marginTop: 3,
     },
-    itemDivider: {
-        height: 1,
-        backgroundColor: '#3a3a3c',
-    },
-    checkmark: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#007AFF',
-        marginLeft: 12,
+    checkmarkBadge: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: '#0A84FF',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    checkmarkText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: 'bold',
     },
 });

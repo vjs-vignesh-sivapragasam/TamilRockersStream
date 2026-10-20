@@ -70,7 +70,7 @@ import {
   savePosterCacheToDisk,
   loadPosterCacheFromDisk,
 } from '../services/tamilMvService';
-import { useDownloads } from '../context/DownloadContext';
+import { useDownloads, resolveBackendUrlForDevice } from '../context/DownloadContext';
 import { OfflinePlayerModal } from './OfflinePlayerModal';
 import { DownloadItem } from '../types/downloads';
 import { continueWatchingService, ContinueWatchingItem } from '../services/continueWatchingService';
@@ -2637,14 +2637,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
 
       setStreamingResId(resItem.id);
 
+      console.log('========================================================');
+      console.log(`[StreamFlow] 🎬 STEP 1: Stream requested by user`);
+      console.log(`[StreamFlow] 📌 Movie Title: "${movie.movieTitle}"`);
+      console.log(`[StreamFlow] 📊 Resolution: "${resItem.resolution}" | Size: "${resItem.size || 'unknown'}"`);
+      console.log(`[StreamFlow] 🌐 Active 1TamilMV Mirror: ${tamilMvService.getBaseUrl()}`);
+      console.log(`[StreamFlow] 🔗 Topic URL: ${resItem.topicUrl || movie.topicUrl || 'N/A'}`);
+
       const launchPlayerWithMagnet = (resolvedMagnet: string) => {
-        const cleanBackend = (backendUrl || 'https://vflix-backend.onrender.com').trim().replace(/\/+$/, '');
+        const rawBackend = (backendUrl || 'http://localhost:3002').trim().replace(/\/+$/, '');
+        const cleanBackend = resolveBackendUrlForDevice(rawBackend).replace(/\/+$/, '');
+        console.log(`[StreamFlow] 📡 STEP 3: Preparing HTTP stream via backend`);
+        console.log(`[StreamFlow] 🌐 Backend Server: ${cleanBackend}`);
+        console.log(`[StreamFlow] 🧲 Full Magnet URI: ${resolvedMagnet.substring(0, 75)}...`);
+
         // Silent non-blocking background pre-warm to initiate peer discovery without awaiting
         fetch(`${cleanBackend}/api/stream/warmup?magnet=${encodeURIComponent(resolvedMagnet)}`).catch(() => {});
 
         // Always use /api/stream/play?magnet= so the backend gets the full magnet
         // (includes all embedded trackers for faster peer discovery)
         const streamUrl = `${cleanBackend}/api/stream/play?magnet=${encodeURIComponent(resolvedMagnet)}`;
+        console.log(`[StreamFlow] 🔗 Stream Video Endpoint: ${streamUrl}`);
+        console.log(
+          `[StreamFlow] 🚀 STEP 4: Launching Player Modal (OS: ${Platform.OS} -> Engine: ${
+            Platform.OS === 'android' ? 'LibVLC (Android)' : Platform.OS === 'ios' ? 'KSPlayer (iOS)' : 'NativePlayer'
+          })`
+        );
+        console.log('========================================================');
 
         // Directly launch internal player — no intermediate modal, zero server delay
         const streamDownloadItem: DownloadItem = {
@@ -2673,23 +2692,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
       try {
         // Fast launch if magnet is already known (immediate playback with zero delay)
         if (magnet) {
+          console.log(`[StreamFlow] 🧲 STEP 2: Magnet link is already available on item!`);
           launchPlayerWithMagnet(magnet);
           return;
         }
 
         // Asynchronously extract magnet from topic page if needed
         if (!magnet && resItem.topicUrl) {
+          console.log(`[StreamFlow] 🔍 STEP 2: Scraping topic page on current mirror for magnet...`);
           const extracted = await tamilMvService.extractMagnetFromTopic(resItem.topicUrl, resItem.resolution);
           if (extracted.magnetUrl) {
             magnet = extracted.magnetUrl;
             resItem.magnetUrl = extracted.magnetUrl;
+            console.log(`[StreamFlow] ✅ Successfully extracted direct magnet link`);
           } else if (extracted.torrentUrl) {
             magnet = extracted.torrentUrl;
             resItem.magnetUrl = extracted.torrentUrl;
+            console.log(`[StreamFlow] ✅ Successfully extracted torrent attachment link`);
           }
         }
 
         if (!magnet && movie.movieTitle) {
+          console.log(`[StreamFlow] 🔎 STEP 2b: Fallback search on current mirror for title: "${movie.movieTitle}"`);
           try {
             const searchResults = await tamilMvService.searchMovie(movie.movieTitle);
             if (searchResults && searchResults.length > 0) {
@@ -2702,16 +2726,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
               if (matchedRes && (matchedRes.magnetUrl || matchedRes.torrentFileUrl)) {
                 magnet = matchedRes.magnetUrl || matchedRes.torrentFileUrl;
                 resItem.magnetUrl = magnet;
+                console.log(`[StreamFlow] ✅ Found magnet via fallback search for resolution: ${matchedRes.resolution}`);
               }
             }
-          } catch (searchErr) {
-            console.warn('Fallback magnet search failed:', searchErr);
+          } catch (searchErr: any) {
+            console.warn('[StreamFlow] ❌ Fallback magnet search error:', searchErr?.message || searchErr);
           }
         }
 
         if (magnet) {
           launchPlayerWithMagnet(magnet);
         } else {
+          console.warn(`[StreamFlow] ⚠️ STEP 2 Failed: No magnet could be resolved for "${title}"`);
           Alert.alert(
             'Stream Unavailable',
             `Could not resolve a direct magnet stream for "${title}". You can check the forum post directly.`,
@@ -2722,6 +2748,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToTab, onOpenI
           );
         }
       } catch (err: any) {
+        console.error('[StreamFlow] ❌ Stream Launch Error:', err?.message || err);
         Alert.alert('Stream Error', err?.message || 'Could not start stream');
       } finally {
         setStreamingResId(null);

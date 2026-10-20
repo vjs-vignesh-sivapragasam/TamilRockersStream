@@ -219,58 +219,41 @@ export const tamilMvService = {
     if (!term) return [];
 
     const isRecent = !term || /^recent/i.test(term);
-    const primaryBase = overrideUrl ? overrideUrl.replace(/\/+$/, '') : configuredBaseUrl;
+    const baseUrl = overrideUrl ? overrideUrl.replace(/\/+$/, '') : configuredBaseUrl;
+    const searchUrl = isRecent
+      ? baseUrl
+      : `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
 
-    // Build list of candidate mirrors to try, starting with primary configured URL
-    const candidates = [primaryBase];
-    for (const m of POPULAR_MIRRORS) {
-      const cleanM = m.replace(/\/+$/, '');
-      if (cleanM.toLowerCase() !== primaryBase.toLowerCase() && !candidates.includes(cleanM)) {
-        candidates.push(cleanM);
+    console.log(`[TamilMV] 🌐 Searching on current selected domain: ${baseUrl}`);
+    console.log(`[TamilMV] 🔎 Query: "${term}" | URL: ${searchUrl}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 9000);
+
+    try {
+      const response = await fetch(searchUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status} from ${baseUrl}`);
       }
+
+      const html = await response.text();
+      const results = this.parseSearchResults(html, baseUrl, isRecent ? '' : term);
+      console.log(`[TamilMV] ✅ Search completed on ${baseUrl}: found ${results?.length || 0} result(s)`);
+      return results || [];
+    } catch (err: any) {
+      clearTimeout(timeout);
+      console.warn(`[TamilMV] ❌ Search fetch error on current domain (${baseUrl}):`, err?.message || err);
+      throw err;
     }
-
-    let lastError: any = null;
-
-    for (const baseUrl of candidates) {
-      const searchUrl = isRecent
-        ? baseUrl
-        : `${baseUrl}/index.php?/search/&q=${encodeURIComponent(term)}&type=forums_topic`;
-
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 7000);
-
-        const response = await fetch(searchUrl, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          throw new Error(`HTTP Error ${response.status} from ${baseUrl}`);
-        }
-
-        const html = await response.text();
-        const results = this.parseSearchResults(html, baseUrl, isRecent ? '' : term);
-        if (results && results.length > 0) {
-          if (!overrideUrl && baseUrl.toLowerCase() !== configuredBaseUrl.toLowerCase()) {
-            console.log(`[tamilMvService] Auto-switched working mirror to: ${baseUrl}`);
-            this.setBaseUrl(baseUrl);
-          }
-          return results;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`TamilMV Search Fetch error for ${baseUrl}:`, err?.message || err);
-      }
-    }
-
-    throw lastError || new Error('All mirrors failed to respond');
   },
 
   /**
@@ -617,6 +600,7 @@ export const tamilMvService = {
   ): Promise<{ magnetUrl?: string; torrentUrl?: string }> {
     if (!topicUrl) return {};
     const finalTopicUrl = this.normalizeUrlToActiveMirror(topicUrl);
+    console.log(`[StreamFlow] 🌐 Scraping topic page: ${finalTopicUrl} (Resolution: ${targetResolution || 'any'})`);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
@@ -631,7 +615,10 @@ export const tamilMvService = {
       });
       clearTimeout(timeout);
 
-      if (!response.ok) return {};
+      if (!response.ok) {
+        console.warn(`[StreamFlow] ⚠️ Topic page returned HTTP ${response.status} from ${finalTopicUrl}`);
+        return {};
+      }
       const html = await response.text();
 
       // Extract torrent file attachment URL
@@ -765,9 +752,10 @@ export const tamilMvService = {
         }
       }
 
+      console.log(`[StreamFlow] 🧲 Extracted ${allMagnets.length} magnet(s). Selected: ${selectedMagnet ? selectedMagnet.substring(0, 60) + '...' : 'none'}`);
       return { magnetUrl: selectedMagnet, torrentUrl };
-    } catch (err) {
-      console.warn('Failed to extract magnet from topic:', err);
+    } catch (err: any) {
+      console.warn(`[StreamFlow] ⚠️ Failed to extract magnet from topic:`, err?.message || err);
       return {};
     }
   },

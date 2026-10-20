@@ -13,7 +13,6 @@ import {
   MovieResolutionItem,
   posterCache,
   tamilMvService,
-  POPULAR_MIRRORS,
 } from './tamilMvService';
 import { storageService } from '@/utils/StorageService';
 
@@ -218,24 +217,8 @@ async function fetchSingleXmlUrl(url: string): Promise<string> {
 
   try {
     return await tryFetch(url, 12000);
-  } catch (err) {
-    // Attempt fallback across other popular mirrors
-    const currentBase = tamilMvService.getBaseUrl();
-    for (const mirror of POPULAR_MIRRORS) {
-      if (mirror.toLowerCase() === currentBase.toLowerCase()) continue;
-      try {
-        const parsed = new URL(url);
-        const alt = new URL(mirror);
-        parsed.protocol = alt.protocol;
-        parsed.host = alt.host;
-        const fallbackUrl = parsed.toString();
-        const text = await tryFetch(fallbackUrl, 8000);
-        if (text && text.includes('<rss')) {
-          tamilMvService.setBaseUrl(mirror);
-          return text;
-        }
-      } catch {}
-    }
+  } catch (err: any) {
+    console.warn(`[XMLFeed] ❌ Feed fetch failed for current domain (${url}):`, err?.message || err);
     throw err;
   }
 }

@@ -4,7 +4,7 @@ import Video, { OnLoadData, OnProgressData, VideoRef, OnBufferData, ResizeMode, 
 import { WebView } from "react-native-webview";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
-import { WebMenu } from "@/components/WebMenuView";
+import { WebMenu, UniversalMenu } from "@/components/WebMenuView";
 import { styles } from "../coreplayer/styles";
 
 const isRCTVideoAvailable = (() => {
@@ -55,13 +55,8 @@ import { SkipBanner } from "../introdb/skipBanner";
 import { useIntroDB } from "../introdb/useIntroDb";
 import { isPictureInPictureSupported } from "@/utils/MediaPlayer";
 
-// Menu wrapper component - uses WebMenu on web, MenuView on native
-const MenuWrapper: React.FC<any> = (props) => {
-    if (Platform.OS === 'web') {
-        return <WebMenu {...props} />;
-    }
-    return <MenuView {...props} />;
-};
+// Menu wrapper component - uses native MenuView if available, otherwise UniversalMenu modal
+const MenuWrapper = UniversalMenu;
 
 
 export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({

@@ -18,7 +18,7 @@ import { continueWatchingService } from '../services/continueWatchingService';
 import { Subtitle } from '@/components/coreplayer/models';
 import OpenSubtitlesClient, { SubtitleResult } from '@/clients/opensubtitles';
 import { storageService, StorageKeys } from '@/utils/StorageService';
-import { isKSPlayerSupported } from '@/utils/MediaPlayer';
+import { isKSPlayerSupported, isVLCPlayerSupported } from '@/utils/MediaPlayer';
 
 interface OfflinePlayerModalProps {
   visible: boolean;
@@ -171,6 +171,26 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
     return item?.title || item?.movieFileName || item?.fileName || 'Offline Movie';
   }, [item]);
 
+  // Log active player configuration on open
+  useEffect(() => {
+    if (visible && item) {
+      const engineName =
+        Platform.OS === 'android' && isVLCPlayerSupported()
+          ? 'LibVLC (Android native)'
+          : Platform.OS === 'ios' && isKSPlayerSupported()
+          ? 'KSPlayer (iOS native)'
+          : 'NativePlayer (react-native-video / fallback)';
+
+      console.log('----------------------------------------------------');
+      console.log(`[OfflinePlayerModal] 📱 Player Modal opened!`);
+      console.log(`[OfflinePlayerModal] 🎬 Title: "${movieTitle}"`);
+      console.log(`[OfflinePlayerModal] 🔗 Media URL: ${effectiveVideoSrc}`);
+      console.log(`[OfflinePlayerModal] 🤖 OS Platform: ${Platform.OS}`);
+      console.log(`[OfflinePlayerModal] ⚙️ Active Player Engine: ${engineName}`);
+      console.log('----------------------------------------------------');
+    }
+  }, [visible, item, effectiveVideoSrc, movieTitle]);
+
   const saveProgress = useCallback(
     (curTime: number, dur: number) => {
       if (!item || dur <= 0) return;
@@ -232,7 +252,7 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
         event.error?.includes('embedded player');
 
       const message = isFormatError
-        ? 'This stream format (e.g. MKV container, HEVC video, or Dolby AC3 audio) cannot be decoded inside Expo Go.\n\nYou can open it in VLC, copy the stream link for Infuse/Outplayer, or use an iOS Development Build with KSPlayer.'
+        ? 'This stream format (e.g. MKV container, HEVC video, or Dolby AC3 audio) cannot be decoded inside Expo Go.\n\nYou can open it in VLC, copy the stream link for Infuse/Outplayer, or use a custom build with LibVLC (Android) / KSPlayer (iOS).'
         : (event.error || 'Unable to play this video format. Make sure the file exists and is not corrupted.');
 
       Alert.alert(
@@ -269,10 +289,19 @@ export const OfflinePlayerModal: React.FC<OfflinePlayerModalProps> = ({
   );
 
   // Player Selection:
-  // On iOS with KSPlayer native module available: KSPlayer (FFmpegKit + Metal - handles MKV, AC3, EAC3, DTS, ASS)
-  // Otherwise (Android, web, or iOS without KSPlayer view config): NativePlayer (react-native-video ExoPlayer / AVPlayer or HTML5 WebView)
+  // If Android: LibVLC (handles MKV, AC3, EAC3, DTS, ASS natively with zero dependencies)
+  // If iOS: KSPlayer (FFmpegKit + Metal - handles MKV, AC3, EAC3, DTS, ASS)
+  // Fallback (Expo Go or web): NativePlayer (react-native-video ExoPlayer / AVPlayer or HTML5 WebView)
   const Player = useMemo(() => {
-    if (isKSPlayerSupported()) {
+    if (Platform.OS === 'android' && isVLCPlayerSupported()) {
+      try {
+        const vlc = require('../../components/vlcplayer');
+        if (vlc && vlc.MediaPlayer) return vlc.MediaPlayer;
+      } catch (e) {
+        console.warn('[OfflinePlayerModal] Failed to load VLCPlayer, falling back to NativePlayer:', e);
+      }
+    }
+    if (Platform.OS === 'ios' && isKSPlayerSupported()) {
       try {
         const ks = require('../../components/ksplayer');
         if (ks && ks.MediaPlayer) return ks.MediaPlayer;
