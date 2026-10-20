@@ -450,8 +450,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const handleShareApp = async () => {
     try {
       await Share.share({
-        message: 'Stream & download high-res movies with VFLEX Stream: https://github.com/vjs-vignesh-sivapragasam/TamilRockersStream',
-        title: 'VFLEX Stream App',
+        message: 'Stream & download high-res movies with VFlix Stream: https://github.com/vjs-vignesh-sivapragasam/TamilRockersStream',
+        title: 'VFlix Stream App',
       });
     } catch {}
   };
@@ -761,7 +761,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
         {/* Footer Brand Logo */}
         <View style={styles.footerWrap}>
-          <Text style={styles.footerTitle}>VFLEX STREAM</Text>
+          <Text style={styles.footerTitle}>VFLIX STREAM</Text>
           <Text style={styles.footerSub}>High Performance P2P Cinema Engine • Build 2026.10</Text>
         </View>
       </ScrollView>

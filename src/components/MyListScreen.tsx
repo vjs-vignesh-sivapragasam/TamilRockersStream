@@ -266,7 +266,7 @@ export const MyListScreen: React.FC<MyListScreenProps> = ({
           progress: 1,
           totalBytes: 0,
           downloadedBytes: 0,
-          speed: 'VFLEX Stream Engine',
+          speed: 'VFLIX Stream Engine',
           isTorrent: false,
           createdAt: Date.now(),
         };
