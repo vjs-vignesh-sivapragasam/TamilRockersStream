@@ -58,6 +58,7 @@ import {
   User,
   Calendar,
   ChevronRight,
+  Link,
 } from 'lucide-react-native';
 import { Colors, getTheme } from '../constants/theme';
 import {
@@ -898,9 +899,8 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
     const [resolutionsList, setResolutionsList] = useState<MovieResolutionItem[]>(() => movie?.resolutions || []);
     const [resolutionsLoading, setResolutionsLoading] = useState(false);
     const [qualityModalMode, setQualityModalMode] = useState<'play' | 'download' | null>(null);
-    const [playDestination, setPlayDestination] = useState<'internal' | 'browser'>('internal');
-    const [downloadDestination, setDownloadDestination] = useState<'internal' | 'torrent_app'>('internal');
     const [copyingMagnet, setCopyingMagnet] = useState(false);
+    const [copyingResId, setCopyingResId] = useState<string | null>(null);
 
     const topicUrl = movie?.topicUrl || movie?.resolutions?.[0]?.topicUrl || '';
 
@@ -1073,6 +1073,8 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         const resTopic = targetRes?.topicUrl || topicUrl;
 
         if (!magnet && resTopic) {
+          const resKey = targetRes?.id || targetRes?.resolution || 'copying';
+          setCopyingResId(resKey);
           setCopyingMagnet(true);
           try {
             const extracted = await tamilMvService.extractMagnetFromTopic(
@@ -1083,8 +1085,10 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
               magnet = extracted.magnetUrl;
               if (targetRes) targetRes.magnetUrl = extracted.magnetUrl;
             }
-          } catch {}
-          setCopyingMagnet(false);
+          } catch {} finally {
+            setCopyingMagnet(false);
+            setCopyingResId(null);
+          }
         }
 
         if (magnet) {
@@ -1118,6 +1122,8 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
         const resTopic = targetRes?.topicUrl || topicUrl;
 
         if (!magnet && resTopic) {
+          const resKey = targetRes?.id || targetRes?.resolution || 'copying';
+          setCopyingResId(resKey);
           setCopyingMagnet(true);
           try {
             const extracted = await tamilMvService.extractMagnetFromTopic(
@@ -1128,8 +1134,10 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
               magnet = extracted.magnetUrl;
               if (targetRes) targetRes.magnetUrl = extracted.magnetUrl;
             }
-          } catch {}
-          setCopyingMagnet(false);
+          } catch {} finally {
+            setCopyingMagnet(false);
+            setCopyingResId(null);
+          }
         }
 
         if (magnet) {
@@ -1378,7 +1386,7 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
 
             {/* ── 3. Four Action Buttons: [Bookmark] [▶ Watch Now] [Trailer] [Download] ── */}
             <View style={styles.dsMainActionRow}>
-              {/* Bookmark Button */}
+              {/* Bookmark Button (My List) */}
               <TouchableOpacity
                 style={[
                   styles.dsRoundActionBtn,
@@ -1392,6 +1400,15 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                   size={20}
                   fill={isSaved ? theme.primary : 'transparent'}
                 />
+              </TouchableOpacity>
+
+              {/* Movie Page Button (Next to My List) */}
+              <TouchableOpacity
+                style={styles.dsRoundActionBtn}
+                onPress={handleQuickOpenBrowser}
+                activeOpacity={0.8}
+              >
+                <Globe color="#FFFFFF" size={20} strokeWidth={2} />
               </TouchableOpacity>
 
               {/* Watch Now Button (White Pill) */}
@@ -1625,74 +1642,6 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                 </ScrollView>
               </View>
             ) : null}
-
-            {/* ── 9. Verified Torrent Releases & Direct Streaming ── */}
-            <View style={styles.dsTorrentReleasesSection}>
-              <View style={styles.dsReleasesHeaderRow}>
-                <Text style={styles.dsReleasesTitle}>Verified Torrents & Releases ({resolutions.length})</Text>
-                <Text style={styles.dsReleasesSub}>Direct P2P Stream via VFlix Engine</Text>
-              </View>
-              <View style={styles.dsResolutionBadgesRow}>
-                {resolutions.map((res, idx) => (
-                  <TouchableOpacity
-                    key={res.id || `res-${idx}`}
-                    style={[
-                      styles.dsResBadgePill,
-                      selectedResIndex === idx && [styles.dsResBadgePillActive, { backgroundColor: theme.badgeBg, borderColor: theme.primary }],
-                    ]}
-                    onPress={() => setSelectedResIndex(idx)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.dsResBadgeText, selectedResIndex === idx && styles.dsResBadgeTextActive]}>
-                      {res.resolution || 'HD'} {res.size ? `• ${res.size}` : ''}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Quick Actions Grid */}
-              <View style={styles.dsQuickActionsGrid}>
-                <TouchableOpacity
-                  style={styles.dsQuickPillBtn}
-                  onPress={() => handleQuickCopyMagnet()}
-                  activeOpacity={0.8}
-                >
-                  {copyingMagnet ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Copy color="#FFFFFF" size={13} />
-                  )}
-                  <Text style={styles.dsQuickPillText}>Copy Magnet</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.dsQuickPillBtn}
-                  onPress={handleQuickOpenBrowser}
-                  activeOpacity={0.8}
-                >
-                  <Globe color="#FFFFFF" size={13} />
-                  <Text style={styles.dsQuickPillText}>Movie Page</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.dsQuickPillBtn}
-                  onPress={() => handleQuickCopyStreamUrl()}
-                  activeOpacity={0.8}
-                >
-                  <PlayCircle color="#FFFFFF" size={13} />
-                  <Text style={styles.dsQuickPillText}>Copy Stream URL</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.dsQuickPillBtn}
-                  onPress={() => handleQuickCopyDownloadUrl()}
-                  activeOpacity={0.8}
-                >
-                  <DownloadCloud color="#FFFFFF" size={13} />
-                  <Text style={styles.dsQuickPillText}>Copy Download URL</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
           </ScrollView>
 
           {/* Quality & File Size Selection Popup for Play / Download */}
@@ -1725,35 +1674,21 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                       ]}
                     >
                       {qualityModalMode === 'play' ? (
-                        playDestination === 'internal' ? (
-                          <Play color={theme.primary} size={18} fill={theme.primary} />
-                        ) : (
-                          <Globe color={theme.primary} size={18} />
-                        )
-                      ) : downloadDestination === 'internal' ? (
-                        <Download color="#30D158" size={18} strokeWidth={2.2} />
+                        <Play color={theme.primary} size={18} fill={theme.primary} />
                       ) : (
-                        <ExternalLink color="#30D158" size={18} strokeWidth={2.2} />
+                        <Download color="#30D158" size={18} strokeWidth={2.2} />
                       )}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.qmTitle}>
                         {qualityModalMode === 'play'
-                          ? playDestination === 'internal'
-                            ? 'Select Playback Quality'
-                            : 'Watch in Web Browser'
-                          : downloadDestination === 'internal'
-                          ? 'Select Download Quality'
-                          : 'Open in BitTorrent App'}
+                          ? 'Select Playback Quality'
+                          : 'Select Download Quality'}
                       </Text>
                       <Text style={styles.qmSubtitle} numberOfLines={1}>
                         {qualityModalMode === 'play'
-                          ? playDestination === 'internal'
-                            ? `In-App VFlix Player • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
-                            : `Instant browser stream • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
-                          : downloadDestination === 'internal'
-                          ? `Internal storage • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`
-                          : `Redirect to external torrent app • ${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'}`}
+                          ? `In-App • Browser • Copy Stream (${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'})`
+                          : `In-App • BitTorrent • Copy Magnet (${resolutions.length} ${resolutions.length === 1 ? 'quality' : 'qualities'})`}
                       </Text>
                     </View>
                   </View>
@@ -1765,104 +1700,6 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                   >
                     <X color="#8E8E93" size={18} strokeWidth={2.2} />
                   </TouchableOpacity>
-                </View>
-
-                {/* Destination Selector Tabs */}
-                <View style={styles.qmDestinationSelector}>
-                  {qualityModalMode === 'play' ? (
-                    <>
-                      <TouchableOpacity
-                        style={[
-                          styles.qmDestinationTab,
-                          playDestination === 'internal' && [styles.qmDestinationTabActivePlay, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }],
-                        ]}
-                        onPress={() => setPlayDestination('internal')}
-                        activeOpacity={0.8}
-                      >
-                        <Play
-                          color={playDestination === 'internal' ? '#FFFFFF' : '#8E8E93'}
-                          size={13}
-                          fill={playDestination === 'internal' ? '#FFFFFF' : 'none'}
-                        />
-                        <Text
-                          style={[
-                            styles.qmDestinationTabText,
-                            playDestination === 'internal' && styles.qmDestinationTabTextActive,
-                          ]}
-                        >
-                          Internal Player
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[
-                          styles.qmDestinationTab,
-                          playDestination === 'browser' && [styles.qmDestinationTabActivePlay, { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }],
-                        ]}
-                        onPress={() => setPlayDestination('browser')}
-                        activeOpacity={0.8}
-                      >
-                        <Globe
-                          color={playDestination === 'browser' ? '#FFFFFF' : '#8E8E93'}
-                          size={13}
-                        />
-                        <Text
-                          style={[
-                            styles.qmDestinationTabText,
-                            playDestination === 'browser' && styles.qmDestinationTabTextActive,
-                          ]}
-                        >
-                          Watch in Browser
-                        </Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : (
-                    <>
-                      <TouchableOpacity
-                        style={[
-                          styles.qmDestinationTab,
-                          downloadDestination === 'internal' && styles.qmDestinationTabActiveDownload,
-                        ]}
-                        onPress={() => setDownloadDestination('internal')}
-                        activeOpacity={0.8}
-                      >
-                        <Download
-                          color={downloadDestination === 'internal' ? '#FFFFFF' : '#8E8E93'}
-                          size={13}
-                        />
-                        <Text
-                          style={[
-                            styles.qmDestinationTabText,
-                            downloadDestination === 'internal' && styles.qmDestinationTabTextActive,
-                          ]}
-                        >
-                          In-App Download
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[
-                          styles.qmDestinationTab,
-                          downloadDestination === 'torrent_app' && styles.qmDestinationTabActiveDownload,
-                        ]}
-                        onPress={() => setDownloadDestination('torrent_app')}
-                        activeOpacity={0.8}
-                      >
-                        <ExternalLink
-                          color={downloadDestination === 'torrent_app' ? '#FFFFFF' : '#8E8E93'}
-                          size={13}
-                        />
-                        <Text
-                          style={[
-                            styles.qmDestinationTabText,
-                            downloadDestination === 'torrent_app' && styles.qmDestinationTabTextActive,
-                          ]}
-                        >
-                          BitTorrent App
-                        </Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
                 </View>
 
                 {/* Quality Options */}
@@ -1880,37 +1717,25 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                     {resolutions.map((res, idx) => {
                       const qb = getQualityBadgeConfig(res.resolution);
                       const isThisStreaming = streamingResId === res.id;
+                      const isThisCopying = copyingResId === (res.id || res.resolution);
 
                       return (
-                        <TouchableOpacity
+                        <View
                           key={res.id || `qm-res-${idx}`}
                           style={styles.qmOptionCard}
-                          onPress={() => {
-                            const mode = qualityModalMode;
-                            setQualityModalMode(null);
-                            setSelectedResIndex(idx);
-                            if (mode === 'play') {
-                              if (playDestination === 'browser') {
-                                handleStreamInBrowser(res);
-                              } else {
-                                onStream(res, movie);
-                              }
-                            } else if (mode === 'download') {
-                              if (downloadDestination === 'torrent_app') {
-                                handleOpenBitTorrentApp(res);
-                              } else {
-                                onMovieDownload(res, movie);
-                              }
-                            }
-                          }}
-                          activeOpacity={0.75}
                         >
                           {/* Quality Badge & Details */}
                           <View style={styles.qmCardLeft}>
-                            <View style={[styles.qmQualityBadge, { backgroundColor: qb.bg, borderColor: qb.border }]}>
-                              <Text style={[styles.qmQualityBadgeText, { color: qb.text }]}>
-                                {res.resolution}
-                              </Text>
+                            <View style={styles.qmBadgeRow}>
+                              <View style={[styles.qmQualityBadge, { backgroundColor: qb.bg, borderColor: qb.border }]}>
+                                <Text style={[styles.qmQualityBadgeText, { color: qb.text }]}>
+                                  {res.resolution}
+                                </Text>
+                              </View>
+                              <View style={styles.qmSizeBadge}>
+                                <HardDrive color="#30D158" size={11} strokeWidth={2.4} />
+                                <Text style={styles.qmSizeBadgeText}>{res.size || 'Standard'}</Text>
+                              </View>
                             </View>
                             {(res.codec || res.audio || (res.rawTitle && res.rawTitle !== res.resolution)) ? (
                               <Text style={styles.qmCardMeta} numberOfLines={1}>
@@ -1919,37 +1744,115 @@ export const MovieDetailSheet = React.memo<MovieDetailSheetProps>(
                             ) : null}
                           </View>
 
-                          {/* Right: File Size & Action Icon */}
-                          <View style={styles.qmCardRight}>
-                            <View style={styles.qmSizeBadge}>
-                              <HardDrive color="#30D158" size={12.5} strokeWidth={2.4} />
-                              <Text style={styles.qmSizeBadgeText}>{res.size || 'Standard'}</Text>
-                            </View>
+                          {/* Right: Three Dedicated Action Buttons */}
+                          <View style={styles.qmActionsGroup}>
+                            {qualityModalMode === 'play' ? (
+                              <>
+                                {/* 1. Play in In-App Player */}
+                                <TouchableOpacity
+                                  style={[
+                                    styles.qmActionCircleBtn,
+                                    { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder },
+                                  ]}
+                                  onPress={() => {
+                                    setQualityModalMode(null);
+                                    setSelectedResIndex(idx);
+                                    onStream(res, movie);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  {isThisStreaming ? (
+                                    <ActivityIndicator size="small" color={theme.primary} />
+                                  ) : (
+                                    <Play color={theme.primary} size={15} fill={theme.primary} />
+                                  )}
+                                </TouchableOpacity>
 
-                            <View
-                              style={[
-                                styles.qmActionCircle,
-                                qualityModalMode === 'play'
-                                  ? { backgroundColor: theme.badgeBg, borderColor: theme.badgeBorder }
-                                  : { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderColor: 'rgba(52, 199, 89, 0.35)' },
-                              ]}
-                            >
-                              {isThisStreaming ? (
-                                <ActivityIndicator size="small" color={theme.primary} />
-                              ) : qualityModalMode === 'play' ? (
-                                playDestination === 'internal' ? (
-                                  <Play color={theme.primary} size={13} fill={theme.primary} />
-                                ) : (
-                                  <Globe color={theme.primary} size={13} />
-                                )
-                              ) : downloadDestination === 'internal' ? (
-                                <Download color="#30D158" size={13} strokeWidth={2.2} />
-                              ) : (
-                                <ExternalLink color="#30D158" size={13} strokeWidth={2.2} />
-                              )}
-                            </View>
+                                {/* 2. Watch in Browser (Global Icon) */}
+                                <TouchableOpacity
+                                  style={[styles.qmActionCircleBtn, styles.qmSecondaryCircleBtn]}
+                                  onPress={() => {
+                                    setQualityModalMode(null);
+                                    setSelectedResIndex(idx);
+                                    handleStreamInBrowser(res);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  <Globe color="#FFFFFF" size={15} strokeWidth={2} />
+                                </TouchableOpacity>
+
+                                {/* 3. Copy Stream URL */}
+                                <TouchableOpacity
+                                  style={[styles.qmActionCircleBtn, styles.qmSecondaryCircleBtn]}
+                                  onPress={() => {
+                                    setSelectedResIndex(idx);
+                                    handleQuickCopyStreamUrl(res);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  {isThisCopying ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                  ) : (
+                                    <Link color="#FFFFFF" size={15} strokeWidth={2} />
+                                  )}
+                                </TouchableOpacity>
+                              </>
+                            ) : (
+                              <>
+                                {/* 1. Internal Download */}
+                                <TouchableOpacity
+                                  style={[
+                                    styles.qmActionCircleBtn,
+                                    { backgroundColor: 'rgba(52, 199, 89, 0.18)', borderColor: 'rgba(52, 199, 89, 0.45)' },
+                                  ]}
+                                  onPress={() => {
+                                    setQualityModalMode(null);
+                                    setSelectedResIndex(idx);
+                                    onMovieDownload(res, movie);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  <Download color="#30D158" size={15} strokeWidth={2.4} />
+                                </TouchableOpacity>
+
+                                {/* 2. BitTorrent Redirect */}
+                                <TouchableOpacity
+                                  style={[styles.qmActionCircleBtn, styles.qmSecondaryCircleBtn]}
+                                  onPress={() => {
+                                    setQualityModalMode(null);
+                                    setSelectedResIndex(idx);
+                                    handleOpenBitTorrentApp(res);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  <ExternalLink color="#FFFFFF" size={15} strokeWidth={2} />
+                                </TouchableOpacity>
+
+                                {/* 3. Copy Magnet URL */}
+                                <TouchableOpacity
+                                  style={[styles.qmActionCircleBtn, styles.qmSecondaryCircleBtn]}
+                                  onPress={() => {
+                                    setSelectedResIndex(idx);
+                                    handleQuickCopyMagnet(res);
+                                  }}
+                                  activeOpacity={0.7}
+                                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                                >
+                                  {isThisCopying ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                  ) : (
+                                    <Copy color="#FFFFFF" size={14} strokeWidth={2} />
+                                  )}
+                                </TouchableOpacity>
+                              </>
+                            )}
                           </View>
-                        </TouchableOpacity>
+                        </View>
                       );
                     })}
                   </ScrollView>
@@ -4402,13 +4305,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 18,
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: 8,
+    gap: 8,
   },
   dsRoundActionBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#1A1922',
     borderWidth: 1,
     borderColor: '#2E2D3A',
@@ -4424,10 +4327,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 24,
-    height: 48,
-    borderRadius: 24,
-    gap: 8,
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: 22,
+    gap: 6,
   },
   dsWatchNowPillText: {
     color: '#000000',
@@ -4746,14 +4649,20 @@ const styles = StyleSheet.create({
     borderWidth: 1.2,
     borderColor: '#282C3D',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 13,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     justifyContent: 'space-between',
+    gap: 10,
   },
   qmCardLeft: {
     flex: 1,
     gap: 4,
-    marginRight: 10,
+  },
+  qmBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
   qmQualityBadge: {
     alignSelf: 'flex-start',
@@ -4772,10 +4681,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
   },
-  qmCardRight: {
+  qmActionsGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 7,
   },
   qmSizeBadge: {
     flexDirection: 'row',
@@ -4785,22 +4694,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(52, 199, 89, 0.35)',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
   },
   qmSizeBadgeText: {
     color: '#30D158',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     letterSpacing: -0.2,
   },
-  qmActionCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  qmActionCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  qmSecondaryCircleBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
   },
   qmLoadingContainer: {
     flexDirection: 'row',
